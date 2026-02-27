@@ -14,8 +14,11 @@ from app.models import Company, User
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/register", response_model=RegisterResponse)
 async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)) -> RegisterResponse:
+    if len(payload.admin_password.encode("utf-8")) > 72:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Password too long (max 72 bytes)")
+
     existing = await db.scalar(select(User).where(User.email == payload.admin_email))
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
@@ -32,10 +35,18 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
     db.add(company)
     await db.flush()
 
+    try:
+        password_hash = hash_password(payload.admin_password)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Password too long (max 72 bytes)",
+        ) from exc
+
     admin_user = User(
         company_id=company.id,
         email=payload.admin_email,
-        password_hash=hash_password(payload.admin_password),
+        password_hash=password_hash,
         role="admin",
     )
     db.add(admin_user)

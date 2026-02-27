@@ -38,7 +38,7 @@ class RegisterRequest(BaseModel):
     finance_settings: dict | None = None
 
     admin_email: EmailStr
-    admin_password: str = Field(min_length=8, max_length=128)
+    admin_password: str = Field(min_length=8, max_length=72)
 
 
 class RegisterResponse(BaseModel):
