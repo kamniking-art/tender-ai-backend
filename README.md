@@ -191,3 +191,36 @@ curl -X POST "http://localhost:8000/tenders/<TENDER_ID>/decision/recommend" \
 curl "http://localhost:8000/tenders/<TENDER_ID>/decision" \
   -H "Authorization: Bearer $TOKEN"
 ```
+
+## Tender tasks
+
+### A) Create task
+
+```bash
+curl -X POST "http://localhost:8000/tenders/<TENDER_ID>/tasks" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"submission_deadline","title":"Подготовить заявку","description":"Собрать пакет документов","due_at":"2026-03-01T12:00:00Z"}'
+```
+
+### B) List tasks by status
+
+```bash
+curl "http://localhost:8000/tenders/<TENDER_ID>/tasks?status=pending&order_by=due_at%20asc" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### C) Mark task as done
+
+```bash
+curl -X PATCH "http://localhost:8000/tender-tasks/<TASK_ID>" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"done"}'
+```
+
+### D) Overdue processing logs
+
+The background scheduler checks pending tasks every `TASK_SLA_CHECK_INTERVAL_MINUTES` (default 5).
+If `due_at <= now`, task status becomes `overdue` and app logs:
+`Task <task_id> for tender <tender_id> is overdue.`

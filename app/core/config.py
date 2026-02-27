@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
     storage_root: str = "/data"
     documents_subdir: str = "tender_docs"
+    task_sla_check_interval_minutes: int = 5
 
 
 settings = Settings()
