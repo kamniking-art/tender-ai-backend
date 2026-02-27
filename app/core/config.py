@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     secret_key: str = "change_me_to_long_random_string"
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
+    storage_root: str = "/data"
+    documents_subdir: str = "tender_docs"
 
 
 settings = Settings()

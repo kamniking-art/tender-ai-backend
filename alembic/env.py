@@ -5,7 +5,10 @@ from sqlalchemy import engine_from_config, pool
 
 from app.core.config import settings
 from app.models import Base
+from app.tender_analysis import model as tender_analysis  # noqa: F401
+from app.tender_decisions import model as tender_decision  # noqa: F401
 from app.models import company, user  # noqa: F401
+from app.tender_documents import model as tender_document  # noqa: F401
 from app.tenders import model as tender  # noqa: F401
 
 config = context.config

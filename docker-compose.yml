@@ -20,6 +20,9 @@ services:
       - tender_ai_db
     ports:
       - "8000:8000"
+    volumes:
+      - tender_ai_storage:/data
 
 volumes:
   tender_ai_pgdata:
+  tender_ai_storage:

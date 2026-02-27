@@ -95,3 +95,99 @@ curl -sS http://localhost:8000/companies/me \
 curl -sS http://localhost:8000/users/me \
   -H "Authorization: Bearer $TOKEN"
 ```
+
+## Tender documents
+
+### A) Upload document
+
+```bash
+curl -X POST "http://localhost:8000/tenders/<TENDER_ID>/documents" \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "doc_type=tz" \
+  -F "file=@/path/to/file.pdf"
+```
+
+### B) List documents
+
+```bash
+curl "http://localhost:8000/tenders/<TENDER_ID>/documents" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### C) Download document
+
+```bash
+curl -L "http://localhost:8000/tender-documents/<DOC_ID>/download" \
+  -H "Authorization: Bearer $TOKEN" \
+  -o out.bin
+```
+
+## Tender analysis
+
+### A) Create draft analysis
+
+```bash
+curl -X POST "http://localhost:8000/tenders/<TENDER_ID>/analysis" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"summary":"Первичный разбор","requirements":{"items":[]},"missing_docs":[],"risk_flags":[]}'
+```
+
+### B) Get analysis
+
+```bash
+curl "http://localhost:8000/tenders/<TENDER_ID>/analysis" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### C) Patch analysis
+
+```bash
+curl -X PATCH "http://localhost:8000/tenders/<TENDER_ID>/analysis" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"ready","risk_flags":[{"code":"short_deadline","title":"Короткий срок","severity":"high"}]}'
+```
+
+### D) Approve analysis
+
+```bash
+curl -X POST "http://localhost:8000/tenders/<TENDER_ID>/analysis/approve" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+## Tender decisions
+
+### A) Create decision
+
+```bash
+curl -X POST "http://localhost:8000/tenders/<TENDER_ID>/decision" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"recommendation":"unsure","expected_revenue":1000000,"cogs":700000,"logistics_cost":50000,"other_costs":25000,"risk_score":35}'
+```
+
+### B) Patch decision (margin recalculation)
+
+```bash
+curl -X PATCH "http://localhost:8000/tenders/<TENDER_ID>/decision" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"expected_revenue":1200000,"cogs":800000,"logistics_cost":70000,"other_costs":30000}'
+```
+
+### C) Recommend go/no_go
+
+```bash
+curl -X POST "http://localhost:8000/tenders/<TENDER_ID>/decision/recommend" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"recommendation":"go","notes":"Маржа и риски в допуске"}'
+```
+
+### D) Get decision
+
+```bash
+curl "http://localhost:8000/tenders/<TENDER_ID>/decision" \
+  -H "Authorization: Bearer $TOKEN"
+```
