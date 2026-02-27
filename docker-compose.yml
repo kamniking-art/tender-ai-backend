@@ -1,0 +1,25 @@
+services:
+  tender_ai_db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-tender_ai}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "5433:5432"
+    volumes:
+      - tender_ai_pgdata:/var/lib/postgresql/data
+
+  tender_ai_app:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - tender_ai_db
+    ports:
+      - "8000:8000"
+
+volumes:
+  tender_ai_pgdata:
