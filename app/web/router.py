@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from uuid import UUID
 from urllib.parse import urlencode
@@ -48,13 +49,167 @@ templates = Jinja2Templates(directory="app/web/templates")
 
 router = APIRouter(prefix="/web", tags=["web"])
 
+ANALYSIS_STATUS_RU = {
+    "none": "нет",
+    "draft": "черновик",
+    "ready": "готово",
+    "approved": "утверждено",
+}
+
+DECISION_STATUS_RU = {
+    "none": "нет",
+    "go": "идём",
+    "no_go": "не идём",
+    "unsure": "сомнительно",
+}
+
+INGESTION_STATE_RU = {
+    "ok": "работает",
+    "cooldown": "пауза (cooldown)",
+    "maintenance": "техработы",
+    "unknown": "неизвестно",
+    "disabled": "выключено",
+}
+
+TENDER_STATUS_RU = {
+    "new": "новый",
+    "analyzing": "анализ",
+    "approved": "утвержден",
+    "rejected": "отклонен",
+    "submitted": "подан",
+    "won": "выигран",
+    "lost": "проигран",
+}
+
+RISK_FLAG_RU = {
+    "short_deadline": "короткие сроки",
+    "high_penalty": "высокие штрафы",
+    "harsh_penalties": "жесткие штрафы",
+    "missing_docs": "не хватает документов",
+    "price_anomaly": "аномальная цена",
+    "customer_risk": "риск заказчика",
+    "high_bid_security": "высокое обеспечение заявки",
+    "high_contract_security": "высокое обеспечение контракта",
+    "excessive_requirements": "завышенные требования",
+}
+
+ALERT_CATEGORY_RU = {
+    "new": "новые",
+    "deadline_soon": "дедлайн скоро",
+    "risky": "высокий риск",
+    "go": "рекомендация: идём",
+    "no_go": "рекомендация: не идём",
+    "overdue_task": "просроченные задачи",
+}
+
+TASK_STATUS_RU = {
+    "pending": "в работе",
+    "done": "выполнено",
+    "overdue": "просрочено",
+}
+
+TASK_TYPE_RU = {
+    "clarification_deadline": "дедлайн разъяснений",
+    "submission_deadline": "дедлайн подачи",
+    "bid_security_deadline": "дедлайн обеспечения заявки",
+    "contract_security_deadline": "дедлайн обеспечения контракта",
+    "contract_signing_deadline": "дедлайн подписания контракта",
+    "other": "прочее",
+}
+
+SOURCE_RU = {
+    "eis": "ЕИС",
+    "eis_public": "ЕИС (публичный поиск)",
+    "eis_opendata": "ЕИС (открытые данные)",
+    "manual": "вручную",
+    "other": "другое",
+}
+
+
+def _translate(value: str | None, mapping: dict[str, str], fallback: str = "-") -> str:
+    if not value:
+        return fallback
+    return mapping.get(value, value)
+
+
+def _format_datetime_ru(value: datetime | str | None) -> str:
+    if value is None:
+        return "-"
+
+    parsed: datetime | None = None
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        normalized = value.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return value
+
+    if parsed is None:
+        return str(value)
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    parsed = parsed.astimezone(UTC)
+    if parsed.hour == 0 and parsed.minute == 0:
+        return parsed.strftime("%d.%m.%Y")
+    return parsed.strftime("%d.%m.%Y %H:%M")
+
+
+def _format_money_ru(value: Decimal | float | int | str | None, currency: str | None = None) -> str:
+    if value is None or value == "":
+        return "-"
+    try:
+        decimal_value = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return str(value)
+
+    formatted = f"{decimal_value:,.2f}".replace(",", " ").replace(".", ",")
+    if currency == "RUB":
+        return f"{formatted} ₽"
+    return formatted
+
+
+def _humanize_risk_flag(flag: str) -> str:
+    normalized = flag.strip()
+    if not normalized:
+        return ""
+    translated = RISK_FLAG_RU.get(normalized)
+    if translated:
+        return translated
+    return normalized.replace("_", " ")
+
+
+def _translate_action_name(action: str | None) -> str:
+    action_map = {
+        "extract": "извлечение требований",
+        "risk": "расчет риска",
+        "engine": "пересчет рекомендации",
+        "package": "формирование пакета",
+    }
+    return _translate(action, action_map)
+
+
+templates.env.filters["analysis_status_ru"] = lambda value: _translate(value, ANALYSIS_STATUS_RU)
+templates.env.filters["decision_status_ru"] = lambda value: _translate(value, DECISION_STATUS_RU)
+templates.env.filters["tender_status_ru"] = lambda value: _translate(value, TENDER_STATUS_RU)
+templates.env.filters["ingestion_state_ru"] = lambda value: _translate(value, INGESTION_STATE_RU)
+templates.env.filters["risk_flag_ru"] = _humanize_risk_flag
+templates.env.filters["source_ru"] = lambda value: _translate(value, SOURCE_RU)
+templates.env.filters["alert_category_ru"] = lambda value: _translate(value, ALERT_CATEGORY_RU)
+templates.env.filters["task_status_ru"] = lambda value: _translate(value, TASK_STATUS_RU)
+templates.env.filters["task_type_ru"] = lambda value: _translate(value, TASK_TYPE_RU)
+templates.env.filters["ru_dt"] = _format_datetime_ru
+templates.env.filters["ru_money"] = _format_money_ru
+
 
 def _get_migrations_head() -> str:
     try:
         script = ScriptDirectory.from_config(Config("alembic.ini"))
-        return script.get_current_head() or "unknown"
+        return script.get_current_head() or "неизвестно"
     except Exception:
-        return "unknown"
+        return "неизвестно"
 
 
 def _version_info() -> dict[str, str]:
@@ -138,9 +293,9 @@ def _top_risk_flags(analysis: TenderAnalysis | None, limit: int = 3) -> list[str
         if isinstance(item, dict):
             title = item.get("title") or item.get("code")
             if title:
-                flags.append(str(title))
+                flags.append(_humanize_risk_flag(str(title)))
         elif isinstance(item, str):
-            flags.append(item)
+            flags.append(_humanize_risk_flag(item))
         if len(flags) >= limit:
             break
     return flags
@@ -165,9 +320,9 @@ def _ingestion_status(company: Company) -> dict[str, str]:
         opendata_status = str(discovery.get("status") or "unknown")
 
     return {
-        "eis_public": public_status,
+        "eis_public": _translate(public_status, INGESTION_STATE_RU),
         "eis_public_cooldown_until": str(eis_public_state.get("cooldown_until") or "-"),
-        "eis_opendata": opendata_status,
+        "eis_opendata": _translate(opendata_status, INGESTION_STATE_RU),
         "eis_opendata_last_success_at": str(discovery.get("last_success_at") or "-"),
     }
 
@@ -188,7 +343,7 @@ async def login_submit(
     if not user or not verify_password(password, user.password_hash):
         return templates.TemplateResponse(
             "login.html",
-            _template_context(request, None, error="Invalid email or password"),
+            _template_context(request, None, error="Неверный email или пароль"),
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
 
@@ -246,10 +401,10 @@ async def web_ack_alert(
 ):
     category = category_query or category_form
     if category is None:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Category is required")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Нужно указать категорию")
 
     if not await ensure_tender_scoped(db, current_user.company_id, tender_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tender not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Тендер не найден")
 
     await ack_alert(
         db,
@@ -425,6 +580,10 @@ async def tenders_page(
             analysis_statuses=["none", "draft", "ready", "approved"],
             decision_statuses=["none", "go", "no_go", "unsure"],
             source_values=["eis", "eis_public", "eis_opendata", "manual", "other"],
+            analysis_status_labels=ANALYSIS_STATUS_RU,
+            decision_status_labels=DECISION_STATUS_RU,
+            tender_status_labels=TENDER_STATUS_RU,
+            source_labels=SOURCE_RU,
         ),
     )
 
@@ -442,7 +601,7 @@ async def tender_detail_page(
 ):
     tender = await get_tender_by_id_scoped(db, current_user.company_id, tender_id)
     if tender is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tender not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Тендер не найден")
 
     company = await db.scalar(select(Company).where(Company.id == current_user.company_id))
     decision = await get_decision_scoped(db, current_user.company_id, tender_id)
@@ -476,8 +635,8 @@ async def tender_detail_page(
                 "ingestion": _ingestion_status(company) if company else {},
             },
             action_result={
-                "action": action,
-                "status": action_status,
+                "action": _translate_action_name(action),
+                "status": "успешно" if action_status == "ok" else ("ошибка" if action_status == "error" else "-"),
                 "message": action_message,
                 "details": action_details,
             },
@@ -499,17 +658,18 @@ async def web_extract_tender(
             tender_id=tender_id,
             document_ids=None,
         )
-        return _redirect_with_action(tender_id, "extract", True, f"Extraction completed. Analysis status: {analysis.status}")
+        analysis_label = _translate(analysis.status, ANALYSIS_STATUS_RU)
+        return _redirect_with_action(tender_id, "extract", True, f"Извлечение завершено. Статус анализа: {analysis_label}")
     except (ScopedNotFoundError,):
-        return _redirect_with_action(tender_id, "extract", False, "Tender not found")
+        return _redirect_with_action(tender_id, "extract", False, "Тендер не найден")
     except (ExtractionBadRequestError, NoExtractableTextError) as exc:
-        return _redirect_with_action(tender_id, "extract", False, "Extraction failed", str(exc))
+        return _redirect_with_action(tender_id, "extract", False, "Извлечение не выполнено", str(exc))
     except AnalysisConflictError as exc:
-        return _redirect_with_action(tender_id, "extract", False, "Extraction blocked", str(exc))
+        return _redirect_with_action(tender_id, "extract", False, "Извлечение заблокировано", str(exc))
     except ExtractionProviderError as exc:
-        return _redirect_with_action(tender_id, "extract", False, f"Extractor error: {exc.code}", str(exc))
+        return _redirect_with_action(tender_id, "extract", False, f"Ошибка сервиса извлечения: {exc.code}", str(exc))
     except Exception as exc:
-        return _redirect_with_action(tender_id, "extract", False, "Extractor unexpected error", str(exc))
+        return _redirect_with_action(tender_id, "extract", False, "Непредвиденная ошибка извлечения", str(exc))
 
 
 @router.post("/tenders/{tender_id}/risk/recompute")
@@ -520,7 +680,7 @@ async def web_recompute_risk(
 ):
     tender = await get_tender_by_id_scoped(db, current_user.company_id, tender_id)
     if tender is None:
-        return _redirect_with_action(tender_id, "risk", False, "Tender not found")
+        return _redirect_with_action(tender_id, "risk", False, "Тендер не найден")
 
     analysis = await db.scalar(
         select(TenderAnalysis).where(
@@ -529,21 +689,21 @@ async def web_recompute_risk(
         )
     )
     if analysis is None:
-        return _redirect_with_action(tender_id, "risk", False, "Analysis not found")
+        return _redirect_with_action(tender_id, "risk", False, "Анализ не найден")
 
     if analysis.status == "approved":
-        return _redirect_with_action(tender_id, "risk", False, "Approved analysis cannot be overwritten")
+        return _redirect_with_action(tender_id, "risk", False, "Нельзя изменять утвержденный анализ")
 
     extracted_payload = (analysis.requirements or {}).get("extracted_v1")
     if extracted_payload is None:
-        return _redirect_with_action(tender_id, "risk", False, "Extracted data is missing")
+        return _redirect_with_action(tender_id, "risk", False, "Нет данных после извлечения")
 
     try:
         from app.ai_extraction.schemas import ExtractedTenderV1
 
         extracted = ExtractedTenderV1.model_validate(extracted_payload)
     except Exception:
-        return _redirect_with_action(tender_id, "risk", False, "Invalid extracted_v1 payload")
+        return _redirect_with_action(tender_id, "risk", False, "Некорректные данные extracted_v1")
 
     risk_flags = compute_risk_flags(extracted, tender)
     risk_v1 = compute_risk_score_v1(extracted, tender)
@@ -557,7 +717,7 @@ async def web_recompute_risk(
         analysis.status = "ready"
 
     await db.commit()
-    return _redirect_with_action(tender_id, "risk", True, f"Risk recomputed: score={risk_v1.get('score_auto')}")
+    return _redirect_with_action(tender_id, "risk", True, f"Риск пересчитан: score={risk_v1.get('score_auto')}")
 
 
 @router.post("/tenders/{tender_id}/engine/recompute")
@@ -579,12 +739,12 @@ async def web_recompute_engine(
             tender_id,
             "engine",
             True,
-            f"Engine recomputed. Recommendation={decision.recommendation}, score={engine.get('score')}",
+            f"Рекомендация пересчитана: {_translate(decision.recommendation, DECISION_STATUS_RU)}, score={engine.get('score')}",
         )
     except ManualRecommendationConflictError as exc:
-        return _redirect_with_action(tender_id, "engine", False, "Manual recommendation set", str(exc))
+        return _redirect_with_action(tender_id, "engine", False, "Рекомендация задана вручную", str(exc))
     except DecisionEngineBadRequestError as exc:
-        return _redirect_with_action(tender_id, "engine", False, "Engine recompute failed", str(exc))
+        return _redirect_with_action(tender_id, "engine", False, "Не удалось пересчитать рекомендацию", str(exc))
 
 
 @router.post("/tenders/{tender_id}/documents/generate")
@@ -606,14 +766,14 @@ async def web_generate_tender_package(
             tender_id,
             "package",
             True,
-            f"Package generated ({len(generated_files)} files)",
+            f"Пакет сформирован ({len(generated_files)} файлов)",
         )
     except DocumentModuleNotFoundError as exc:
-        return _redirect_with_action(tender_id, "package", False, "Package generation failed", str(exc))
+        return _redirect_with_action(tender_id, "package", False, "Не удалось сформировать пакет", str(exc))
     except DocumentModuleConflictError as exc:
-        return _redirect_with_action(tender_id, "package", False, "Package generation blocked", str(exc))
+        return _redirect_with_action(tender_id, "package", False, "Формирование пакета заблокировано", str(exc))
     except DocumentModuleValidationError as exc:
-        return _redirect_with_action(tender_id, "package", False, "Company profile validation failed", str(exc))
+        return _redirect_with_action(tender_id, "package", False, "Профиль компании заполнен не полностью", str(exc))
 
 
 @router.get("/tender-documents/{document_id}/download")
@@ -624,11 +784,11 @@ async def web_download_tender_document(
 ):
     document = await get_document_scoped(db, company_id=current_user.company_id, document_id=document_id)
     if document is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Документ не найден")
 
     file_path = Path(settings.storage_root) / document.storage_path
     if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
 
     return FileResponse(
         path=file_path,

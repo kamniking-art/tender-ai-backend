@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>{% block title %}Tender AI Dashboard{% endblock %}</title>
+  <title>{% block title %}Панель Tender AI{% endblock %}</title>
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
@@ -11,17 +11,17 @@
     <div class="topbar-inner">
       <nav class="nav-links">
         {% if current_user %}
-        <a href="/web">Dashboard</a>
-        <a href="/web/tenders">Tenders</a>
+        <a href="/web">Дашборд</a>
+        <a href="/web/tenders">Тендеры</a>
         <form action="/web/logout" method="post" class="inline-form">
-          <button type="submit" class="link-button">Logout</button>
+          <button type="submit" class="link-button">Выход</button>
         </form>
         {% else %}
-        <a href="/web/login">Login</a>
+        <a href="/web/login">Вход</a>
         {% endif %}
       </nav>
       <div class="version-box">
-        <span>Version: {{ version_info.version }}</span>
+        <span>Версия: {{ version_info.version }}</span>
         <span>Alembic: {{ version_info.migrations_head }}</span>
       </div>
     </div>

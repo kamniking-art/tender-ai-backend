@@ -1,19 +1,19 @@
 {% extends "base.html" %}
-{% block title %}Login | Tender AI{% endblock %}
+{% block title %}Вход | Tender AI{% endblock %}
 {% block content %}
 <section class="card login-card">
-  <h1>Web Dashboard Login</h1>
+  <h1>Вход в веб-кабинет</h1>
   {% if error %}
   <p class="error">{{ error }}</p>
   {% endif %}
   <form action="/web/login" method="post" class="grid-form">
-    <label>Email
+    <label>Эл. почта
       <input type="email" name="email" required />
     </label>
-    <label>Password
+    <label>Пароль
       <input type="password" name="password" required />
     </label>
-    <button type="submit">Sign In</button>
+    <button type="submit">Войти</button>
   </form>
 </section>
 {% endblock %}

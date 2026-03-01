@@ -1,90 +1,90 @@
 {% extends "base.html" %}
-{% block title %}Tenders | Tender AI{% endblock %}
+{% block title %}Тендеры | Tender AI{% endblock %}
 {% block content %}
-<h1>Tenders</h1>
+<h1>Тендеры</h1>
 
 <section class="card">
   <form method="get" action="/web/tenders" class="filters">
-    <label>Search
-      <input type="text" name="q" value="{{ filters.q }}" placeholder="number/title/customer" />
+    <label>Поиск
+      <input type="text" name="q" value="{{ filters.q }}" placeholder="номер/название/заказчик" />
     </label>
 
-    <label>Tender Status
+    <label>Статус тендера
       <select name="status">
-        <option value="">All</option>
+        <option value="">Все</option>
         {% for status in statuses %}
-          <option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>{{ status }}</option>
+          <option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>{{ tender_status_labels.get(status, status) }}</option>
         {% endfor %}
       </select>
     </label>
 
-    <label>Analysis Status
+    <label>Статус анализа
       <select name="analysis_status">
-        <option value="">All</option>
+        <option value="">Все</option>
         {% for item in analysis_statuses %}
-          <option value="{{ item }}" {% if filters.analysis_status == item %}selected{% endif %}>{{ item }}</option>
+          <option value="{{ item }}" {% if filters.analysis_status == item %}selected{% endif %}>{{ analysis_status_labels.get(item, item) }}</option>
         {% endfor %}
       </select>
     </label>
 
-    <label>Decision
+    <label>Решение
       <select name="decision">
-        <option value="">All</option>
+        <option value="">Все</option>
         {% for item in decision_statuses %}
-          <option value="{{ item }}" {% if filters.decision == item %}selected{% endif %}>{{ item }}</option>
+          <option value="{{ item }}" {% if filters.decision == item %}selected{% endif %}>{{ decision_status_labels.get(item, item) }}</option>
         {% endfor %}
       </select>
     </label>
 
-    <label>Source
+    <label>Источник
       <select name="source">
-        <option value="">All</option>
+        <option value="">Все</option>
         {% for src in source_values %}
-          <option value="{{ src }}" {% if filters.source == src %}selected{% endif %}>{{ src }}</option>
+          <option value="{{ src }}" {% if filters.source == src %}selected{% endif %}>{{ source_labels.get(src, src) }}</option>
         {% endfor %}
       </select>
     </label>
 
-    <label>Risk Min
+    <label>Риск от
       <input type="number" name="risk_min" min="0" max="100" value="{{ filters.risk_min }}" />
     </label>
 
-    <label>Risk Max
+    <label>Риск до
       <input type="number" name="risk_max" min="0" max="100" value="{{ filters.risk_max }}" />
     </label>
 
-    <label>Risky Only
+    <label>Только рискованные
       <select name="risky_only">
-        <option value="">No</option>
-        <option value="true" {% if filters.risky_only == "true" %}selected{% endif %}>Yes</option>
+        <option value="">Нет</option>
+        <option value="true" {% if filters.risky_only == "true" %}selected{% endif %}>Да</option>
       </select>
     </label>
 
-    <label>Deadline From (ISO)
+    <label>Дедлайн с (ISO)
       <input type="text" name="deadline_from" value="{{ filters.deadline_from }}" placeholder="2026-03-01T00:00:00Z" />
     </label>
 
-    <label>Deadline To (ISO)
+    <label>Дедлайн до (ISO)
       <input type="text" name="deadline_to" value="{{ filters.deadline_to }}" placeholder="2026-03-31T23:59:59Z" />
     </label>
 
-    <label>Published From (ISO)
+    <label>Опубликован с (ISO)
       <input type="text" name="published_from" value="{{ filters.published_from }}" placeholder="2026-03-01T00:00:00Z" />
     </label>
 
-    <label>Published To (ISO)
+    <label>Опубликован до (ISO)
       <input type="text" name="published_to" value="{{ filters.published_to }}" placeholder="2026-03-31T23:59:59Z" />
     </label>
 
-    <label>Created From (ISO)
+    <label>Создан с (ISO)
       <input type="text" name="created_from" value="{{ filters.created_from }}" placeholder="2026-03-01T00:00:00Z" />
     </label>
 
-    <label>Created To (ISO)
+    <label>Создан до (ISO)
       <input type="text" name="created_to" value="{{ filters.created_to }}" placeholder="2026-03-31T23:59:59Z" />
     </label>
 
-    <label>Page Size
+    <label>На странице
       <select name="page_size">
         <option value="20" {% if filters.page_size == 20 %}selected{% endif %}>20</option>
         <option value="50" {% if filters.page_size == 50 %}selected{% endif %}>50</option>
@@ -92,44 +92,44 @@
       </select>
     </label>
 
-    <button type="submit">Apply</button>
+    <button type="submit">Применить</button>
   </form>
 </section>
 
 <section class="card">
-  <h2>Results: {{ total }} total</h2>
-  <p>Page {{ page }} / {{ total_pages }}</p>
+  <h2>Результаты: {{ total }}</h2>
+  <p>Страница {{ page }} / {{ total_pages }}</p>
   {% if tenders %}
   <table>
     <thead>
       <tr>
-        <th>Title</th>
-        <th>Status</th>
-        <th>Source / External ID</th>
-        <th>Deadline</th>
-        <th>Published</th>
-        <th>NMCK</th>
+        <th>Название</th>
+        <th>Статус</th>
+        <th>Источник / Внешний ID</th>
+        <th>Дедлайн</th>
+        <th>Публикация</th>
+        <th>НМЦК</th>
       </tr>
     </thead>
     <tbody>
       {% for tender in tenders %}
       <tr>
         <td><a href="/web/tenders/{{ tender.id }}">{{ tender.title or '-' }}</a></td>
-        <td>{{ tender.status }}</td>
-        <td>{{ tender.source }} / {{ tender.external_id }}</td>
-        <td>{{ tender.submission_deadline or '-' }}</td>
-        <td>{{ tender.published_at or '-' }}</td>
-        <td>{{ tender.nmck or '-' }}</td>
+        <td>{{ tender.status | tender_status_ru }}</td>
+        <td>{{ tender.source | source_ru }} / {{ tender.external_id }}</td>
+        <td>{{ tender.submission_deadline | ru_dt }}</td>
+        <td>{{ tender.published_at | ru_dt }}</td>
+        <td>{{ tender.nmck | ru_money("RUB") }}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   <div class="pager">
-    {% if prev_qs %}<a href="/web/tenders?{{ prev_qs }}">Previous</a>{% endif %}
-    {% if next_qs %}<a href="/web/tenders?{{ next_qs }}">Next</a>{% endif %}
+    {% if prev_qs %}<a href="/web/tenders?{{ prev_qs }}">Назад</a>{% endif %}
+    {% if next_qs %}<a href="/web/tenders?{{ next_qs }}">Вперёд</a>{% endif %}
   </div>
   {% else %}
-  <p>No tenders found.</p>
+  <p>Тендеры не найдены.</p>
   {% endif %}
 </section>
 {% endblock %}

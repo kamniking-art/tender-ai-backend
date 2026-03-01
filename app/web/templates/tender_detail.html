@@ -1,16 +1,16 @@
 {% extends "base.html" %}
-{% block title %}Tender Detail | Tender AI{% endblock %}
+{% block title %}Карточка тендера | Tender AI{% endblock %}
 {% block content %}
-<h1>{{ tender.title or 'Tender' }}</h1>
+<h1>{{ tender.title or 'Тендер' }}</h1>
 
-{% if action_result and action_result.status %}
-<section class="card {% if action_result.status == 'ok' %}notice-ok{% else %}notice-error{% endif %}">
-  <h2>Action: {{ action_result.action or '-' }}</h2>
-  <p><strong>Status:</strong> {{ action_result.status }}</p>
-  <p><strong>Message:</strong> {{ action_result.message or '-' }}</p>
+{% if action_result and action_result.status and action_result.status != '-' %}
+<section class="card {% if action_result.status == 'успешно' %}notice-ok{% else %}notice-error{% endif %}">
+  <h2>Действие: {{ action_result.action or '-' }}</h2>
+  <p><strong>Статус:</strong> {{ action_result.status }}</p>
+  <p><strong>Сообщение:</strong> {{ action_result.message or '-' }}</p>
   {% if action_result.details %}
   <details>
-    <summary>Details</summary>
+    <summary>Подробности</summary>
     <pre>{{ action_result.details }}</pre>
   </details>
   {% endif %}
@@ -18,93 +18,93 @@
 {% endif %}
 
 <section class="card">
-  <h2>Status Overview</h2>
+  <h2>Сводка статусов</h2>
   <div class="badges">
-    <span class="badge">Analysis: {{ badges.analysis_status }}</span>
-    <span class="badge">Risk: {{ badges.risk_score if badges.risk_score is not none else '-' }}</span>
-    <span class="badge">Decision: {{ badges.decision }}</span>
-    <span class="badge">Margin %: {{ badges.margin_pct if badges.margin_pct is not none else '-' }}</span>
-    <span class="badge">Documents: {{ badges.documents_count }}</span>
-    <span class="badge">Package: {{ 'yes' if badges.package_generated else 'no' }}</span>
+    <span class="badge">Анализ: {{ badges.analysis_status | analysis_status_ru }}</span>
+    <span class="badge">Риск: {{ badges.risk_score if badges.risk_score is not none else '-' }}</span>
+    <span class="badge">Решение: {{ badges.decision | decision_status_ru }}</span>
+    <span class="badge">Маржа %: {{ badges.margin_pct | ru_money if badges.margin_pct is not none else '-' }}</span>
+    <span class="badge">Документы: {{ badges.documents_count }}</span>
+    <span class="badge">Пакет: {{ 'есть' if badges.package_generated else 'нет' }}</span>
   </div>
   {% if badges.risk_flags %}
-  <p><strong>Top risk flags:</strong> {{ badges.risk_flags | join(', ') }}</p>
+  <p><strong>Ключевые риск-флаги:</strong> {{ badges.risk_flags | join(', ') }}</p>
   {% endif %}
   {% if badges.ingestion %}
-  <p><strong>Ingestion:</strong> eis_public={{ badges.ingestion.eis_public }}, eis_opendata={{ badges.ingestion.eis_opendata }}</p>
-  <p><strong>Ingestion details:</strong> opendata_last_success={{ badges.ingestion.eis_opendata_last_success_at }}, public_cooldown_until={{ badges.ingestion.eis_public_cooldown_until }}</p>
+  <p><strong>Ингест:</strong> eis_public={{ badges.ingestion.eis_public }}, eis_opendata={{ badges.ingestion.eis_opendata }}</p>
+  <p><strong>Детали ингеста:</strong> последний успех opendata={{ badges.ingestion.eis_opendata_last_success_at | ru_dt }}, cooldown public={{ badges.ingestion.eis_public_cooldown_until | ru_dt }}</p>
   {% endif %}
 </section>
 
 <section class="card">
-  <h2>Actions</h2>
+  <h2>Действия</h2>
   <div class="action-row">
     <form method="post" action="/web/tenders/{{ tender.id }}/extract" class="action-form">
-      <button type="submit">Extract</button>
+      <button type="submit">Извлечь требования</button>
     </form>
 
     <form method="post" action="/web/tenders/{{ tender.id }}/risk/recompute" class="action-form">
-      <button type="submit">Compute risk</button>
+      <button type="submit">Рассчитать риск</button>
     </form>
 
     <form method="post" action="/web/tenders/{{ tender.id }}/engine/recompute" class="action-form">
       <input type="hidden" name="force" value="false" />
-      <button type="submit">Recompute engine</button>
+      <button type="submit">Пересчитать рекомендацию</button>
     </form>
 
     <form method="post" action="/web/tenders/{{ tender.id }}/documents/generate" class="action-form">
       <input type="hidden" name="force" value="false" />
-      <button type="submit" {% if not (decision and decision.recommendation == "go") %}disabled title="Decision must be go"{% endif %}>Generate package</button>
+      <button type="submit" {% if not (decision and decision.recommendation == "go") %}disabled title="Решение должно быть «идём»"{% endif %}>Сформировать пакет документов</button>
     </form>
   </div>
 </section>
 
 <section class="card">
-  <h2>Tender</h2>
+  <h2>Тендер</h2>
   <div class="kv-grid">
-    <div><strong>Source:</strong> {{ tender.source }}</div>
-    <div><strong>External ID:</strong> {{ tender.external_id }}</div>
-    <div><strong>Status:</strong> {{ tender.status }}</div>
-    <div><strong>Published:</strong> {{ tender.published_at or '-' }}</div>
-    <div><strong>Deadline:</strong> {{ tender.submission_deadline or '-' }}</div>
-    <div><strong>NMCK:</strong> {{ tender.nmck or '-' }}</div>
-    <div><strong>Customer:</strong> {{ tender.customer_name or '-' }}</div>
-    <div><strong>Region:</strong> {{ tender.region or '-' }}</div>
-    <div><strong>Procurement Type:</strong> {{ tender.procurement_type or '-' }}</div>
+    <div><strong>Источник:</strong> {{ tender.source | source_ru }}</div>
+    <div><strong>Внешний ID:</strong> {{ tender.external_id }}</div>
+    <div><strong>Статус:</strong> {{ tender.status | tender_status_ru }}</div>
+    <div><strong>Опубликован:</strong> {{ tender.published_at | ru_dt }}</div>
+    <div><strong>Дедлайн:</strong> {{ tender.submission_deadline | ru_dt }}</div>
+    <div><strong>НМЦК:</strong> {{ tender.nmck | ru_money("RUB") }}</div>
+    <div><strong>Заказчик:</strong> {{ tender.customer_name or '-' }}</div>
+    <div><strong>Регион:</strong> {{ tender.region or '-' }}</div>
+    <div><strong>Тип закупки:</strong> {{ tender.procurement_type or '-' }}</div>
   </div>
 </section>
 
 <section class="card">
-  <h2>Decision</h2>
+  <h2>Решение</h2>
   {% if decision %}
   <div class="kv-grid">
-    <div><strong>Recommendation:</strong> {{ decision.recommendation }}</div>
-    <div><strong>Risk Score:</strong> {{ decision.risk_score }}</div>
-    <div><strong>Margin Value:</strong> {{ decision.expected_margin_value or '-' }}</div>
-    <div><strong>Margin %:</strong> {{ decision.expected_margin_pct or '-' }}</div>
-    <div><strong>Notes:</strong> {{ decision.notes or '-' }}</div>
+    <div><strong>Рекомендация:</strong> {{ decision.recommendation | decision_status_ru }}</div>
+    <div><strong>Риск score:</strong> {{ decision.risk_score or '-' }}</div>
+    <div><strong>Маржа (значение):</strong> {{ decision.expected_margin_value | ru_money("RUB") }}</div>
+    <div><strong>Маржа (%):</strong> {{ decision.expected_margin_pct | ru_money }}</div>
+    <div><strong>Заметки:</strong> {{ decision.notes or '-' }}</div>
   </div>
   {% if decision.engine_meta %}
-  <h3>Decision Engine v1</h3>
-  <p><strong>Score:</strong> {{ decision.engine_meta.get("score") }}</p>
+  <h3>Движок решения v1</h3>
+  <p><strong>Оценка:</strong> {{ decision.engine_meta.get("score") }}</p>
   <pre>{{ decision.engine_meta.get("explain") | tojson(indent=2) }}</pre>
   {% endif %}
   {% else %}
-  <p>No decision yet.</p>
+  <p>Решение пока не создано.</p>
   {% endif %}
 </section>
 
 <section class="card">
-  <h2>Document Package v1</h2>
+  <h2>Пакет документов v1</h2>
   {% if package and package.files %}
-  <h3>Package files</h3>
+  <h3>Файлы пакета</h3>
   <ul>
     {% for file in package.files %}
-    <li><a href="/web/tender-documents/{{ file.id }}/download">{{ file.file_name }}</a> ({{ file.uploaded_at }})</li>
+    <li><a href="/web/tender-documents/{{ file.id }}/download">{{ file.file_name }}</a> ({{ file.uploaded_at | ru_dt }})</li>
     {% endfor %}
   </ul>
   {% if package.checklist %}
-  <h3>Checklist</h3>
+  <h3>Чек-лист</h3>
   <ul>
     {% for item in package.checklist %}
     <li>{{ item }}</li>
@@ -112,62 +112,62 @@
   </ul>
   {% endif %}
   {% else %}
-  <p>Package not generated.</p>
+  <p>Пакет не сформирован.</p>
   {% endif %}
 </section>
 
 <section class="card">
-  <h2>Analysis</h2>
+  <h2>Анализ</h2>
   {% if analysis %}
-  <p><strong>Status:</strong> {{ analysis.status }}</p>
-  <p><strong>Summary:</strong> {{ analysis.summary or '-' }}</p>
-  <h3>Risk Flags</h3>
+  <p><strong>Статус:</strong> {{ analysis.status | analysis_status_ru }}</p>
+  <p><strong>Резюме:</strong> {{ analysis.summary or '-' }}</p>
+  <h3>Риск-флаги</h3>
   <pre>{{ analysis.risk_flags | tojson(indent=2) }}</pre>
-  <h3>Missing Docs</h3>
+  <h3>Недостающие документы</h3>
   <pre>{{ analysis.missing_docs | tojson(indent=2) }}</pre>
   {% else %}
-  <p>No analysis yet.</p>
+  <p>Анализ пока не создан.</p>
   {% endif %}
 </section>
 
 <section class="card">
-  <h2>Tasks</h2>
+  <h2>Задачи</h2>
   {% if tasks %}
   <table>
     <thead>
       <tr>
-        <th>Due</th>
-        <th>Status</th>
-        <th>Type</th>
-        <th>Title</th>
+        <th>Срок</th>
+        <th>Статус</th>
+        <th>Тип</th>
+        <th>Название</th>
       </tr>
     </thead>
     <tbody>
       {% for task in tasks %}
       <tr>
-        <td>{{ task.due_at }}</td>
-        <td>{{ task.status }}</td>
-        <td>{{ task.type }}</td>
+        <td>{{ task.due_at | ru_dt }}</td>
+        <td>{{ task.status | task_status_ru }}</td>
+        <td>{{ task.type | task_type_ru }}</td>
         <td>{{ task.title }}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   {% else %}
-  <p>No tasks.</p>
+  <p>Нет задач.</p>
   {% endif %}
 </section>
 
 <section class="card">
-  <h2>Documents</h2>
+  <h2>Документы</h2>
   {% if documents %}
   <table>
     <thead>
       <tr>
-        <th>Name</th>
-        <th>Type</th>
-        <th>Uploaded At</th>
-        <th>Size</th>
+        <th>Имя</th>
+        <th>Тип</th>
+        <th>Загружен</th>
+        <th>Размер</th>
         <th></th>
       </tr>
     </thead>
@@ -176,15 +176,15 @@
       <tr>
         <td>{{ doc.file_name }}</td>
         <td>{{ doc.doc_type or '-' }}</td>
-        <td>{{ doc.uploaded_at }}</td>
+        <td>{{ doc.uploaded_at | ru_dt }}</td>
         <td>{{ doc.file_size or '-' }}</td>
-        <td><a href="/web/tender-documents/{{ doc.id }}/download">Download</a></td>
+        <td><a href="/web/tender-documents/{{ doc.id }}/download">Скачать</a></td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   {% else %}
-  <p>No documents.</p>
+  <p>Нет документов.</p>
   {% endif %}
 </section>
 
@@ -194,7 +194,7 @@
       const btn = form.querySelector('button[type="submit"]');
       if (btn) {
         btn.disabled = true;
-        btn.textContent = 'Running...';
+        btn.textContent = 'Загрузка...';
       }
     });
   });
