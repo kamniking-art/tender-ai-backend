@@ -129,7 +129,8 @@ Manual smoke:
 2. Verify `/web` shows alerts counts and items.
 3. Press `Ack` on alert item and verify it disappears from dashboard.
 4. Open `/web/tenders` and then `/web/tenders/<id>`.
-5. Download document from detail via `/web/tender-documents/<DOC_ID>/download`.
+5. On tender detail, run actions: `Extract` -> `Compute risk` -> `Recompute engine` -> `Generate package`.
+6. Download document from detail via `/web/tender-documents/<DOC_ID>/download`.
 
 ## AI extraction v1 (documents -> text -> analysis)
 
@@ -252,6 +253,7 @@ curl -X PATCH "http://localhost:8000/companies/me/profile" \
         "enabled": true,
         "bot_token": "123456:ABCDEF",
         "chat_id": "-1001234567890",
+        "categories": { "new": true, "deadline_24h": true, "risky": true },
         "send_window": {"from": "09:00", "to": "21:00"},
         "min_interval_minutes": 30
       }
@@ -267,6 +269,10 @@ curl -X POST "http://localhost:8000/telegram/test" \
   -H "Content-Type: application/json" \
   -d '{"text":"hello from tender_ai_backend"}'
 ```
+
+`POST /telegram/test` returns explicit result:
+- success: `{\"ok\": true, \"error\": null}`
+- send error: `{\"ok\": false, \"error\": \"...\"}`
 
 ## Tender documents
 

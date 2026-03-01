@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai_extraction.client import AIServiceBadResponseError, AIServiceUnavailableError
+from app.ai_extraction.interfaces import ExtractionProviderError
 from app.ai_extraction.schemas import ExtractedReadResponse, ExtractionRequest, ExtractionResponse
 from app.ai_extraction.service import ExtractionBadRequestError, get_extracted_v1, run_extraction
 from app.ai_extraction.text_extract import NoExtractableTextError
@@ -36,10 +36,14 @@ async def extract_analysis(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except AnalysisConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except AIServiceUnavailableError as exc:
+    except ExtractionProviderError as exc:
+        if exc.code in {"NO_DOCS", "UNSUPPORTED_FORMAT"}:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        if exc.code == "PROVIDER_TIMEOUT":
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+        if exc.code in {"VALIDATION_ERROR"}:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
-    except AIServiceBadResponseError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     return ExtractionResponse(
         analysis_status=analysis.status,

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models import Company, User
@@ -19,7 +22,8 @@ class TelegramTestRequest(BaseModel):
 
 
 class TelegramTestResponse(BaseModel):
-    ok: bool = True
+    ok: bool
+    error: str | None = None
 
 
 @router.post("/test", response_model=TelegramTestResponse)
@@ -43,10 +47,16 @@ async def telegram_test_send(
 
     client = TelegramClient(timeout_sec=15)
     try:
-        await client.send_message(bot_token=cfg.bot_token, chat_id=cfg.chat_id, text=payload.text)
+        test_text = (
+            f"{payload.text}\n\n"
+            f"company_id={company.id}\n"
+            f"timestamp={datetime.utcnow().isoformat()}Z\n"
+            f"environment={settings.app_version}"
+        )
+        await client.send_message(bot_token=cfg.bot_token, chat_id=cfg.chat_id, text=test_text)
     except TelegramSendError as exc:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+        return TelegramTestResponse(ok=False, error=str(exc))
     finally:
         await client.close()
 
-    return TelegramTestResponse(ok=True)
+    return TelegramTestResponse(ok=True, error=None)

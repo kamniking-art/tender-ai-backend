@@ -3,6 +3,62 @@
 {% block content %}
 <h1>{{ tender.title or 'Tender' }}</h1>
 
+{% if action_result and action_result.status %}
+<section class="card {% if action_result.status == 'ok' %}notice-ok{% else %}notice-error{% endif %}">
+  <h2>Action: {{ action_result.action or '-' }}</h2>
+  <p><strong>Status:</strong> {{ action_result.status }}</p>
+  <p><strong>Message:</strong> {{ action_result.message or '-' }}</p>
+  {% if action_result.details %}
+  <details>
+    <summary>Details</summary>
+    <pre>{{ action_result.details }}</pre>
+  </details>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Status Overview</h2>
+  <div class="badges">
+    <span class="badge">Analysis: {{ badges.analysis_status }}</span>
+    <span class="badge">Risk: {{ badges.risk_score if badges.risk_score is not none else '-' }}</span>
+    <span class="badge">Decision: {{ badges.decision }}</span>
+    <span class="badge">Margin %: {{ badges.margin_pct if badges.margin_pct is not none else '-' }}</span>
+    <span class="badge">Documents: {{ badges.documents_count }}</span>
+    <span class="badge">Package: {{ 'yes' if badges.package_generated else 'no' }}</span>
+  </div>
+  {% if badges.risk_flags %}
+  <p><strong>Top risk flags:</strong> {{ badges.risk_flags | join(', ') }}</p>
+  {% endif %}
+  {% if badges.ingestion %}
+  <p><strong>Ingestion:</strong> eis_public={{ badges.ingestion.eis_public }}, eis_opendata={{ badges.ingestion.eis_opendata }}</p>
+  <p><strong>Ingestion details:</strong> opendata_last_success={{ badges.ingestion.eis_opendata_last_success_at }}, public_cooldown_until={{ badges.ingestion.eis_public_cooldown_until }}</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Actions</h2>
+  <div class="action-row">
+    <form method="post" action="/web/tenders/{{ tender.id }}/extract" class="action-form">
+      <button type="submit">Extract</button>
+    </form>
+
+    <form method="post" action="/web/tenders/{{ tender.id }}/risk/recompute" class="action-form">
+      <button type="submit">Compute risk</button>
+    </form>
+
+    <form method="post" action="/web/tenders/{{ tender.id }}/engine/recompute" class="action-form">
+      <input type="hidden" name="force" value="false" />
+      <button type="submit">Recompute engine</button>
+    </form>
+
+    <form method="post" action="/web/tenders/{{ tender.id }}/documents/generate" class="action-form">
+      <input type="hidden" name="force" value="false" />
+      <button type="submit" {% if not (decision and decision.recommendation == "go") %}disabled title="Decision must be go"{% endif %}>Generate package</button>
+    </form>
+  </div>
+</section>
+
 <section class="card">
   <h2>Tender</h2>
   <div class="kv-grid">
@@ -40,13 +96,6 @@
 
 <section class="card">
   <h2>Document Package v1</h2>
-  {% if decision and decision.recommendation == "go" %}
-  <form method="post" action="/web/tenders/{{ tender.id }}/documents/generate">
-    <button type="submit">Generate package</button>
-  </form>
-  {% else %}
-  <p>Package generation is available only when recommendation is <strong>go</strong>.</p>
-  {% endif %}
   {% if package and package.files %}
   <h3>Package files</h3>
   <ul>
@@ -62,6 +111,8 @@
     {% endfor %}
   </ul>
   {% endif %}
+  {% else %}
+  <p>Package not generated.</p>
   {% endif %}
 </section>
 
@@ -136,4 +187,16 @@
   <p>No documents.</p>
   {% endif %}
 </section>
+
+<script>
+  document.querySelectorAll('.action-form').forEach(function(form) {
+    form.addEventListener('submit', function() {
+      const btn = form.querySelector('button[type="submit"]');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Running...';
+      }
+    });
+  });
+</script>
 {% endblock %}

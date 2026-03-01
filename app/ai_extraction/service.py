@@ -5,7 +5,8 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai_extraction.client import AIExtractorClient
+from app.ai_extraction.client import get_extractor_provider
+from app.ai_extraction.interfaces import ExtractionProviderError
 from app.ai_extraction.schemas import ExtractedTenderV1
 from app.ai_extraction.text_extract import NoExtractableTextError, build_normalized_text
 from app.core.config import settings
@@ -88,14 +89,52 @@ async def run_extraction(
         document_ids=document_ids,
     )
 
+    supported_suffixes = {".pdf", ".docx", ".txt"}
+    has_supported = any((doc.file_name or "").lower().endswith(tuple(supported_suffixes)) for doc in documents)
+    if not has_supported:
+        raise ExtractionProviderError("UNSUPPORTED_FORMAT", "No supported document formats (.pdf/.docx/.txt)")
+
     merged_text = build_normalized_text(
         documents=documents,
         storage_root=settings.storage_root,
         max_chars=settings.ai_extractor_max_chars,
     )
 
-    client = AIExtractorClient()
-    extracted = await client.extract(tender_id=tender_id, text=merged_text)
+    provider = get_extractor_provider()
+    try:
+        provider_result = await provider.extract(
+            tender_id=tender_id,
+            company_id=company_id,
+            tender_context={
+                "title": getattr(tender, "title", None),
+                "external_id": getattr(tender, "external_id", None),
+                "source": getattr(tender, "source", None),
+                "nmck": str(getattr(tender, "nmck", None)) if getattr(tender, "nmck", None) is not None else None,
+                "published_at": getattr(tender, "published_at", None).isoformat() if getattr(tender, "published_at", None) else None,
+                "submission_deadline": getattr(tender, "submission_deadline", None).isoformat() if getattr(tender, "submission_deadline", None) else None,
+            },
+            text=merged_text,
+        )
+    except ExtractionProviderError:
+        # Best-effort persist of extraction error without schema changes.
+        analysis_err = await db.scalar(
+            select(TenderAnalysis).where(
+                TenderAnalysis.company_id == company_id,
+                TenderAnalysis.tender_id == tender_id,
+            )
+        )
+        if analysis_err and analysis_err.status != "approved":
+            req_err = dict(analysis_err.requirements or {})
+            req_err["extract_error_v1"] = {
+                "status": "failed",
+                "error": "provider_error",
+            }
+            analysis_err.requirements = req_err
+            analysis_err.updated_by = user_id
+            await db.commit()
+        raise
+
+    extracted = provider_result.extracted
     risk_flags = compute_risk_flags(extracted, tender)
     risk_v1 = compute_risk_score_v1(extracted, tender)
     summary = build_summary(extracted)
@@ -117,7 +156,7 @@ async def run_extraction(
             company_id=company_id,
             tender_id=tender_id,
             status="ready",
-            requirements={"extracted_v1": extracted_payload, "risk_v1": risk_v1},
+            requirements={"extracted_v1": extracted_payload, "risk_v1": risk_v1, "extract_meta_v1": provider_result.extract_meta},
             missing_docs=[],
             risk_flags=risk_flags,
             summary=summary,
@@ -129,6 +168,8 @@ async def run_extraction(
         merged_requirements = dict(analysis.requirements or {})
         merged_requirements["extracted_v1"] = extracted_payload
         merged_requirements["risk_v1"] = risk_v1
+        merged_requirements["extract_meta_v1"] = provider_result.extract_meta
+        merged_requirements.pop("extract_error_v1", None)
         analysis.requirements = merged_requirements
         analysis.risk_flags = risk_flags
         analysis.summary = summary

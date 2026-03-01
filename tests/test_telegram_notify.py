@@ -25,7 +25,7 @@ class TelegramNotifyUnitTests(TestCase):
         state = {
             "sent": {
                 "new": {
-                    str(t1): datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                    f"new:{t1}:{datetime.now(UTC).strftime('%Y-%m-%d')}": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                 }
             }
         }
@@ -155,6 +155,7 @@ class TelegramNotifyIntegrationTests(IsolatedAsyncioTestCase):
         state = company.profile.get("telegram_state")
         self.assertIsNotNone(state)
         self.assertTrue(state.get("last_sent_at"))
-        self.assertIn(str(tender_id), state.get("sent", {}).get("new", {}))
-        self.assertIn(str(tender_id), state.get("sent", {}).get("deadline_24h", {}))
-        self.assertIn(str(tender_id), state.get("sent", {}).get("risky", {}))
+        sent = state.get("sent", {})
+        self.assertTrue(any(str(tender_id) in key for key in sent.get("new", {}).keys()))
+        self.assertTrue(any(str(tender_id) in key for key in sent.get("deadline_24h", {}).keys()))
+        self.assertTrue(any(str(tender_id) in key for key in sent.get("risky", {}).keys()))

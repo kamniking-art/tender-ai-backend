@@ -7,6 +7,7 @@ from app.auth.schemas import CompanyRead
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models import Company, User
+from app.telegram_notify.service import mask_telegram_profile
 
 router = APIRouter(prefix="/companies", tags=["companies"])
 
@@ -27,7 +28,9 @@ async def get_my_company(
     company = await db.scalar(select(Company).where(Company.id == current_user.company_id))
     if company is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
-    return CompanyRead.model_validate(company)
+    payload = CompanyRead.model_validate(company).model_dump(mode="json")
+    payload["profile"] = mask_telegram_profile(payload.get("profile") or {})
+    return CompanyRead.model_validate(payload)
 
 
 @router.get("/me/profile", response_model=CompanyProfileResponse)
@@ -40,7 +43,7 @@ async def get_my_company_profile(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
 
     profile = company.profile if isinstance(company.profile, dict) else {}
-    return CompanyProfileResponse(profile=profile)
+    return CompanyProfileResponse(profile=mask_telegram_profile(profile))
 
 
 @router.patch("/me/profile", response_model=CompanyProfileResponse)
@@ -57,4 +60,4 @@ async def patch_my_company_profile(
     await db.commit()
     await db.refresh(company)
 
-    return CompanyProfileResponse(profile=payload.profile)
+    return CompanyProfileResponse(profile=mask_telegram_profile(payload.profile))

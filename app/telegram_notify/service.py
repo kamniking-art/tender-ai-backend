@@ -30,6 +30,7 @@ class TelegramConfig:
     send_from: str | None
     send_to: str | None
     min_interval_minutes: int
+    categories: dict[str, bool]
 
 
 @dataclass
@@ -119,6 +120,13 @@ def _extract_telegram_config(profile: dict) -> TelegramConfig | None:
     except (TypeError, ValueError):
         min_interval_value = 30
 
+    categories_raw = raw.get("categories") if isinstance(raw.get("categories"), dict) else {}
+    categories = {
+        "new": bool(categories_raw.get("new", True)),
+        "deadline_24h": bool(categories_raw.get("deadline_24h", True)),
+        "risky": bool(categories_raw.get("risky", True)),
+    }
+
     return TelegramConfig(
         enabled=enabled,
         bot_token=str(raw.get("bot_token") or ""),
@@ -126,6 +134,7 @@ def _extract_telegram_config(profile: dict) -> TelegramConfig | None:
         send_from=send_window.get("from") if isinstance(send_window.get("from"), str) else None,
         send_to=send_window.get("to") if isinstance(send_window.get("to"), str) else None,
         min_interval_minutes=min_interval_value,
+        categories=categories,
     )
 
 
@@ -171,12 +180,32 @@ def _prune_bucket(bucket: dict[str, str], limit: int = 500) -> dict[str, str]:
     return dict(items[-limit:])
 
 
+def mask_telegram_profile(profile: dict) -> dict:
+    masked = copy.deepcopy(profile or {})
+    telegram = masked.get("telegram")
+    if isinstance(telegram, dict):
+        token = telegram.get("bot_token")
+        if isinstance(token, str) and token:
+            if len(token) <= 8:
+                telegram["bot_token"] = "***"
+            else:
+                telegram["bot_token"] = f"{token[:4]}***{token[-3:]}"
+        masked["telegram"] = telegram
+    return masked
+
+
+def _event_key(category: str, tender_id: UUID, now: datetime) -> str:
+    bucket = now.astimezone(UTC).strftime("%Y-%m-%d")
+    return f"{category}:{tender_id}:{bucket}"
+
+
 def dedup_unsent_items(category: str, items: list[AlertTenderItem], state: dict) -> list[AlertTenderItem]:
     sent = state.get("sent") if isinstance(state.get("sent"), dict) else {}
     bucket = sent.get(category) if isinstance(sent.get(category), dict) else {}
     unsent: list[AlertTenderItem] = []
+    now = _now_utc()
     for item in items:
-        if str(item.tender_id) not in bucket:
+        if _event_key(category, item.tender_id, now) not in bucket:
             unsent.append(item)
     return unsent
 
@@ -185,7 +214,7 @@ def mark_items_sent(category: str, items: list[AlertTenderItem], state: dict, se
     sent = state.setdefault("sent", {})
     bucket = sent.setdefault(category, {})
     for item in items:
-        bucket[str(item.tender_id)] = _iso(sent_at)
+        bucket[_event_key(category, item.tender_id, sent_at)] = _iso(sent_at)
     sent[category] = _prune_bucket(bucket, limit=500)
     state["last_sent_at"] = _iso(sent_at)
 
@@ -324,9 +353,9 @@ async def process_company_notifications(db: AsyncSession, company: Company, clie
     ]
 
     pending = {
-        "new": dedup_unsent_items("new", new_items, state)[:5],
-        "deadline_24h": dedup_unsent_items("deadline_24h", deadline_24h, state)[:5],
-        "risky": dedup_unsent_items("risky", risky_items, state)[:5],
+        "new": dedup_unsent_items("new", new_items, state)[:5] if cfg.categories.get("new", True) else [],
+        "deadline_24h": dedup_unsent_items("deadline_24h", deadline_24h, state)[:5] if cfg.categories.get("deadline_24h", True) else [],
+        "risky": dedup_unsent_items("risky", risky_items, state)[:5] if cfg.categories.get("risky", True) else [],
     }
 
     stats = NotificationStats()

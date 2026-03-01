@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import re
-from datetime import UTC, datetime
+import time
+from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
 import httpx
 
+from app.ai_extraction.interfaces import ExtractionProvider, ExtractionProviderError, ExtractionProviderResult
 from app.ai_extraction.schemas import ExtractedTenderV1, RemoteExtractorPayload, RemoteExtractorResult
 from app.core.config import settings
 
@@ -93,16 +95,43 @@ def _mock_extract(text: str) -> ExtractedTenderV1:
     )
 
 
-class AIExtractorClient:
-    async def extract(self, tender_id: UUID, text: str) -> ExtractedTenderV1:
-        mode = (settings.ai_extractor_mode or "mock").strip().lower()
-        if mode == "mock":
-            return _mock_extract(text)
-        if mode != "remote":
-            raise AIServiceBadResponseError(f"Unsupported AI_EXTRACTOR_MODE: {settings.ai_extractor_mode}")
+class MockExtractorProvider(ExtractionProvider):
+    async def extract(
+        self,
+        *,
+        tender_id: UUID,
+        company_id: UUID,
+        tender_context: dict,
+        text: str,
+    ) -> ExtractionProviderResult:
+        started = time.perf_counter()
+        extracted = _mock_extract(text)
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        return ExtractionProviderResult(
+            extracted=extracted,
+            extract_meta={
+                "provider": "mock",
+                "model": "deterministic-regex-v1",
+                "latency_ms": latency_ms,
+                "doc_coverage": 1.0,
+                "confidence": extracted.confidence.get("overall", 0.0),
+                "warnings": [],
+                "sources": [str(tender_id)],
+            },
+        )
 
+
+class RemoteExtractorProvider(ExtractionProvider):
+    async def extract(
+        self,
+        *,
+        tender_id: UUID,
+        company_id: UUID,
+        tender_context: dict,
+        text: str,
+    ) -> ExtractionProviderResult:
         if not settings.ai_extractor_base_url:
-            raise AIServiceUnavailableError("AI extractor base URL is not configured")
+            raise ExtractionProviderError("PROVIDER_ERROR", "AI extractor base URL is not configured")
 
         payload = RemoteExtractorPayload(tender_id=tender_id, text=text)
         headers: dict[str, str] = {"Content-Type": "application/json"}
@@ -111,7 +140,7 @@ class AIExtractorClient:
 
         url = settings.ai_extractor_base_url.rstrip("/") + "/extract"
         delays = [0.0, 0.5, 1.5]
-        last_error: Exception | None = None
+        started = time.perf_counter()
 
         for attempt, delay in enumerate(delays):
             if delay:
@@ -120,30 +149,65 @@ class AIExtractorClient:
                 async with httpx.AsyncClient(timeout=settings.ai_extractor_timeout_sec) as client:
                     response = await client.post(url, headers=headers, json=payload.model_dump(mode="json"))
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
-                last_error = exc
                 if attempt < len(delays) - 1:
                     continue
-                raise AIServiceUnavailableError("AI extractor service timeout/unreachable") from exc
+                raise ExtractionProviderError("PROVIDER_TIMEOUT", "AI extractor service timeout/unreachable") from exc
 
             if response.status_code >= 500:
-                last_error = RuntimeError(f"upstream status {response.status_code}")
                 if attempt < len(delays) - 1:
                     continue
-                raise AIServiceUnavailableError("AI extractor service unavailable")
+                raise ExtractionProviderError("PROVIDER_ERROR", f"upstream status {response.status_code}")
 
             if response.status_code >= 400:
-                raise AIServiceBadResponseError(f"AI extractor returned status {response.status_code}")
+                raise ExtractionProviderError("PROVIDER_ERROR", f"AI extractor returned status {response.status_code}")
 
             try:
                 raw_json = response.json()
             except ValueError as exc:
-                raise AIServiceBadResponseError("AI extractor returned invalid JSON") from exc
+                raise ExtractionProviderError("VALIDATION_ERROR", "AI extractor returned invalid JSON") from exc
 
             try:
                 if isinstance(raw_json, dict) and "extracted" in raw_json:
-                    return RemoteExtractorResult.model_validate(raw_json).extracted
-                return ExtractedTenderV1.model_validate(raw_json)
+                    parsed = RemoteExtractorResult.model_validate(raw_json)
+                    extracted = parsed.extracted
+                    meta = raw_json.get("extract_meta") if isinstance(raw_json.get("extract_meta"), dict) else {}
+                else:
+                    extracted = ExtractedTenderV1.model_validate(raw_json)
+                    meta = {}
             except Exception as exc:
-                raise AIServiceBadResponseError("AI extractor JSON does not match schema") from exc
+                raise ExtractionProviderError("VALIDATION_ERROR", "AI extractor JSON does not match schema") from exc
 
-        raise AIServiceUnavailableError("AI extractor service unavailable") from last_error
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            meta = {
+                "provider": meta.get("provider", "remote"),
+                "model": meta.get("model", "unknown"),
+                "latency_ms": meta.get("latency_ms", latency_ms),
+                "doc_coverage": meta.get("doc_coverage", 1.0),
+                "confidence": meta.get("confidence", extracted.confidence.get("overall", 0.0)),
+                "warnings": meta.get("warnings", []),
+                "sources": meta.get("sources", [str(tender_id)]),
+            }
+            return ExtractionProviderResult(extracted=extracted, extract_meta=meta)
+
+        raise ExtractionProviderError("PROVIDER_ERROR", "AI extractor service unavailable")
+
+
+def get_extractor_provider() -> ExtractionProvider:
+    mode = (settings.ai_extractor_mode or "mock").strip().lower()
+    if mode == "mock":
+        return MockExtractorProvider()
+    if mode == "remote":
+        return RemoteExtractorProvider()
+    raise ExtractionProviderError("PROVIDER_ERROR", f"Unsupported AI_EXTRACTOR_MODE: {settings.ai_extractor_mode}")
+
+
+class AIExtractorClient:
+    async def extract(self, tender_id: UUID, text: str) -> ExtractedTenderV1:
+        provider = get_extractor_provider()
+        result = await provider.extract(
+            tender_id=tender_id,
+            company_id=UUID("00000000-0000-0000-0000-000000000000"),
+            tender_context={},
+            text=text,
+        )
+        return result.extracted
