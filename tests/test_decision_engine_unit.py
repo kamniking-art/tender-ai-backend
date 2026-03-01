@@ -3,7 +3,10 @@ from __future__ import annotations
 from decimal import Decimal
 from unittest import TestCase
 
-from app.decision_engine.service import compute_decision_engine_v1
+from app.decision_engine.service import (
+    compute_decision_engine_v1,
+    compute_finance_v2,
+)
 
 
 class DecisionEngineUnitTests(TestCase):
@@ -61,3 +64,48 @@ class DecisionEngineUnitTests(TestCase):
             high_security=True,
         )
         self.assertLess(penalized["score"], base["score"])
+
+    def test_finance_requires_analysis_when_price_missing(self) -> None:
+        finance = compute_finance_v2(
+            contract_price=None,
+            cost_estimate=Decimal("100"),
+            participation_cost=Decimal("10"),
+            win_probability_pct=Decimal("40"),
+        )
+        self.assertEqual(finance["finance_recommendation"], "requires_analysis")
+
+    def test_finance_no_go_when_negative_margin(self) -> None:
+        finance = compute_finance_v2(
+            contract_price=Decimal("100"),
+            cost_estimate=Decimal("120"),
+            participation_cost=Decimal("0"),
+            win_probability_pct=Decimal("50"),
+        )
+        self.assertEqual(finance["finance_recommendation"], "no_go")
+
+    def test_finance_no_go_when_negative_ev(self) -> None:
+        finance = compute_finance_v2(
+            contract_price=Decimal("1000"),
+            cost_estimate=Decimal("900"),
+            participation_cost=Decimal("70"),
+            win_probability_pct=Decimal("40"),
+        )
+        self.assertEqual(finance["finance_recommendation"], "no_go")
+
+    def test_finance_go_when_ev_and_margin_good(self) -> None:
+        finance = compute_finance_v2(
+            contract_price=Decimal("1000"),
+            cost_estimate=Decimal("700"),
+            participation_cost=Decimal("50"),
+            win_probability_pct=Decimal("40"),
+        )
+        self.assertEqual(finance["finance_recommendation"], "go")
+
+    def test_finance_requires_analysis_when_incomplete(self) -> None:
+        finance = compute_finance_v2(
+            contract_price=Decimal("1000"),
+            cost_estimate=None,
+            participation_cost=Decimal("10"),
+            win_probability_pct=Decimal("50"),
+        )
+        self.assertEqual(finance["finance_recommendation"], "requires_analysis")

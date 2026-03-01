@@ -60,12 +60,18 @@ class DecisionEngineIntegrationTests(IsolatedAsyncioTestCase):
             },
             risk_flags=[],
         )
+        finance = SimpleNamespace(
+            cost_estimate=Decimal("700000"),
+            participation_cost=Decimal("5000"),
+            win_probability=Decimal("40"),
+        )
 
         from app.decision_engine import service as engine_service
 
         old_get_tender = engine_service.get_tender_by_id_scoped
         old_get_or_create = engine_service._get_or_create_decision
         old_get_analysis = engine_service._get_analysis_scoped
+        old_get_finance = engine_service._get_finance_scoped
         try:
             async def _mock_get_tender(db, company, tid):
                 self.assertIs(db, fake_db)
@@ -86,9 +92,16 @@ class DecisionEngineIntegrationTests(IsolatedAsyncioTestCase):
                 self.assertEqual(tid, tender_id)
                 return analysis
 
+            async def _mock_get_finance(db, company, tid):
+                self.assertIs(db, fake_db)
+                self.assertEqual(company, company_id)
+                self.assertEqual(tid, tender_id)
+                return finance
+
             engine_service.get_tender_by_id_scoped = _mock_get_tender
             engine_service._get_or_create_decision = _mock_get_or_create
             engine_service._get_analysis_scoped = _mock_get_analysis
+            engine_service._get_finance_scoped = _mock_get_finance
 
             updated_decision, engine_meta = await recompute_decision_engine_v1(
                 fake_db,
@@ -101,7 +114,9 @@ class DecisionEngineIntegrationTests(IsolatedAsyncioTestCase):
             engine_service.get_tender_by_id_scoped = old_get_tender
             engine_service._get_or_create_decision = old_get_or_create
             engine_service._get_analysis_scoped = old_get_analysis
+            engine_service._get_finance_scoped = old_get_finance
 
         self.assertEqual(updated_decision.recommendation, "go")
         self.assertEqual(engine_meta["recommendation"], "go")
+        self.assertIn("finance", engine_meta)
         self.assertEqual(updated_decision.engine_meta["score"], engine_meta["score"])

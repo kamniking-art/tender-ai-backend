@@ -11,8 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai_extraction.schemas import ExtractedTenderV1
 from app.tender_analysis.model import TenderAnalysis
 from app.tender_decisions.model import TenderDecision
+from app.tender_finance.model import TenderFinance
 from app.tenders.model import Tender
 from app.tenders.service import get_tender_by_id_scoped
+
+MIN_MARGIN_PCT = Decimal("10")
+RISK_GO_MAX = 40
 
 
 class DecisionEngineError(Exception):
@@ -140,6 +144,68 @@ def _recommendation_for_score(score: int) -> Literal["go", "no_go", "unsure"]:
     return "unsure"
 
 
+def _to_float(value: Decimal | None) -> float | None:
+    if value is None:
+        return None
+    return float(value)
+
+
+def compute_finance_v2(
+    *,
+    contract_price: Decimal | None,
+    cost_estimate: Decimal | None,
+    participation_cost: Decimal | None,
+    win_probability_pct: Decimal | None,
+) -> dict:
+    reasons: list[str] = []
+    recommendation: Literal["go", "no_go", "requires_analysis"]
+
+    P = contract_price
+    C = cost_estimate
+    K = participation_cost if participation_cost is not None else Decimal("0")
+    W = (win_probability_pct / Decimal("100")) if win_probability_pct is not None else None
+
+    gross_margin: Decimal | None = None
+    gross_margin_pct: Decimal | None = None
+    expected_value: Decimal | None = None
+
+    if P is None or P <= 0:
+        recommendation = "requires_analysis"
+        reasons.append("Нет цены контракта.")
+    elif C is None or W is None:
+        recommendation = "requires_analysis"
+        reasons.append("Не заполнены финансовые параметры.")
+    else:
+        gross_margin = P - C
+        gross_margin_pct = (gross_margin / P) * Decimal("100")
+        expected_value = (W * gross_margin) - K
+
+        if gross_margin <= 0:
+            recommendation = "no_go"
+            reasons.append("Отрицательная/нулевая маржа.")
+        elif expected_value < 0:
+            recommendation = "no_go"
+            reasons.append("Отрицательное матожидание.")
+        elif expected_value >= 0 and gross_margin_pct >= MIN_MARGIN_PCT:
+            recommendation = "go"
+            reasons.append("Положительное матожидание и маржа выше порога.")
+        else:
+            recommendation = "requires_analysis"
+            reasons.append("Требуется дополнительная финансовая оценка.")
+
+    return {
+        "P": _to_float(P),
+        "C": _to_float(C),
+        "K": _to_float(K),
+        "W": _to_float(W),
+        "gross_margin": _to_float(gross_margin),
+        "gross_margin_pct": _to_float(gross_margin_pct),
+        "expected_value": _to_float(expected_value),
+        "finance_recommendation": recommendation,
+        "reasons": reasons,
+    }
+
+
 def compute_decision_engine_v1(
     *,
     margin_pct: Decimal | None,
@@ -182,6 +248,17 @@ def compute_decision_engine_v1(
     }
 
 
+def _final_recommendation_from_finance(
+    finance_recommendation: Literal["go", "no_go", "requires_analysis"],
+    risk_score: int | None,
+) -> Literal["go", "no_go", "unsure"]:
+    if finance_recommendation == "no_go":
+        return "no_go"
+    if finance_recommendation == "go" and risk_score is not None and risk_score <= RISK_GO_MAX:
+        return "go"
+    return "unsure"
+
+
 async def _get_analysis_scoped(db: AsyncSession, company_id: UUID, tender_id: UUID) -> TenderAnalysis | None:
     return await db.scalar(
         select(TenderAnalysis).where(
@@ -196,6 +273,15 @@ async def _get_decision_scoped(db: AsyncSession, company_id: UUID, tender_id: UU
         select(TenderDecision).where(
             TenderDecision.company_id == company_id,
             TenderDecision.tender_id == tender_id,
+        )
+    )
+
+
+async def _get_finance_scoped(db: AsyncSession, company_id: UUID, tender_id: UUID) -> TenderFinance | None:
+    return await db.scalar(
+        select(TenderFinance).where(
+            TenderFinance.company_id == company_id,
+            TenderFinance.tender_id == tender_id,
         )
     )
 
@@ -248,6 +334,7 @@ async def recompute_decision_engine_v1(
     short_deadline = _resolve_short_deadline(analysis, extracted)
     harsh_penalties = _resolve_harsh_penalties(analysis)
     high_security = _resolve_high_security(extracted, decision, tender)
+    finance = await _get_finance_scoped(db, company_id, tender_id)
 
     engine = compute_decision_engine_v1(
         margin_pct=decision.expected_margin_pct,
@@ -257,6 +344,22 @@ async def recompute_decision_engine_v1(
         harsh_penalties=harsh_penalties,
         high_security=high_security,
     )
+    finance_result = compute_finance_v2(
+        contract_price=tender.nmck,
+        cost_estimate=finance.cost_estimate if finance else None,
+        participation_cost=finance.participation_cost if finance else None,
+        win_probability_pct=finance.win_probability if finance else None,
+    )
+    final_recommendation = _final_recommendation_from_finance(
+        finance_recommendation=finance_result["finance_recommendation"],
+        risk_score=risk_score,
+    )
+
+    engine["finance"] = finance_result
+    engine["recommendation_base"] = engine["recommendation"]
+    engine["recommendation"] = final_recommendation
+    engine["risk_go_max"] = RISK_GO_MAX
+    engine["min_margin_pct"] = float(MIN_MARGIN_PCT)
 
     decision.recommendation = engine["recommendation"]
     decision.engine_meta = engine

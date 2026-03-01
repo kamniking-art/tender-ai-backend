@@ -18,6 +18,7 @@ from app.tender_alerts import router as tender_alerts_router
 from app.tender_analysis import router as tender_analysis_router
 from app.tender_decisions import router as tender_decisions_router
 from app.tender_documents import router as tender_documents_router
+from app.tender_finance import router as tender_finance_router
 from app.tender_tasks import router as tender_tasks_router
 from app.tender_tasks.scheduler import scheduler as tender_task_scheduler
 from app.tenders import router as tenders_router
@@ -43,6 +44,7 @@ app.include_router(ai_extraction_router)
 app.include_router(document_module_router)
 app.include_router(tender_analysis_router)
 app.include_router(tender_decisions_router)
+app.include_router(tender_finance_router)
 app.include_router(decision_engine_router)
 app.include_router(tender_documents_router)
 app.include_router(tender_tasks_router)

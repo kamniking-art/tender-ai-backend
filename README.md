@@ -568,3 +568,26 @@ curl -X POST "http://localhost:8000/alerts/tenders/<TENDER_ID>/ack" \
   -H "Content-Type: application/json" \
   -d '{"category":"deadline_soon"}'
 ```
+
+## Decision Engine v2 (finance + EV)
+
+### Upsert finance parameters
+
+```bash
+curl -X PUT "http://localhost:8000/tenders/<TENDER_ID>/finance" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cost_estimate": 700000,
+    "participation_cost": 5000,
+    "win_probability": 40,
+    "notes": "Тестовая оценка"
+  }'
+```
+
+### Get finance parameters
+
+```bash
+curl "http://localhost:8000/tenders/<TENDER_ID>/finance" \
+  -H "Authorization: Bearer $TOKEN"
+```

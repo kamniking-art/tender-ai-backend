@@ -95,6 +95,44 @@
 </section>
 
 <section class="card">
+  <h2>Финансовая оценка</h2>
+  <form method="post" action="/web/tenders/{{ tender.id }}/finance" class="grid-form">
+    <label>Оценка себестоимости, ₽
+      <input type="number" step="0.01" min="0" name="cost_estimate" value="{{ finance.cost_estimate if finance else '' }}" />
+    </label>
+    <label>Стоимость участия, ₽
+      <input type="number" step="0.01" min="0" name="participation_cost" value="{{ finance.participation_cost if finance else '' }}" />
+    </label>
+    <label>Вероятность победы, %
+      <input type="number" step="0.01" min="0" max="100" name="win_probability" value="{{ finance.win_probability if finance else '' }}" />
+    </label>
+    <label>Комментарий
+      <input type="text" name="notes" value="{{ finance.notes if finance else '' }}" />
+    </label>
+    <input type="hidden" name="auto_recompute" value="true" />
+    <button type="submit">Сохранить финансовые параметры</button>
+  </form>
+
+  {% if finance_meta %}
+  <div class="kv-grid">
+    <div><strong>Маржа:</strong> {{ finance_meta.get("gross_margin") | ru_money("RUB") }} ({% if finance_meta.get("gross_margin_pct") is not none %}{{ finance_meta.get("gross_margin_pct") | ru_money }}%{% else %}-{% endif %})</div>
+    <div><strong>Матожидание (EV):</strong> {{ finance_meta.get("expected_value") | ru_money("RUB") }}</div>
+    <div><strong>Финансовый вывод:</strong> {{ finance_meta.get("finance_recommendation") | finance_recommendation_ru }}</div>
+  </div>
+  {% if finance_meta.get("reasons") %}
+  <p><strong>Причины:</strong></p>
+  <ul>
+    {% for reason in finance_meta.get("reasons") %}
+    <li>{{ reason }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% else %}
+  <p>Финансовая модель ещё не рассчитана.</p>
+  {% endif %}
+</section>
+
+<section class="card">
   <h2>Пакет документов v1</h2>
   {% if package and package.files %}
   <h3>Файлы пакета</h3>

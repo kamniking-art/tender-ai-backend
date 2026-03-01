@@ -34,6 +34,12 @@ from app.tender_analysis.service import AnalysisConflictError, ScopedNotFoundErr
 from app.tender_decisions.model import TenderDecision
 from app.tender_decisions.service import get_decision_scoped
 from app.tender_documents.service import get_document_scoped, list_documents_for_tender
+from app.tender_finance.schemas import TenderFinanceUpsert
+from app.tender_finance.service import (
+    ScopedNotFoundError as FinanceScopedNotFoundError,
+    get_finance_scoped,
+    upsert_finance,
+)
 from app.tender_tasks.service import list_tasks
 from app.tenders.model import Tender
 from app.tenders.schemas import TenderStatus
@@ -125,6 +131,12 @@ SOURCE_RU = {
     "other": "другое",
 }
 
+FINANCE_RECOMMENDATION_RU = {
+    "go": "участвовать",
+    "no_go": "не участвовать",
+    "requires_analysis": "требует анализа",
+}
+
 
 def _translate(value: str | None, mapping: dict[str, str], fallback: str = "-") -> str:
     if not value:
@@ -187,6 +199,7 @@ def _translate_action_name(action: str | None) -> str:
         "risk": "расчет риска",
         "engine": "пересчет рекомендации",
         "package": "формирование пакета",
+        "finance": "финансовая оценка",
     }
     return _translate(action, action_map)
 
@@ -202,6 +215,7 @@ templates.env.filters["task_status_ru"] = lambda value: _translate(value, TASK_S
 templates.env.filters["task_type_ru"] = lambda value: _translate(value, TASK_TYPE_RU)
 templates.env.filters["ru_dt"] = _format_datetime_ru
 templates.env.filters["ru_money"] = _format_money_ru
+templates.env.filters["finance_recommendation_ru"] = lambda value: _translate(value, FINANCE_RECOMMENDATION_RU)
 
 
 def _get_migrations_head() -> str:
@@ -609,6 +623,7 @@ async def tender_detail_page(
     tasks = await list_tasks(db, current_user.company_id, tender_id, order_by="due_at asc")
     documents = await list_documents_for_tender(db, company_id=current_user.company_id, tender_id=tender_id)
     package = await get_package_for_tender(db, company_id=current_user.company_id, tender_id=tender_id)
+    finance = await get_finance_scoped(db, company_id=current_user.company_id, tender_id=tender_id)
 
     risk_score = _extract_risk_score(analysis, decision)
     risk_flags_top = _top_risk_flags(analysis)
@@ -624,6 +639,7 @@ async def tender_detail_page(
             tasks=tasks,
             documents=documents,
             package=package,
+            finance=finance,
             badges={
                 "analysis_status": analysis.status if analysis else "none",
                 "risk_score": risk_score,
@@ -634,6 +650,7 @@ async def tender_detail_page(
                 "package_generated": bool(package.files),
                 "ingestion": _ingestion_status(company) if company else {},
             },
+            finance_meta=decision.engine_meta.get("finance") if decision and isinstance(decision.engine_meta, dict) else None,
             action_result={
                 "action": _translate_action_name(action),
                 "status": "успешно" if action_status == "ok" else ("ошибка" if action_status == "error" else "-"),
@@ -774,6 +791,63 @@ async def web_generate_tender_package(
         return _redirect_with_action(tender_id, "package", False, "Формирование пакета заблокировано", str(exc))
     except DocumentModuleValidationError as exc:
         return _redirect_with_action(tender_id, "package", False, "Профиль компании заполнен не полностью", str(exc))
+
+
+@router.post("/tenders/{tender_id}/finance")
+async def web_upsert_finance(
+    tender_id: UUID,
+    cost_estimate: Decimal | None = Form(default=None),
+    participation_cost: Decimal | None = Form(default=None),
+    win_probability: Decimal | None = Form(default=None),
+    notes: str | None = Form(default=None),
+    auto_recompute: bool = Form(default=True),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_cookie),
+):
+    try:
+        payload = TenderFinanceUpsert(
+            cost_estimate=cost_estimate,
+            participation_cost=participation_cost,
+            win_probability=win_probability,
+            notes=notes,
+        )
+        await upsert_finance(
+            db,
+            company_id=current_user.company_id,
+            tender_id=tender_id,
+            payload=payload,
+        )
+    except FinanceScopedNotFoundError:
+        return _redirect_with_action(tender_id, "finance", False, "Тендер не найден")
+    except Exception as exc:
+        return _redirect_with_action(tender_id, "finance", False, "Не удалось сохранить финансовые параметры", str(exc))
+
+    if auto_recompute:
+        try:
+            decision, engine = await recompute_decision_engine_v1(
+                db,
+                company_id=current_user.company_id,
+                tender_id=tender_id,
+                user_id=current_user.id,
+                force=True,
+            )
+            return _redirect_with_action(
+                tender_id,
+                "finance",
+                True,
+                f"Финансовые параметры сохранены. Рекомендация: {_translate(decision.recommendation, DECISION_STATUS_RU)}",
+                f"EV={engine.get('finance', {}).get('expected_value')}",
+            )
+        except Exception as exc:
+            return _redirect_with_action(
+                tender_id,
+                "finance",
+                False,
+                "Финансовые параметры сохранены, но пересчет рекомендации не выполнен",
+                str(exc),
+            )
+
+    return _redirect_with_action(tender_id, "finance", True, "Финансовые параметры сохранены")
 
 
 @router.get("/tender-documents/{document_id}/download")
