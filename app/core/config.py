@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     app_port: int = 8000
     app_version: str = "unknown"
     app_built_at: str = "unknown"
+    public_base_url: str = "http://127.0.0.1:8000"
     web_cookie_secure: bool = False
 
     database_url: str = "postgresql+asyncpg://postgres:postgres@tender_ai_db:5432/tender_ai"
@@ -19,6 +20,7 @@ class Settings(BaseSettings):
     storage_root: str = "/data"
     documents_subdir: str = "tender_docs"
     task_sla_check_interval_minutes: int = 5
+    telegram_notify_interval_minutes: int = 5
 
     # EIS OpenData discovery/config
     eis_opendata_base_url: str = "https://zakupki.gov.ru"

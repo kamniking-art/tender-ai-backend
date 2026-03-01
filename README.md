@@ -230,6 +230,44 @@ curl "http://localhost:8000/tenders/<TENDER_ID>/documents/package" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
+## Telegram notifications v1 (alerts-based)
+
+1. Create bot in Telegram via `@BotFather` and get `bot_token`.
+2. Get `chat_id` (for example, send a message to the bot and inspect `getUpdates` response).
+3. Save telegram config in company profile:
+
+```bash
+curl -X PATCH "http://localhost:8000/companies/me/profile" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "profile": {
+      "legal_name": "ООО Гранит",
+      "inn": "7800000000",
+      "legal_address": "СПб",
+      "director_name": "Иванов И.И.",
+      "phone": "+7-812-000-00-00",
+      "email": "demo@example.com",
+      "telegram": {
+        "enabled": true,
+        "bot_token": "123456:ABCDEF",
+        "chat_id": "-1001234567890",
+        "send_window": {"from": "09:00", "to": "21:00"},
+        "min_interval_minutes": 30
+      }
+    }
+  }'
+```
+
+Test send:
+
+```bash
+curl -X POST "http://localhost:8000/telegram/test" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"hello from tender_ai_backend"}'
+```
+
 ## Tender documents
 
 ### A) Upload document

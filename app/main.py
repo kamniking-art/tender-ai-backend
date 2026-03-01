@@ -21,6 +21,8 @@ from app.tender_documents import router as tender_documents_router
 from app.tender_tasks import router as tender_tasks_router
 from app.tender_tasks.scheduler import scheduler as tender_task_scheduler
 from app.tenders import router as tenders_router
+from app.telegram_notify import router as telegram_notify_router
+from app.telegram_notify.scheduler import scheduler as telegram_notify_scheduler
 from app.users import router as users_router
 from app.web import router as web_router
 
@@ -45,6 +47,7 @@ app.include_router(decision_engine_router)
 app.include_router(tender_documents_router)
 app.include_router(tender_tasks_router)
 app.include_router(risk_router)
+app.include_router(telegram_notify_router)
 app.include_router(users_router)
 app.include_router(web_router)
 
@@ -75,9 +78,11 @@ async def version() -> dict[str, str]:
 async def startup_event() -> None:
     await tender_task_scheduler.start()
     await ingestion_scheduler.start()
+    await telegram_notify_scheduler.start()
 
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
     await tender_task_scheduler.stop()
     await ingestion_scheduler.stop()
+    await telegram_notify_scheduler.stop()
