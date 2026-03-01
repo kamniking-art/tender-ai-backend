@@ -10,7 +10,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ingestion.eis_opendata.client import EISOpenDataClient
+from app.ingestion.eis_opendata.client import EISOpenDataClient, EISOpenDataMaintenanceError
 from app.ingestion.eis_opendata.parser import iter_candidates_from_file
 from app.ingestion.eis_opendata.schemas import EISDatasetSummary, EISOpenDataSettings, OpenDataCandidate
 from app.ingestion.eis_opendata.state import mark_dataset_processed, should_process_resource
@@ -24,6 +24,7 @@ logger = logging.getLogger("uvicorn.error")
 class OpenDataRunStats:
     datasets_count: int = 0
     files_count: int = 0
+    candidates_count: int = 0
     inserted_count: int = 0
     updated_count: int = 0
     skipped_count: int = 0
@@ -33,6 +34,8 @@ async def list_available_datasets(settings: EISOpenDataSettings, q: str, limit: 
     client = EISOpenDataClient(
         timeout_sec=settings.download_timeout_sec,
         rate_limit_rps=settings.rate_limit_rps,
+        search_api_url=settings.state.discovery.search_api_url,
+        dataset_api_url=settings.state.discovery.dataset_api_url,
     )
     try:
         datasets = await client.list_datasets(q=q, limit=limit)
@@ -56,20 +59,33 @@ async def run_eis_opendata_ingestion(db: AsyncSession, company: Company, setting
     start = time.perf_counter()
     stats = OpenDataRunStats()
 
-    if not settings.dataset_ids:
-        logger.warning("EIS_OPENDATA skip: company_id=%s reason=dataset_ids_empty", company.id)
-        return stats
-
     storage_dir = Path(settings.storage_dir)
     storage_dir.mkdir(parents=True, exist_ok=True)
 
     client = EISOpenDataClient(
         timeout_sec=settings.download_timeout_sec,
         rate_limit_rps=settings.rate_limit_rps,
+        search_api_url=settings.state.discovery.search_api_url,
+        dataset_api_url=settings.state.discovery.dataset_api_url,
     )
 
+    dataset_ids = list(settings.dataset_ids)
+
     try:
-        for dataset_id in settings.dataset_ids:
+        if not dataset_ids:
+            if not settings.allow_demo:
+                logger.warning("EIS_OPENDATA run: inserted=0 updated=0 skipped=0 candidates=0 reason=dataset_ids_empty company_id=%s", company.id)
+                return stats
+
+            search_q = " OR ".join(settings.keywords) if settings.keywords else "закуп"
+            demo_list = await client.search_datasets(q=search_q, limit=20)
+            dataset_ids = [x.dataset_id for x in demo_list[:2]]
+            if not dataset_ids:
+                logger.warning("EIS_OPENDATA run: inserted=0 updated=0 skipped=0 candidates=0 reason=demo_no_datasets company_id=%s", company.id)
+                return stats
+            logger.info("dataset_ids empty, using demo datasets: %s", dataset_ids)
+
+        for dataset_id in dataset_ids:
             dataset = await client.get_dataset(dataset_id)
             if dataset is None:
                 logger.warning("EIS_OPENDATA error: dataset_id=%s reason=dataset_not_found", dataset_id)
@@ -91,12 +107,13 @@ async def run_eis_opendata_ingestion(db: AsyncSession, company: Company, setting
                     logger.warning("EIS_OPENDATA error: dataset_id=%s reason=download_failed file=%s", dataset.dataset_id, resource.url)
                     continue
 
-                inserted, updated, skipped = await _process_downloaded_file(
+                inserted, updated, skipped, candidates = await _process_downloaded_file(
                     db=db,
                     company_id=company.id,
                     file_path=download_path,
                     settings=settings,
                 )
+                stats.candidates_count += candidates
                 stats.inserted_count += inserted
                 stats.updated_count += updated
                 stats.skipped_count += skipped
@@ -111,15 +128,19 @@ async def run_eis_opendata_ingestion(db: AsyncSession, company: Company, setting
 
         duration_ms = int((time.perf_counter() - start) * 1000)
         logger.info(
-            "EIS_OPENDATA ingestion done: company_id=%s datasets=%s files=%s inserted=%s updated=%s skipped=%s duration_ms=%s",
-            company.id,
-            stats.datasets_count,
-            stats.files_count,
+            "EIS_OPENDATA run: inserted=%s updated=%s skipped=%s candidates=%s company_id=%s datasets=%s files=%s duration_ms=%s",
             stats.inserted_count,
             stats.updated_count,
             stats.skipped_count,
+            stats.candidates_count,
+            company.id,
+            stats.datasets_count,
+            stats.files_count,
             duration_ms,
         )
+        return stats
+    except EISOpenDataMaintenanceError as exc:
+        logger.warning("EIS_OPENDATA run: inserted=0 updated=0 skipped=%s candidates=%s reason=%s company_id=%s", stats.skipped_count, stats.candidates_count, str(exc), company.id)
         return stats
     finally:
         await client.close()
@@ -137,13 +158,15 @@ async def _process_downloaded_file(
     company_id: UUID,
     file_path: Path,
     settings: EISOpenDataSettings,
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, int]:
     inserted = 0
     updated = 0
     skipped = 0
+    candidates = 0
 
     candidates_iter, _ = iter_candidates_from_file(file_path, settings.max_records_per_file)
     for candidate in candidates_iter:
+        candidates += 1
         if not _passes_filters(candidate, settings):
             skipped += 1
             continue
@@ -184,7 +207,7 @@ async def _process_downloaded_file(
                 skipped += 1
 
     await db.flush()
-    return inserted, updated, skipped
+    return inserted, updated, skipped, candidates
 
 
 def _passes_filters(candidate: OpenDataCandidate, settings: EISOpenDataSettings) -> bool:

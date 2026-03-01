@@ -2,7 +2,7 @@ from fastapi import FastAPI
 
 from app.auth import router as auth_router
 from app.companies import router as companies_router
-from app.ingestion import opendata_router as ingestion_opendata_router, settings_router as ingestion_settings_router
+from app.ingestion import health_router as ingestion_health_router, opendata_router as ingestion_opendata_router, settings_router as ingestion_settings_router
 from app.ingestion.scheduler import scheduler as ingestion_scheduler
 from app.tender_analysis import router as tender_analysis_router
 from app.tender_decisions import router as tender_decisions_router
@@ -18,6 +18,7 @@ app.include_router(auth_router)
 app.include_router(companies_router)
 app.include_router(ingestion_settings_router)
 app.include_router(ingestion_opendata_router)
+app.include_router(ingestion_health_router)
 app.include_router(tenders_router)
 app.include_router(tender_analysis_router)
 app.include_router(tender_decisions_router)
@@ -27,8 +28,8 @@ app.include_router(users_router)
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health() -> dict[str, bool]:
+    return {"ok": True}
 
 
 @app.on_event("startup")

@@ -344,3 +344,24 @@ If `eis_public` receives HTTP `434` or maintenance markers in body, ingestion se
 `ingestion_settings.eis_public.state.cooldown_until = now + 6h`
 
 Scheduler skips `eis_public` runs for the company until cooldown expires.
+
+## Ingestion recovery health
+
+```bash
+curl "http://localhost:8000/ingestion/health" -H "Authorization: Bearer $TOKEN"
+```
+
+Shows:
+- `eis_public` cooldown
+- `eis_opendata.discovery` status/cooldown/last_success/endpoints
+- scheduler last run stats
+
+To allow automatic demo import when `dataset_ids` is empty:
+
+```json
+{
+  "eis_opendata": {
+    "allow_demo": true
+  }
+}
+```

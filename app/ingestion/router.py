@@ -8,10 +8,12 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.ingestion.eis_opendata.schemas import EISOpenDataSettings, IngestionSettingsPatch
 from app.ingestion.eis_opendata.service import list_available_datasets, run_eis_opendata_once_for_company
+from app.ingestion.scheduler import scheduler as ingestion_scheduler
 from app.models import Company, User
 
 settings_router = APIRouter(prefix="/companies/me/ingestion-settings", tags=["ingestion"])
 opendata_router = APIRouter(prefix="/ingestion/eis-opendata", tags=["ingestion"])
+health_router = APIRouter(prefix="/ingestion", tags=["ingestion"])
 
 
 @settings_router.get("")
@@ -67,9 +69,47 @@ async def run_eis_opendata_once(
     return {
         "datasets": stats.datasets_count,
         "files": stats.files_count,
+        "candidates": stats.candidates_count,
         "inserted": stats.inserted_count,
         "updated": stats.updated_count,
         "skipped": stats.skipped_count,
+    }
+
+
+@health_router.get("/health")
+async def get_ingestion_health(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    company = await _get_company_for_user(db, current_user)
+    settings = company.ingestion_settings or {}
+
+    eis_public = settings.get("eis_public") if isinstance(settings.get("eis_public"), dict) else {}
+    eis_public_state = eis_public.get("state") if isinstance(eis_public.get("state"), dict) else {}
+
+    eis_opendata = settings.get("eis_opendata") if isinstance(settings.get("eis_opendata"), dict) else {}
+    od_state = eis_opendata.get("state") if isinstance(eis_opendata.get("state"), dict) else {}
+    od_discovery = od_state.get("discovery") if isinstance(od_state.get("discovery"), dict) else {}
+
+    snapshot = ingestion_scheduler.get_health_snapshot()
+    return {
+        "company_id": str(company.id),
+        "eis_public": {
+            "enabled": bool(eis_public.get("enabled", False)),
+            "cooldown_until": eis_public_state.get("cooldown_until"),
+        },
+        "eis_opendata": {
+            "enabled": bool(eis_opendata.get("enabled", False)),
+            "discovery": {
+                "status": od_discovery.get("status", "unknown"),
+                "cooldown_until": od_discovery.get("cooldown_until"),
+                "last_success_at": od_discovery.get("last_success_at"),
+                "search_api_url": od_discovery.get("search_api_url"),
+                "dataset_api_url": od_discovery.get("dataset_api_url"),
+                "last_error": od_discovery.get("last_error"),
+            },
+        },
+        "scheduler": snapshot,
     }
 
 

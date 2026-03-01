@@ -3,8 +3,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, Field
+
+
+class EISOpenDataDiscoveryState(BaseModel):
+    last_attempt_at: datetime | None = None
+    last_success_at: datetime | None = None
+    cooldown_until: datetime | None = None
+    search_api_url: str | None = None
+    dataset_api_url: str | None = None
+    status: Literal["unknown", "maintenance", "ok"] = "unknown"
+    last_error: str | None = None
 
 
 class EISOpenDataDatasetState(BaseModel):
@@ -15,6 +26,7 @@ class EISOpenDataDatasetState(BaseModel):
 
 class EISOpenDataState(BaseModel):
     datasets: dict[str, EISOpenDataDatasetState] = Field(default_factory=dict)
+    discovery: EISOpenDataDiscoveryState = Field(default_factory=EISOpenDataDiscoveryState)
 
 
 class EISOpenDataSettings(BaseModel):
@@ -29,6 +41,7 @@ class EISOpenDataSettings(BaseModel):
     download_timeout_sec: int = 60
     rate_limit_rps: float = 0.2
     storage_dir: str = "/data/opendata_cache"
+    allow_demo: bool = False
     state: EISOpenDataState = Field(default_factory=EISOpenDataState)
 
 
@@ -80,3 +93,18 @@ class OpenDataCandidate:
     nmck: Decimal | None = None
     published_at: datetime | None = None
     submission_deadline: datetime | None = None
+
+
+@dataclass
+class DiscoveryResult:
+    status: Literal["unknown", "maintenance", "ok"]
+    search_api_url: str | None = None
+    dataset_api_url: str | None = None
+    last_error: str | None = None
+
+
+@dataclass
+class ProbeResult:
+    ok: bool
+    status: Literal["unknown", "maintenance", "ok"]
+    last_error: str | None = None

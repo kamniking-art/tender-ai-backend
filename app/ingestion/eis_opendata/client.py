@@ -12,11 +12,15 @@ from urllib.parse import urljoin
 import httpx
 
 from app.core.config import settings
-from app.ingestion.eis_opendata.schemas import DatasetMeta, DatasetResource
+from app.ingestion.eis_opendata.schemas import DatasetMeta, DatasetResource, DiscoveryResult, ProbeResult
 
 logger = logging.getLogger("uvicorn.error")
 
 _MAINTENANCE_MARKERS = ("регламентных работ", "технической поддержки", "недоступен официальный сайт")
+
+
+class EISOpenDataMaintenanceError(Exception):
+    pass
 
 
 class EISOpenDataClient:
@@ -51,16 +55,72 @@ class EISOpenDataClient:
     async def close(self) -> None:
         await self._client.aclose()
 
+    async def discover_endpoints(self) -> DiscoveryResult:
+        page_url = _build_page_url(self.base_url, self.search_page_path)
+        html, error = await self._request_text_limited(page_url, max_bytes=300 * 1024, timeout_sec=min(20, self.timeout_sec))
+        if error:
+            if "maintenance" in error:
+                return DiscoveryResult(status="maintenance", last_error=error)
+            return DiscoveryResult(status="unknown", last_error=error)
+        if not html:
+            return DiscoveryResult(status="unknown", last_error="empty_html")
+
+        scripts = _extract_script_urls(html, base=page_url)[:3]
+        chunks = [html]
+        for script_url in scripts:
+            text, _ = await self._request_text_limited(script_url, max_bytes=300 * 1024, timeout_sec=min(20, self.timeout_sec))
+            if text:
+                chunks.append(text)
+
+        candidates = _extract_candidate_urls("\n".join(chunks), self.base_url)
+        for endpoint in candidates:
+            probe = await self.probe_search_endpoint(endpoint)
+            if probe.ok:
+                logger.info("EIS_OPENDATA discovery: status=ok search_api_url=%s", endpoint)
+                return DiscoveryResult(status="ok", search_api_url=endpoint, dataset_api_url=self.dataset_api_url)
+            if probe.status == "maintenance":
+                return DiscoveryResult(status="maintenance", last_error=probe.last_error)
+
+        logger.warning("EIS_OPENDATA discovery: status=unknown reason=no_working_endpoint")
+        return DiscoveryResult(status="unknown", last_error="no_working_endpoint")
+
+    async def probe_search_endpoint(self, endpoint: str, q: str = "закуп", limit: int = 1) -> ProbeResult:
+        response, error = await self._raw_get(endpoint, params={"q": q, "limit": limit, "offset": 0}, timeout_sec=min(20, self.timeout_sec))
+        if error:
+            return ProbeResult(ok=False, status="unknown", last_error=error)
+        if response is None:
+            return ProbeResult(ok=False, status="unknown", last_error="no_response")
+
+        text = response.text or ""
+        if response.status_code == 434 or _looks_like_maintenance(text):
+            return ProbeResult(ok=False, status="maintenance", last_error=f"maintenance_http_{response.status_code}")
+        if response.status_code >= 400:
+            return ProbeResult(ok=False, status="unknown", last_error=f"http_{response.status_code}")
+
+        ctype = (response.headers.get("content-type") or "").lower()
+        if "json" not in ctype and not text.lstrip().startswith(("{", "[")):
+            return ProbeResult(ok=False, status="unknown", last_error="non_json_response")
+
+        try:
+            payload = response.json()
+        except json.JSONDecodeError:
+            return ProbeResult(ok=False, status="unknown", last_error="invalid_json")
+
+        _ = self._parse_datasets_from_payload(payload)
+        return ProbeResult(ok=True, status="ok")
+
     async def search_datasets(self, q: str, limit: int = 20, offset: int = 0) -> list[DatasetMeta]:
-        datasets = await self.list_datasets(q=q, limit=limit, offset=offset)
-        return datasets
+        return await self.list_datasets(q=q, limit=limit, offset=offset)
 
     async def list_datasets(self, q: str, limit: int = 20, offset: int = 0) -> list[DatasetMeta]:
         search_apis = [x for x in [self.search_api_url, self._discovered_search_api_url] if x]
         if not search_apis:
-            self._discovered_search_api_url = await self._discover_search_api_url()
-            if self._discovered_search_api_url:
-                search_apis.append(self._discovered_search_api_url)
+            discovery = await self.discover_endpoints()
+            if discovery.status == "maintenance":
+                raise EISOpenDataMaintenanceError(discovery.last_error or "maintenance")
+            if discovery.status == "ok" and discovery.search_api_url:
+                self._discovered_search_api_url = discovery.search_api_url
+                search_apis.append(discovery.search_api_url)
 
         for endpoint in search_apis:
             payload = await self._query_search_endpoint(endpoint, q=q, limit=limit, offset=offset)
@@ -90,7 +150,6 @@ class EISOpenDataClient:
             if dataset is not None:
                 return dataset
 
-        # fallback: try search by dataset_id
         found = await self.list_datasets(q=dataset_id, limit=20, offset=0)
         for ds in found:
             if ds.dataset_id == dataset_id:
@@ -129,38 +188,46 @@ class EISOpenDataClient:
                 return False
         return False
 
-    async def _discover_search_api_url(self) -> str | None:
-        page_url = _build_page_url(self.base_url, self.search_page_path)
-        html = await self._request_text(page_url)
-        if not html:
-            return None
+    async def _request_text_limited(self, url: str, max_bytes: int, timeout_sec: int) -> tuple[str | None, str | None]:
+        response, error = await self._raw_get(url, params=None, timeout_sec=timeout_sec)
+        if error:
+            return None, error
+        if response is None:
+            return None, "no_response"
 
-        if _looks_like_maintenance(html):
-            logger.warning("eis_opendata discovery blocked by maintenance page: url=%s", page_url)
-            return None
+        body = response.text or ""
+        if response.status_code == 434 or _looks_like_maintenance(body):
+            return None, f"maintenance_http_{response.status_code}"
+        if response.status_code >= 400:
+            return None, f"http_{response.status_code}"
+        if len(body.encode("utf-8", errors="ignore")) > max_bytes:
+            body = body[: max_bytes // 2]
+        return body, None
 
-        scripts = _extract_script_urls(html, base=page_url)
-        all_texts = [html]
-        for script_url in scripts[:8]:
-            script_text = await self._request_text(script_url)
-            if script_text:
-                all_texts.append(script_text)
-
-        candidates = _extract_candidate_urls("\n".join(all_texts), self.base_url)
-        for candidate in candidates:
-            payload = await self._query_search_endpoint(candidate, q="закуп", limit=5, offset=0)
-            if payload is None:
-                continue
-            datasets = self._parse_datasets_from_payload(payload)
-            if datasets:
-                logger.info("eis_opendata discovery selected search api: %s", candidate)
-                return candidate
-
-        logger.warning("eis_opendata discovery found no JSON dataset API")
-        return None
+    async def _raw_get(self, url: str, params: dict | None, timeout_sec: int) -> tuple[httpx.Response | None, str | None]:
+        backoff = [1, 3, 7]
+        for attempt in range(len(backoff) + 1):
+            await self._respect_rate_limit()
+            try:
+                response = await self._client.get(url, params=params, timeout=timeout_sec)
+                logger.info("eis_opendata http: status=%s url=%s", response.status_code, str(response.url))
+                if response.status_code >= 500 and attempt < len(backoff):
+                    await asyncio.sleep(backoff[attempt])
+                    continue
+                return response, None
+            except (httpx.TimeoutException, httpx.NetworkError):
+                if attempt < len(backoff):
+                    await asyncio.sleep(backoff[attempt])
+                    continue
+                return None, "timeout_or_network"
+            except httpx.HTTPError:
+                if attempt < len(backoff):
+                    await asyncio.sleep(backoff[attempt])
+                    continue
+                return None, "http_error"
+        return None, "unknown_error"
 
     async def _query_search_endpoint(self, endpoint: str, q: str, limit: int, offset: int) -> dict | list | None:
-        # Try several common parameter shapes used by portal APIs.
         variants = [
             {"q": q, "limit": limit, "offset": offset},
             {"query": q, "limit": limit, "offset": offset},
@@ -188,63 +255,24 @@ class EISOpenDataClient:
                 return payload
         return None
 
-    async def _request_text(self, url: str) -> str | None:
-        backoff = [1, 3, 7]
-        for attempt in range(len(backoff) + 1):
-            await self._respect_rate_limit()
-            try:
-                response = await self._client.get(url)
-                logger.info("eis_opendata http: status=%s url=%s", response.status_code, str(response.url))
-
-                if response.status_code >= 500 and attempt < len(backoff):
-                    await asyncio.sleep(backoff[attempt])
-                    continue
-                if response.status_code >= 400:
-                    return None
-                return response.text
-            except (httpx.TimeoutException, httpx.NetworkError):
-                if attempt < len(backoff):
-                    await asyncio.sleep(backoff[attempt])
-                    continue
-                return None
-            except httpx.HTTPError:
-                if attempt < len(backoff):
-                    await asyncio.sleep(backoff[attempt])
-                    continue
-                return None
-        return None
-
     async def _request_json(self, url: str, params: dict | None = None) -> dict | list | None:
-        backoff = [1, 3, 7]
-        for attempt in range(len(backoff) + 1):
-            await self._respect_rate_limit()
-            try:
-                response = await self._client.get(url, params=params)
-                logger.info("eis_opendata http: status=%s url=%s", response.status_code, str(response.url))
+        response, _ = await self._raw_get(url, params=params, timeout_sec=self.timeout_sec)
+        if response is None:
+            return None
 
-                if response.status_code >= 500 and attempt < len(backoff):
-                    await asyncio.sleep(backoff[attempt])
-                    continue
-                if response.status_code >= 400:
-                    return None
+        text = response.text or ""
+        if response.status_code == 434 or _looks_like_maintenance(text):
+            raise EISOpenDataMaintenanceError("maintenance")
+        if response.status_code >= 400:
+            return None
 
-                ctype = (response.headers.get("content-type") or "").lower()
-                if "json" not in ctype and not response.text.lstrip().startswith(("{", "[")):
-                    return None
-                return response.json()
-            except json.JSONDecodeError:
-                return None
-            except (httpx.TimeoutException, httpx.NetworkError):
-                if attempt < len(backoff):
-                    await asyncio.sleep(backoff[attempt])
-                    continue
-                return None
-            except httpx.HTTPError:
-                if attempt < len(backoff):
-                    await asyncio.sleep(backoff[attempt])
-                    continue
-                return None
-        return None
+        ctype = (response.headers.get("content-type") or "").lower()
+        if "json" not in ctype and not text.lstrip().startswith(("{", "[")):
+            return None
+        try:
+            return response.json()
+        except json.JSONDecodeError:
+            return None
 
     async def _respect_rate_limit(self) -> None:
         min_interval = 1.0 / self.rate_limit_rps
@@ -350,12 +378,12 @@ def _extract_candidate_urls(content: str, base_url: str) -> list[str]:
     candidates: set[str] = set()
 
     for match in re.findall(r'https?://[^"\'\s)]+', content):
-        if any(token in match.lower() for token in ("opendata", "dataset", "/api/", "search")):
+        if any(token in match.lower() for token in ("opendata", "dataset", "/api/", "search", "download")):
             candidates.add(match)
 
     for match in re.findall(r'/(?:epz/)?[^"\'\s)]+', content):
         lower = match.lower()
-        if any(token in lower for token in ("opendata", "dataset", "/api/", "search")):
+        if any(token in lower for token in ("opendata", "dataset", "/api/", "search", "download")):
             if lower.endswith((".js", ".css", ".svg", ".png", ".jpg")):
                 continue
             candidates.add(urljoin(base_url + "/", match.lstrip("/")))
