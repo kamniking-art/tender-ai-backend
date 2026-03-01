@@ -301,8 +301,10 @@ def _build_detail_flow(
 def _friendly_extract_error(exc: Exception) -> tuple[str, str]:
     text = str(exc)
     normalized = text.lower()
-    if "no documents" in normalized or "документ" in normalized:
+    if "no documents" in normalized or "сначала загрузите документы" in normalized:
         return "Загрузите документы тендера (шаг 1)", "Следующий шаг: загрузите хотя бы один документ"
+    if "документ не найден на сервере" in normalized:
+        return "Документ не найден на сервере", "Следующий шаг: перезагрузите документ и повторите извлечение"
     if "no extractable text" in normalized:
         return "Не удалось извлечь текст из документов", "Следующий шаг: загрузите документ в формате PDF/DOCX/TXT"
     return "Извлечение не выполнено", text
@@ -1073,13 +1075,15 @@ async def web_download_tender_document(
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Документ не найден")
 
+    if not document.storage_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден на сервере")
+
     file_path = Path(settings.storage_root) / document.storage_path
     if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден на сервере")
 
     return FileResponse(
         path=file_path,
         filename=document.file_name,
         media_type=document.content_type or "application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{document.file_name}"'},
     )

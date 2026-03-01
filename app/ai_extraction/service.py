@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import select
@@ -15,6 +17,8 @@ from app.tender_analysis.model import TenderAnalysis
 from app.tender_analysis.service import AnalysisConflictError, ScopedNotFoundError
 from app.tender_documents.model import TenderDocument
 from app.tenders.service import get_tender_by_id_scoped
+
+logger = logging.getLogger(__name__)
 
 
 class ExtractionBadRequestError(ValueError):
@@ -51,11 +55,11 @@ async def _resolve_documents(
     if document_ids is None:
         docs = list((await db.scalars(base_stmt.order_by(TenderDocument.uploaded_at.desc()))).all())
         if not docs:
-            raise ExtractionBadRequestError("No documents found for tender")
+            raise ExtractionBadRequestError("Сначала загрузите документы тендера")
         return docs
 
     if not document_ids:
-        raise ExtractionBadRequestError("document_ids is empty")
+        raise ExtractionBadRequestError("Список document_ids пуст")
 
     docs = list(
         (
@@ -88,6 +92,21 @@ async def run_extraction(
         tender_id=tender_id,
         document_ids=document_ids,
     )
+
+    docs_paths = [
+        str((Path(settings.storage_root) / doc.storage_path)) if doc.storage_path else "-"
+        for doc in documents
+    ]
+    logger.info("Extraction docs: tender_id=%s count=%s paths=%s", tender_id, len(documents), docs_paths)
+
+    missing_paths = [
+        str(Path(settings.storage_root) / doc.storage_path)
+        for doc in documents
+        if not doc.storage_path or not (Path(settings.storage_root) / doc.storage_path).is_file()
+    ]
+    if missing_paths:
+        logger.warning("Extraction missing files: tender_id=%s paths=%s", tender_id, missing_paths)
+        raise ExtractionBadRequestError("Документ не найден на сервере")
 
     supported_suffixes = {".pdf", ".docx", ".txt"}
     has_supported = any((doc.file_name or "").lower().endswith(tuple(supported_suffixes)) for doc in documents)

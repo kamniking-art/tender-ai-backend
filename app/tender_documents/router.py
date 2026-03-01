@@ -81,17 +81,19 @@ async def download_tender_document(
 ) -> FileResponse:
     document = await get_document_scoped(db, company_id=current_user.company_id, document_id=document_id)
     if document is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Документ не найден")
+
+    if not document.storage_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден на сервере")
 
     file_path = Path(settings.storage_root) / document.storage_path
     if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден на сервере")
 
     return FileResponse(
         path=file_path,
         filename=document.file_name,
         media_type=document.content_type or "application/octet-stream",
-        headers={"Content-Disposition": f"attachment; filename=\"{document.file_name}\""},
     )
 
 
