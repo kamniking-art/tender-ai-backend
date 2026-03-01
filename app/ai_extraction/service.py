@@ -97,7 +97,7 @@ async def run_extraction(
         str((Path(settings.storage_root) / doc.storage_path)) if doc.storage_path else "-"
         for doc in documents
     ]
-    logger.info("Extraction docs: tender_id=%s count=%s paths=%s", tender_id, len(documents), docs_paths)
+    logger.warning("Extraction docs: tender_id=%s count=%s paths=%s", tender_id, len(documents), docs_paths)
 
     missing_paths = [
         str(Path(settings.storage_root) / doc.storage_path)
