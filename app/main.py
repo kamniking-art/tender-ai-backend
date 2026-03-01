@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app.auth import router as auth_router
 from app.companies import router as companies_router
@@ -17,8 +18,10 @@ from app.tender_tasks import router as tender_tasks_router
 from app.tender_tasks.scheduler import scheduler as tender_task_scheduler
 from app.tenders import router as tenders_router
 from app.users import router as users_router
+from app.web import router as web_router
 
 app = FastAPI(title="Tender AI Backend Core", version="1.0.0")
+app.mount("/static", StaticFiles(directory="app/web/static"), name="static")
 
 _APP_BUILT_AT = os.getenv("APP_BUILT_AT") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 _APP_VERSION = os.getenv("APP_VERSION", "unknown")
@@ -35,6 +38,7 @@ app.include_router(tender_decisions_router)
 app.include_router(tender_documents_router)
 app.include_router(tender_tasks_router)
 app.include_router(users_router)
+app.include_router(web_router)
 
 
 @app.get("/health")

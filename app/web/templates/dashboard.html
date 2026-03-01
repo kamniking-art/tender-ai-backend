@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Dashboard | Tender AI{% endblock %}
+{% block content %}
+<h1>Alerts Digest</h1>
+
+<section class="grid-cards">
+  <article class="card stat"><h3>New</h3><p>{{ counts.new }}</p></article>
+  <article class="card stat"><h3>Deadline Soon</h3><p>{{ counts.deadline_soon }}</p></article>
+  <article class="card stat"><h3>Risky</h3><p>{{ counts.risky }}</p></article>
+  <article class="card stat"><h3>Go</h3><p>{{ counts.go }}</p></article>
+  <article class="card stat"><h3>No Go</h3><p>{{ counts.no_go }}</p></article>
+  <article class="card stat"><h3>Overdue Tasks</h3><p>{{ counts.overdue_task }}</p></article>
+</section>
+
+<section class="card">
+  <h2>Top Alerts</h2>
+  {% if items %}
+  <table>
+    <thead>
+      <tr>
+        <th>Tender</th>
+        <th>Category</th>
+        <th>Deadline</th>
+        <th>Risk</th>
+        <th>Recommendation</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td><a href="/web/tenders/{{ item.tender_id }}">{{ item.title or item.tender_id }}</a></td>
+        <td>{{ item.category }}</td>
+        <td>{{ item.deadline_at or '-' }}</td>
+        <td>{{ item.risk_score or '-' }}</td>
+        <td>{{ item.recommendation or '-' }}</td>
+        <td>
+          <form method="post" action="/web/alerts/{{ item.tender_id }}/ack" class="inline-form">
+            <input type="hidden" name="category" value="{{ item.category }}" />
+            <button type="submit">Ack</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No pending alerts.</p>
+  {% endif %}
+</section>
+{% endblock %}

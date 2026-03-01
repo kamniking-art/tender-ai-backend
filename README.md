@@ -20,6 +20,7 @@ docker compose up --build
 
 - API docs: <http://localhost:8000/docs>
 - Version: <http://localhost:8000/version>
+- Web login: <http://localhost:8000/web/login>
 - PostgreSQL: `localhost:5433`
 
 ## Standard deploy (git-based)
@@ -111,6 +112,24 @@ curl -sS http://localhost:8000/companies/me \
 curl -sS http://localhost:8000/users/me \
   -H "Authorization: Bearer $TOKEN"
 ```
+
+## Web dashboard (read-only)
+
+- Login form: `/web/login`
+- Dashboard digest: `/web`
+- Tenders list: `/web/tenders`
+- Tender detail: `/web/tenders/<TENDER_ID>`
+
+Cookie auth:
+- JWT is stored in `HttpOnly` cookie `access_token`.
+- Logout: `POST /web/logout`.
+
+Manual smoke:
+1. Open `/web/login`, sign in with registered user.
+2. Verify `/web` shows alerts counts and items.
+3. Press `Ack` on alert item and verify it disappears from dashboard.
+4. Open `/web/tenders` and then `/web/tenders/<id>`.
+5. Download document from detail via `/web/tender-documents/<DOC_ID>/download`.
 
 ## Tender documents
 

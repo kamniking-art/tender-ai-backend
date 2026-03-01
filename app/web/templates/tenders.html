@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Tenders | Tender AI{% endblock %}
+{% block content %}
+<h1>Tenders</h1>
+
+<section class="card">
+  <form method="get" action="/web/tenders" class="filters">
+    <label>Search
+      <input type="text" name="q" value="{{ filters.q }}" placeholder="title/customer" />
+    </label>
+    <label>Status
+      <select name="status">
+        <option value="">All</option>
+        {% for status in statuses %}
+          <option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>{{ status }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Deadline From (ISO)
+      <input type="text" name="deadline_from" value="{{ filters.deadline_from }}" placeholder="2026-03-01T00:00:00Z" />
+    </label>
+    <label>Deadline To (ISO)
+      <input type="text" name="deadline_to" value="{{ filters.deadline_to }}" placeholder="2026-03-31T23:59:59Z" />
+    </label>
+    <button type="submit">Apply</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Latest 50 ({{ total }} total)</h2>
+  {% if tenders %}
+  <table>
+    <thead>
+      <tr>
+        <th>Title</th>
+        <th>Status</th>
+        <th>Source / External ID</th>
+        <th>Deadline</th>
+        <th>NMCK</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for tender in tenders %}
+      <tr>
+        <td><a href="/web/tenders/{{ tender.id }}">{{ tender.title or '-' }}</a></td>
+        <td>{{ tender.status }}</td>
+        <td>{{ tender.source }} / {{ tender.external_id }}</td>
+        <td>{{ tender.submission_deadline or '-' }}</td>
+        <td>{{ tender.nmck or '-' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No tenders found.</p>
+  {% endif %}
+</section>
+{% endblock %}

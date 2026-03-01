@@ -6,6 +6,8 @@ class Settings(BaseSettings):
 
     app_host: str = "0.0.0.0"
     app_port: int = 8000
+    app_version: str = "unknown"
+    app_built_at: str = "unknown"
 
     database_url: str = "postgresql+asyncpg://postgres:postgres@tender_ai_db:5432/tender_ai"
     database_url_sync: str = "postgresql+psycopg2://postgres:postgres@tender_ai_db:5432/tender_ai"

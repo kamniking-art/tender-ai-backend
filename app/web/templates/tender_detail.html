@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Tender Detail | Tender AI{% endblock %}
+{% block content %}
+<h1>{{ tender.title or 'Tender' }}</h1>
+
+<section class="card">
+  <h2>Tender</h2>
+  <div class="kv-grid">
+    <div><strong>Source:</strong> {{ tender.source }}</div>
+    <div><strong>External ID:</strong> {{ tender.external_id }}</div>
+    <div><strong>Status:</strong> {{ tender.status }}</div>
+    <div><strong>Published:</strong> {{ tender.published_at or '-' }}</div>
+    <div><strong>Deadline:</strong> {{ tender.submission_deadline or '-' }}</div>
+    <div><strong>NMCK:</strong> {{ tender.nmck or '-' }}</div>
+    <div><strong>Customer:</strong> {{ tender.customer_name or '-' }}</div>
+    <div><strong>Region:</strong> {{ tender.region or '-' }}</div>
+    <div><strong>Procurement Type:</strong> {{ tender.procurement_type or '-' }}</div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Decision</h2>
+  {% if decision %}
+  <div class="kv-grid">
+    <div><strong>Recommendation:</strong> {{ decision.recommendation }}</div>
+    <div><strong>Risk Score:</strong> {{ decision.risk_score }}</div>
+    <div><strong>Margin Value:</strong> {{ decision.expected_margin_value or '-' }}</div>
+    <div><strong>Margin %:</strong> {{ decision.expected_margin_pct or '-' }}</div>
+    <div><strong>Notes:</strong> {{ decision.notes or '-' }}</div>
+  </div>
+  {% else %}
+  <p>No decision yet.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Analysis</h2>
+  {% if analysis %}
+  <p><strong>Status:</strong> {{ analysis.status }}</p>
+  <p><strong>Summary:</strong> {{ analysis.summary or '-' }}</p>
+  <h3>Risk Flags</h3>
+  <pre>{{ analysis.risk_flags | tojson(indent=2) }}</pre>
+  <h3>Missing Docs</h3>
+  <pre>{{ analysis.missing_docs | tojson(indent=2) }}</pre>
+  {% else %}
+  <p>No analysis yet.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Tasks</h2>
+  {% if tasks %}
+  <table>
+    <thead>
+      <tr>
+        <th>Due</th>
+        <th>Status</th>
+        <th>Type</th>
+        <th>Title</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for task in tasks %}
+      <tr>
+        <td>{{ task.due_at }}</td>
+        <td>{{ task.status }}</td>
+        <td>{{ task.type }}</td>
+        <td>{{ task.title }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No tasks.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Documents</h2>
+  {% if documents %}
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Type</th>
+        <th>Uploaded At</th>
+        <th>Size</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for doc in documents %}
+      <tr>
+        <td>{{ doc.file_name }}</td>
+        <td>{{ doc.doc_type or '-' }}</td>
+        <td>{{ doc.uploaded_at }}</td>
+        <td>{{ doc.file_size or '-' }}</td>
+        <td><a href="/web/tender-documents/{{ doc.id }}/download">Download</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No documents.</p>
+  {% endif %}
+</section>
+{% endblock %}
