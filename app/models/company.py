@@ -20,6 +20,7 @@ class Company(Base):
     bank_details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     scoring_settings: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     finance_settings: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    profile: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb"))
     ingestion_settings: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

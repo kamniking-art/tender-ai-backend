@@ -39,8 +39,7 @@ async def get_my_company_profile(
     if company is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
 
-    settings = company.ingestion_settings if isinstance(company.ingestion_settings, dict) else {}
-    profile = settings.get("profile") if isinstance(settings.get("profile"), dict) else {}
+    profile = company.profile if isinstance(company.profile, dict) else {}
     return CompanyProfileResponse(profile=profile)
 
 
@@ -54,9 +53,7 @@ async def patch_my_company_profile(
     if company is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
 
-    settings = dict(company.ingestion_settings or {})
-    settings["profile"] = payload.profile
-    company.ingestion_settings = settings
+    company.profile = payload.profile
     await db.commit()
     await db.refresh(company)
 

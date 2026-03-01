@@ -44,15 +44,13 @@ class DocumentModuleIntegrationTests(IsolatedAsyncioTestCase):
         )
         company = SimpleNamespace(
             id=company_id,
-            ingestion_settings={
-                "profile": {
-                    "legal_name": "ООО Гранит",
-                    "inn": "7800000000",
-                    "legal_address": "СПб",
-                    "director_name": "Иванов И.И.",
-                    "phone": "+7",
-                    "email": "test@example.com",
-                }
+            profile={
+                "legal_name": "ООО Гранит",
+                "inn": "7800000000",
+                "legal_address": "СПб",
+                "director_name": "Иванов И.И.",
+                "phone": "+7",
+                "email": "test@example.com",
             },
         )
         analysis = SimpleNamespace(

@@ -87,9 +87,7 @@ def _safe_text(value: object | None) -> str:
 
 
 def _extract_profile(company: Company) -> dict:
-    settings_payload = company.ingestion_settings if isinstance(company.ingestion_settings, dict) else {}
-    profile = settings_payload.get("profile") if isinstance(settings_payload.get("profile"), dict) else {}
-    return profile
+    return company.profile if isinstance(company.profile, dict) else {}
 
 
 def _missing_profile_fields(profile: dict) -> list[str]:

@@ -189,6 +189,7 @@ curl "http://localhost:8000/tenders/<TENDER_ID>/decision/engine" \
 ## Document module v1 (checklist + drafts + package)
 
 Set company profile (required fields for generation):
+Profile is stored in `company.profile` (not in `ingestion_settings`).
 
 ```bash
 curl -X PATCH "http://localhost:8000/companies/me/profile" \

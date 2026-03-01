@@ -13,6 +13,7 @@ class CompanyRead(BaseModel):
     bank_details: dict | None
     scoring_settings: dict | None
     finance_settings: dict | None
+    profile: dict
     ingestion_settings: dict
     created_at: datetime
 
