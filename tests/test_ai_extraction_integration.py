@@ -117,5 +117,8 @@ class AIExtractionIntegrationMockTests(IsolatedAsyncioTestCase):
 
         self.assertEqual(analysis.status, "ready")
         self.assertIn("extracted_v1", analysis.requirements)
+        self.assertIn("risk_v1", analysis.requirements)
+        self.assertGreaterEqual(analysis.requirements["risk_v1"]["score_auto"], 0)
+        self.assertLessEqual(analysis.requirements["risk_v1"]["score_auto"], 100)
         self.assertIsNotNone(extracted.schema_version)
         self.assertEqual(fake_db.added, analysis)

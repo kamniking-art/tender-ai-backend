@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import re
-from datetime import UTC, datetime, timedelta
-from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import select
@@ -12,19 +9,15 @@ from app.ai_extraction.client import AIExtractorClient
 from app.ai_extraction.schemas import ExtractedTenderV1
 from app.ai_extraction.text_extract import NoExtractableTextError, build_normalized_text
 from app.core.config import settings
+from app.risk.service import compute_risk_flags, compute_risk_score_v1
 from app.tender_analysis.model import TenderAnalysis
 from app.tender_analysis.service import AnalysisConflictError, ScopedNotFoundError
 from app.tender_documents.model import TenderDocument
-from app.tenders.model import Tender
 from app.tenders.service import get_tender_by_id_scoped
 
 
 class ExtractionBadRequestError(ValueError):
     pass
-
-
-def _now_utc() -> datetime:
-    return datetime.now(UTC)
 
 
 def _line_or_dash(value: object | None) -> str:
@@ -40,90 +33,6 @@ def build_summary(extracted: ExtractedTenderV1) -> str:
         f"Contract security: {_line_or_dash(extracted.contract_security_amount)} ({_line_or_dash(extracted.contract_security_pct)}%)",
     ]
     return "\n".join(lines)
-
-
-def _severity_for_security(pct: Decimal | None) -> str:
-    if pct is None:
-        return "medium"
-    return "high" if pct >= Decimal("10") else "medium"
-
-
-def compute_risk_flags(extracted: ExtractedTenderV1, tender: Tender) -> list[dict]:
-    flags: list[dict] = []
-    now = _now_utc()
-
-    nmck = extracted.nmck or tender.nmck
-    deadline = extracted.submission_deadline_at or tender.submission_deadline
-
-    if deadline is not None and deadline <= now + timedelta(days=3):
-        flags.append(
-            {
-                "code": "short_deadline",
-                "title": "Короткий срок подачи",
-                "severity": "high",
-                "note": f"Deadline is {deadline.isoformat()}",
-            }
-        )
-
-    bid_pct = extracted.bid_security_pct
-    if (
-        bid_pct is not None
-        and bid_pct >= Decimal("5")
-    ) or (
-        extracted.bid_security_amount is not None
-        and nmck is not None
-        and extracted.bid_security_amount >= nmck * Decimal("0.05")
-    ):
-        flags.append(
-            {
-                "code": "high_bid_security",
-                "title": "Высокое обеспечение заявки",
-                "severity": _severity_for_security(bid_pct),
-                "note": "Bid security looks high for this tender.",
-            }
-        )
-
-    contract_pct = extracted.contract_security_pct
-    if (
-        contract_pct is not None
-        and contract_pct >= Decimal("5")
-    ) or (
-        extracted.contract_security_amount is not None
-        and nmck is not None
-        and extracted.contract_security_amount >= nmck * Decimal("0.05")
-    ):
-        flags.append(
-            {
-                "code": "high_contract_security",
-                "title": "Высокое обеспечение контракта",
-                "severity": _severity_for_security(contract_pct),
-                "note": "Contract security looks high for this tender.",
-            }
-        )
-
-    penalties_text = " ".join(extracted.penalties).lower()
-    if re.search(r"неустойк|штраф|пени|0,1%", penalties_text, flags=re.IGNORECASE):
-        flags.append(
-            {
-                "code": "harsh_penalties",
-                "title": "Жесткие штрафные условия",
-                "severity": "medium",
-                "note": "Penalty clauses detected in extracted terms.",
-            }
-        )
-
-    req_text = " ".join(extracted.qualification_requirements).lower()
-    if len(extracted.qualification_requirements) >= 8 or re.search(r"сро|опыт выполнения|аналогичных контрактов", req_text):
-        flags.append(
-            {
-                "code": "excessive_requirements",
-                "title": "Повышенные квалификационные требования",
-                "severity": "medium",
-                "note": "Qualification requirements may be restrictive.",
-            }
-        )
-
-    return flags
 
 
 async def _resolve_documents(
@@ -188,6 +97,7 @@ async def run_extraction(
     client = AIExtractorClient()
     extracted = await client.extract(tender_id=tender_id, text=merged_text)
     risk_flags = compute_risk_flags(extracted, tender)
+    risk_v1 = compute_risk_score_v1(extracted, tender)
     summary = build_summary(extracted)
 
     analysis = await db.scalar(
@@ -207,7 +117,7 @@ async def run_extraction(
             company_id=company_id,
             tender_id=tender_id,
             status="ready",
-            requirements={"extracted_v1": extracted_payload},
+            requirements={"extracted_v1": extracted_payload, "risk_v1": risk_v1},
             missing_docs=[],
             risk_flags=risk_flags,
             summary=summary,
@@ -218,6 +128,7 @@ async def run_extraction(
     else:
         merged_requirements = dict(analysis.requirements or {})
         merged_requirements["extracted_v1"] = extracted_payload
+        merged_requirements["risk_v1"] = risk_v1
         analysis.requirements = merged_requirements
         analysis.risk_flags = risk_flags
         analysis.summary = summary

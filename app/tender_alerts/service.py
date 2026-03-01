@@ -3,12 +3,13 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import and_, exists, func, literal, not_, or_, select, union_all
+from sqlalchemy import Integer, and_, cast, exists, func, literal, not_, or_, select, union_all
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.tender_alerts.model import TenderAlertView
 from app.tender_alerts.schemas import AlertCategory, AlertCounts, AlertDigestResponse, AlertTenderItem
+from app.tender_analysis.model import TenderAnalysis
 from app.tender_decisions.model import TenderDecision
 from app.tender_tasks.model import TenderTask
 from app.tenders.model import Tender
@@ -40,11 +41,14 @@ def _alerts_union(company_id: UUID, user_id: UUID, since: datetime | None, inclu
 
     queries = []
 
+    auto_risk_score = cast(TenderAnalysis.requirements["risk_v1"]["score_auto"].astext, Integer)
+    effective_risk_score = func.coalesce(TenderDecision.risk_score, auto_risk_score)
+
     base_fields = [
         Tender.id.label("tender_id"),
         Tender.title.label("title"),
         Tender.submission_deadline.label("deadline_at"),
-        TenderDecision.risk_score.label("risk_score"),
+        effective_risk_score.label("risk_score"),
         TenderDecision.recommendation.label("recommendation"),
     ]
 
@@ -59,6 +63,7 @@ def _alerts_union(company_id: UUID, user_id: UUID, since: datetime | None, inclu
             select(*base_fields, literal(AlertCategory.NEW.value).label("category"))
             .select_from(Tender)
             .outerjoin(TenderDecision, and_(TenderDecision.company_id == company_id, TenderDecision.tender_id == Tender.id))
+            .outerjoin(TenderAnalysis, and_(TenderAnalysis.company_id == company_id, TenderAnalysis.tender_id == Tender.id))
             .where(*where)
         )
 
@@ -76,21 +81,24 @@ def _alerts_union(company_id: UUID, user_id: UUID, since: datetime | None, inclu
             select(*base_fields, literal(AlertCategory.DEADLINE_SOON.value).label("category"))
             .select_from(Tender)
             .outerjoin(TenderDecision, and_(TenderDecision.company_id == company_id, TenderDecision.tender_id == Tender.id))
+            .outerjoin(TenderAnalysis, and_(TenderAnalysis.company_id == company_id, TenderAnalysis.tender_id == Tender.id))
             .where(*where)
         )
 
     if include(AlertCategory.RISKY.value):
+        effective_recommendation_ok = or_(TenderDecision.recommendation.is_(None), TenderDecision.recommendation != "no_go")
         where = [
             *_base_tender_condition(company_id, since),
-            TenderDecision.risk_score >= 70,
-            TenderDecision.recommendation != "no_go",
+            effective_risk_score >= 70,
+            effective_recommendation_ok,
         ]
         if not include_acknowledged:
             where.append(_ack_filter(company_id, user_id, AlertCategory.RISKY.value))
         queries.append(
             select(*base_fields, literal(AlertCategory.RISKY.value).label("category"))
             .select_from(Tender)
-            .join(TenderDecision, and_(TenderDecision.company_id == company_id, TenderDecision.tender_id == Tender.id))
+            .outerjoin(TenderDecision, and_(TenderDecision.company_id == company_id, TenderDecision.tender_id == Tender.id))
+            .outerjoin(TenderAnalysis, and_(TenderAnalysis.company_id == company_id, TenderAnalysis.tender_id == Tender.id))
             .where(*where)
         )
 
@@ -102,6 +110,7 @@ def _alerts_union(company_id: UUID, user_id: UUID, since: datetime | None, inclu
             select(*base_fields, literal(AlertCategory.GO.value).label("category"))
             .select_from(Tender)
             .join(TenderDecision, and_(TenderDecision.company_id == company_id, TenderDecision.tender_id == Tender.id))
+            .outerjoin(TenderAnalysis, and_(TenderAnalysis.company_id == company_id, TenderAnalysis.tender_id == Tender.id))
             .where(*where)
         )
 
@@ -113,6 +122,7 @@ def _alerts_union(company_id: UUID, user_id: UUID, since: datetime | None, inclu
             select(*base_fields, literal(AlertCategory.NO_GO.value).label("category"))
             .select_from(Tender)
             .join(TenderDecision, and_(TenderDecision.company_id == company_id, TenderDecision.tender_id == Tender.id))
+            .outerjoin(TenderAnalysis, and_(TenderAnalysis.company_id == company_id, TenderAnalysis.tender_id == Tender.id))
             .where(*where)
         )
 
@@ -131,6 +141,7 @@ def _alerts_union(company_id: UUID, user_id: UUID, since: datetime | None, inclu
             select(*base_fields, literal(AlertCategory.OVERDUE_TASK.value).label("category"))
             .select_from(Tender)
             .outerjoin(TenderDecision, and_(TenderDecision.company_id == company_id, TenderDecision.tender_id == Tender.id))
+            .outerjoin(TenderAnalysis, and_(TenderAnalysis.company_id == company_id, TenderAnalysis.tender_id == Tender.id))
             .where(*where)
         )
 

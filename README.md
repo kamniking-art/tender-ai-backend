@@ -155,6 +155,19 @@ curl "http://localhost:8000/tenders/<TENDER_ID>/analysis/extracted" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
+Recompute risk score from latest `extracted_v1`:
+
+```bash
+curl -X POST "http://localhost:8000/tenders/<TENDER_ID>/risk/recompute" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"use_latest_extracted": true}'
+```
+
+Note:
+- Auto risk is stored in `analysis.requirements.risk_v1.score_auto`.
+- In alerts, `decision.risk_score` (manual) has priority over auto score.
+
 ## Tender documents
 
 ### A) Upload document

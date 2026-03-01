@@ -11,6 +11,7 @@ from app.auth import router as auth_router
 from app.companies import router as companies_router
 from app.ingestion import health_router as ingestion_health_router, opendata_router as ingestion_opendata_router, settings_router as ingestion_settings_router
 from app.ingestion.scheduler import scheduler as ingestion_scheduler
+from app.risk.router import router as risk_router
 from app.tender_alerts import router as tender_alerts_router
 from app.tender_analysis import router as tender_analysis_router
 from app.tender_decisions import router as tender_decisions_router
@@ -39,6 +40,7 @@ app.include_router(tender_analysis_router)
 app.include_router(tender_decisions_router)
 app.include_router(tender_documents_router)
 app.include_router(tender_tasks_router)
+app.include_router(risk_router)
 app.include_router(users_router)
 app.include_router(web_router)
 
