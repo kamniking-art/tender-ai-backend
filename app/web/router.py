@@ -204,6 +204,13 @@ def _translate_action_name(action: str | None) -> str:
     return _translate(action, action_map)
 
 
+def _is_recommendation_category(category: str | None) -> bool:
+    if not category:
+        return False
+    normalized = str(category)
+    return normalized in {"go", "no_go", "unsure"} or normalized.startswith("recommendation")
+
+
 templates.env.filters["analysis_status_ru"] = lambda value: _translate(value, ANALYSIS_STATUS_RU)
 templates.env.filters["decision_status_ru"] = lambda value: _translate(value, DECISION_STATUS_RU)
 templates.env.filters["tender_status_ru"] = lambda value: _translate(value, TENDER_STATUS_RU)
@@ -398,9 +405,23 @@ async def dashboard(
         categories=None,
         limit=20,
     )
+    dashboard_items: list[dict[str, object]] = []
+    for item in digest.items:
+        category_value = str(item.category)
+        recommendation_display = item.recommendation if _is_recommendation_category(category_value) else None
+        dashboard_items.append(
+            {
+                "tender_id": item.tender_id,
+                "title": item.title,
+                "category": category_value,
+                "deadline_at": item.deadline_at,
+                "risk_score": item.risk_score,
+                "recommendation_display": recommendation_display,
+            }
+        )
     return templates.TemplateResponse(
         "dashboard.html",
-        _template_context(request, current_user, counts=digest.counts, items=digest.items),
+        _template_context(request, current_user, counts=digest.counts, items=dashboard_items),
     )
 
 

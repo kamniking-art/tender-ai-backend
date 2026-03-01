@@ -33,7 +33,13 @@
         <td>{{ item.category | alert_category_ru }}</td>
         <td>{{ item.deadline_at | ru_dt }}</td>
         <td>{{ item.risk_score or '-' }}</td>
-        <td>{{ item.recommendation | decision_status_ru }}</td>
+        <td>
+          {% if item.recommendation_display %}
+            {{ item.recommendation_display | decision_status_ru }}
+          {% else %}
+            —
+          {% endif %}
+        </td>
         <td>
           <form method="post" action="/web/alerts/{{ item.tender_id }}/ack" class="inline-form">
             <input type="hidden" name="category" value="{{ item.category }}" />
