@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Дашборд | Tender AI{% endblock %}
 {% block content %}
-<h1>Дайджест алертов</h1>
+<h1>Сводка уведомлений</h1>
 
 <section class="grid-cards">
   <article class="card stat"><h3>Новые</h3><p>{{ counts.new }}</p></article>
@@ -13,7 +13,7 @@
 </section>
 
 <section class="card">
-  <h2>Ключевые алерты</h2>
+  <h2>Ключевые уведомления</h2>
   {% if items %}
   <table>
     <thead>
@@ -45,7 +45,7 @@
     </tbody>
   </table>
   {% else %}
-  <p>Нет активных алертов.</p>
+  <p>Нет активных уведомлений.</p>
   {% endif %}
 </section>
 {% endblock %}
