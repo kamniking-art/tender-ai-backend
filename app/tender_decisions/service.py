@@ -114,6 +114,7 @@ async def create_decision(
         expected_margin_pct=margin_pct,
         risk_score=payload.risk_score,
         risk_flags=payload.risk_flags,
+        engine_meta={},
         need_bid_security=payload.need_bid_security,
         bid_security_amount=payload.bid_security_amount,
         need_contract_security=payload.need_contract_security,

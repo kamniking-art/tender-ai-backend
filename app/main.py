@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from app.ai_extraction.router import router as ai_extraction_router
 from app.auth import router as auth_router
 from app.companies import router as companies_router
+from app.decision_engine.router import router as decision_engine_router
 from app.ingestion import health_router as ingestion_health_router, opendata_router as ingestion_opendata_router, settings_router as ingestion_settings_router
 from app.ingestion.scheduler import scheduler as ingestion_scheduler
 from app.risk.router import router as risk_router
@@ -38,6 +39,7 @@ app.include_router(tender_alerts_router)
 app.include_router(ai_extraction_router)
 app.include_router(tender_analysis_router)
 app.include_router(tender_decisions_router)
+app.include_router(decision_engine_router)
 app.include_router(tender_documents_router)
 app.include_router(tender_tasks_router)
 app.include_router(risk_router)

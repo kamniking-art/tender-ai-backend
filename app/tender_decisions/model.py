@@ -43,6 +43,7 @@ class TenderDecision(Base):
 
     risk_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     risk_flags: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
+    engine_meta: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb"))
 
     need_bid_security: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     bid_security_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)

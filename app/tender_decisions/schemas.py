@@ -75,6 +75,7 @@ class TenderDecisionRead(BaseModel):
 
     risk_score: int
     risk_flags: list
+    engine_meta: dict
 
     need_bid_security: bool
     bid_security_amount: Decimal | None

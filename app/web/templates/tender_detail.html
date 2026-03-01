@@ -28,6 +28,11 @@
     <div><strong>Margin %:</strong> {{ decision.expected_margin_pct or '-' }}</div>
     <div><strong>Notes:</strong> {{ decision.notes or '-' }}</div>
   </div>
+  {% if decision.engine_meta %}
+  <h3>Decision Engine v1</h3>
+  <p><strong>Score:</strong> {{ decision.engine_meta.get("score") }}</p>
+  <pre>{{ decision.engine_meta.get("explain") | tojson(indent=2) }}</pre>
+  {% endif %}
   {% else %}
   <p>No decision yet.</p>
   {% endif %}

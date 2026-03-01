@@ -168,6 +168,24 @@ Note:
 - Auto risk is stored in `analysis.requirements.risk_v1.score_auto`.
 - In alerts, `decision.risk_score` (manual) has priority over auto score.
 
+## Decision engine v1
+
+Recompute recommendation manually:
+
+```bash
+curl -X POST "http://localhost:8000/tenders/<TENDER_ID>/decision/recompute" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"force": false}'
+```
+
+Read engine result:
+
+```bash
+curl "http://localhost:8000/tenders/<TENDER_ID>/decision/engine" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
 ## Tender documents
 
 ### A) Upload document
