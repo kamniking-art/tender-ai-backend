@@ -224,3 +224,103 @@ curl -X PATCH "http://localhost:8000/tender-tasks/<TASK_ID>" \
 The background scheduler checks pending tasks every `TASK_SLA_CHECK_INTERVAL_MINUTES` (default 5).
 If `due_at <= now`, task status becomes `overdue` and app logs:
 `Task <task_id> for tender <tender_id> is overdue.`
+
+## EIS ingestion (public, v1)
+
+### Get ingestion settings
+
+```bash
+curl "http://localhost:8000/companies/me/ingestion-settings" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Update ingestion settings
+
+```bash
+curl -X PATCH "http://localhost:8000/companies/me/ingestion-settings" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "eis_public": {
+      "enabled": true,
+      "interval_minutes": 30,
+      "query": "гранит OR памятник OR плита",
+      "law": ["44fz", "223fz"],
+      "regions": ["Санкт-Петербург", "Ленинградская область"],
+      "only_active": true,
+      "max_pages": 2,
+      "page_size": 50,
+      "timeout_sec": 20,
+      "rate_limit_rps": 0.5
+    }
+  }'
+```
+
+## RU deploy smoke
+
+1. Deploy and start in RU environment:
+`docker compose up --build -d`
+2. Enable ingestion via `PATCH /companies/me/ingestion-settings`.
+3. Watch ingestion logs:
+`docker compose logs -f tender_ai_app | grep ingestion`
+4. Expected log pattern:
+`EIS ingestion done: inserted=X updated=Y`
+
+## EIS public diagnostics (434)
+
+Run diagnostics from host or server:
+
+```bash
+cd /opt/tender_ai_backend
+bash scripts/diag_eis_public.sh
+```
+
+Script prints for both modes:
+- HTTP code
+- guessed content type
+- first 60 lines of body
+
+If both runs consistently return `434`/stub/captcha page, keep `eis_public.enabled=false`.
+
+## EIS OpenData ingestion (primary)
+
+### Find datasets
+
+```bash
+curl "http://localhost:8000/ingestion/eis-opendata/datasets?q=закуп" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Update ingestion settings
+
+```bash
+curl -X PATCH "http://localhost:8000/companies/me/ingestion-settings" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "eis_public": {"enabled": false},
+    "eis_opendata": {
+      "enabled": true,
+      "interval_minutes": 60,
+      "dataset_ids": ["<DATASET_ID_1>", "<DATASET_ID_2>"],
+      "keywords": ["гранит", "памятник", "плита", "надгроб"],
+      "regions": ["Санкт-Петербург", "Ленинградская область", "Псков"],
+      "laws": ["44fz", "223fz"],
+      "max_files_per_run": 2,
+      "max_records_per_file": 20000,
+      "download_timeout_sec": 60,
+      "rate_limit_rps": 0.2,
+      "storage_dir": "/data/opendata_cache"
+    }
+  }'
+```
+
+### Manual run once
+
+```bash
+curl -X POST "http://localhost:8000/ingestion/eis-opendata/run-once" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Expected log pattern:
+`EIS_OPENDATA ingestion done: company_id=... datasets=N files=M inserted=X updated=Y skipped=Z duration_ms=...`
