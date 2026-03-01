@@ -131,6 +131,30 @@ Manual smoke:
 4. Open `/web/tenders` and then `/web/tenders/<id>`.
 5. Download document from detail via `/web/tender-documents/<DOC_ID>/download`.
 
+## AI extraction v1 (documents -> text -> analysis)
+
+Mock mode (default):
+
+```bash
+AI_EXTRACTOR_MODE=mock
+```
+
+Run extraction:
+
+```bash
+curl -X POST "http://localhost:8000/tenders/<TENDER_ID>/analysis/extract" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"document_ids": null}'
+```
+
+Read extracted payload:
+
+```bash
+curl "http://localhost:8000/tenders/<TENDER_ID>/analysis/extracted" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
 ## Tender documents
 
 ### A) Upload document

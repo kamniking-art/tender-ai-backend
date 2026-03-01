@@ -98,7 +98,7 @@ async def login_submit(
         value=token,
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=settings.web_cookie_secure,
         max_age=int(expires.total_seconds()),
     )
     return response

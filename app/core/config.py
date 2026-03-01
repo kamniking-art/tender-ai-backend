@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     app_port: int = 8000
     app_version: str = "unknown"
     app_built_at: str = "unknown"
+    web_cookie_secure: bool = False
 
     database_url: str = "postgresql+asyncpg://postgres:postgres@tender_ai_db:5432/tender_ai"
     database_url_sync: str = "postgresql+psycopg2://postgres:postgres@tender_ai_db:5432/tender_ai"
@@ -24,6 +25,12 @@ class Settings(BaseSettings):
     eis_opendata_search_path: str = "/epz/opendata/search/results.html"
     eis_opendata_search_api_url: str | None = None
     eis_opendata_dataset_api_url: str | None = None
+
+    ai_extractor_base_url: str | None = None
+    ai_extractor_api_key: str | None = None
+    ai_extractor_timeout_sec: int = 60
+    ai_extractor_max_chars: int = 120000
+    ai_extractor_mode: str = "mock"
 
 
 settings = Settings()
