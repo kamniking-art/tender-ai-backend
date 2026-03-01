@@ -18,6 +18,13 @@ from app.tender_alerts.schemas import AlertCategory
 from app.tender_alerts.service import ack_alert, build_alert_digest, ensure_tender_scoped
 from app.tender_analysis.service import get_analysis_scoped
 from app.tender_decisions.service import get_decision_scoped
+from app.document_module.service import (
+    DocumentModuleConflictError,
+    DocumentModuleNotFoundError,
+    DocumentModuleValidationError,
+    get_package_for_tender,
+    generate_package_for_tender,
+)
 from app.tender_documents.service import get_document_scoped, list_documents_for_tender
 from app.tender_tasks.service import list_tasks
 from app.tenders.schemas import SortField, SortOrder, TenderStatus
@@ -225,6 +232,7 @@ async def tender_detail_page(
     analysis = await get_analysis_scoped(db, current_user.company_id, tender_id)
     tasks = await list_tasks(db, current_user.company_id, tender_id, order_by="due_at asc")
     documents = await list_documents_for_tender(db, company_id=current_user.company_id, tender_id=tender_id)
+    package = await get_package_for_tender(db, company_id=current_user.company_id, tender_id=tender_id)
 
     return templates.TemplateResponse(
         "tender_detail.html",
@@ -236,8 +244,38 @@ async def tender_detail_page(
             analysis=analysis,
             tasks=tasks,
             documents=documents,
+            package=package,
         ),
     )
+
+
+@router.post("/tenders/{tender_id}/documents/generate")
+async def web_generate_tender_package(
+    request: Request,
+    tender_id: UUID,
+    force: bool = Form(default=False),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_cookie),
+):
+    try:
+        await generate_package_for_tender(
+            db,
+            company_id=current_user.company_id,
+            tender_id=tender_id,
+            user_id=current_user.id,
+            force=force,
+        )
+    except DocumentModuleNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except DocumentModuleConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except DocumentModuleValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"message": str(exc), "missing_fields": exc.missing_fields},
+        ) from exc
+
+    return RedirectResponse(url=request.headers.get("referer", f"/web/tenders/{tender_id}"), status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.get("/tender-documents/{document_id}/download")

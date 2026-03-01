@@ -39,6 +39,33 @@
 </section>
 
 <section class="card">
+  <h2>Document Package v1</h2>
+  {% if decision and decision.recommendation == "go" %}
+  <form method="post" action="/web/tenders/{{ tender.id }}/documents/generate">
+    <button type="submit">Generate package</button>
+  </form>
+  {% else %}
+  <p>Package generation is available only when recommendation is <strong>go</strong>.</p>
+  {% endif %}
+  {% if package and package.files %}
+  <h3>Package files</h3>
+  <ul>
+    {% for file in package.files %}
+    <li><a href="/web/tender-documents/{{ file.id }}/download">{{ file.file_name }}</a> ({{ file.uploaded_at }})</li>
+    {% endfor %}
+  </ul>
+  {% if package.checklist %}
+  <h3>Checklist</h3>
+  <ul>
+    {% for item in package.checklist %}
+    <li>{{ item }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% endif %}
+</section>
+
+<section class="card">
   <h2>Analysis</h2>
   {% if analysis %}
   <p><strong>Status:</strong> {{ analysis.status }}</p>

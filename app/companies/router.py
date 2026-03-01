@@ -1,3 +1,4 @@
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +11,14 @@ from app.models import Company, User
 router = APIRouter(prefix="/companies", tags=["companies"])
 
 
+class CompanyProfileResponse(BaseModel):
+    profile: dict
+
+
+class CompanyProfilePatchRequest(BaseModel):
+    profile: dict
+
+
 @router.get("/me", response_model=CompanyRead)
 async def get_my_company(
     current_user: User = Depends(get_current_user),
@@ -19,3 +28,36 @@ async def get_my_company(
     if company is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
     return CompanyRead.model_validate(company)
+
+
+@router.get("/me/profile", response_model=CompanyProfileResponse)
+async def get_my_company_profile(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CompanyProfileResponse:
+    company = await db.scalar(select(Company).where(Company.id == current_user.company_id))
+    if company is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    settings = company.ingestion_settings if isinstance(company.ingestion_settings, dict) else {}
+    profile = settings.get("profile") if isinstance(settings.get("profile"), dict) else {}
+    return CompanyProfileResponse(profile=profile)
+
+
+@router.patch("/me/profile", response_model=CompanyProfileResponse)
+async def patch_my_company_profile(
+    payload: CompanyProfilePatchRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CompanyProfileResponse:
+    company = await db.scalar(select(Company).where(Company.id == current_user.company_id))
+    if company is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    settings = dict(company.ingestion_settings or {})
+    settings["profile"] = payload.profile
+    company.ingestion_settings = settings
+    await db.commit()
+    await db.refresh(company)
+
+    return CompanyProfileResponse(profile=payload.profile)

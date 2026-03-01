@@ -186,6 +186,49 @@ curl "http://localhost:8000/tenders/<TENDER_ID>/decision/engine" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
+## Document module v1 (checklist + drafts + package)
+
+Set company profile (required fields for generation):
+
+```bash
+curl -X PATCH "http://localhost:8000/companies/me/profile" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "profile": {
+      "legal_name": "ООО Гранит",
+      "inn": "7800000000",
+      "kpp": "780001001",
+      "ogrn": "1027800000000",
+      "legal_address": "г. Санкт-Петербург, Невский пр., 1",
+      "postal_address": "г. Санкт-Петербург, Невский пр., 1",
+      "director_name": "Иванов И.И.",
+      "phone": "+7-812-000-00-00",
+      "email": "tender@example.com",
+      "bank_name": "ПАО Банк",
+      "bank_bik": "044030000",
+      "bank_account": "40702810000000000000",
+      "correspondent_account": "30101810000000000000"
+    }
+  }'
+```
+
+Generate package:
+
+```bash
+curl -X POST "http://localhost:8000/tenders/<TENDER_ID>/documents/generate" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"force": false}'
+```
+
+Get package:
+
+```bash
+curl "http://localhost:8000/tenders/<TENDER_ID>/documents/package" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
 ## Tender documents
 
 ### A) Upload document
