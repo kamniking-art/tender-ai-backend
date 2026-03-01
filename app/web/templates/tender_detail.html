@@ -18,6 +18,18 @@
 {% endif %}
 
 <section class="card">
+  <h2>Шаги по тендеру</h2>
+  <ol>
+    {% for step in tender_flow_steps %}
+    <li><strong>{{ step.name }}:</strong> {{ step.state }}</li>
+    {% endfor %}
+  </ol>
+  {% if next_step %}
+  <p><strong>Следующий шаг:</strong> {{ next_step }}</p>
+  {% endif %}
+</section>
+
+<section class="card">
   <h2>Сводка статусов</h2>
   <div class="badges">
     <span class="badge">Анализ: {{ badges.analysis_status | analysis_status_ru }}</span>
@@ -40,21 +52,35 @@
   <h2>Действия</h2>
   <div class="action-row">
     <form method="post" action="/web/tenders/{{ tender.id }}/extract" class="action-form">
-      <button type="submit">Извлечь требования</button>
+      <button type="submit" {% if not action_availability.can_extract %}disabled title="{{ disabled_reasons.extract }}"{% endif %}>Извлечь требования</button>
+      {% if not action_availability.can_extract %}
+      <div class="hint">{{ disabled_reasons.extract }}</div>
+      {% endif %}
     </form>
 
     <form method="post" action="/web/tenders/{{ tender.id }}/risk/recompute" class="action-form">
-      <button type="submit">Рассчитать риск</button>
+      <button type="submit" {% if not action_availability.can_risk %}disabled title="{{ disabled_reasons.risk }}"{% endif %}>Рассчитать риск</button>
+      {% if not action_availability.can_risk %}
+      <div class="hint">{{ disabled_reasons.risk }}</div>
+      {% endif %}
     </form>
 
     <form method="post" action="/web/tenders/{{ tender.id }}/engine/recompute" class="action-form">
       <input type="hidden" name="force" value="false" />
-      <button type="submit">Пересчитать рекомендацию</button>
+      <button type="submit" {% if not action_availability.can_recompute %}disabled title="{{ disabled_reasons.recompute }}"{% endif %}>Пересчитать рекомендацию</button>
+      {% if not action_availability.can_recompute %}
+      <div class="hint">{{ disabled_reasons.recompute }}</div>
+      {% elif badges.risk_score is none %}
+      <div class="hint">Риск ещё не рассчитан: рекомендация будет предварительной</div>
+      {% endif %}
     </form>
 
     <form method="post" action="/web/tenders/{{ tender.id }}/documents/generate" class="action-form">
       <input type="hidden" name="force" value="false" />
-      <button type="submit" {% if not (decision and decision.recommendation == "go") %}disabled title="Решение должно быть «идём»"{% endif %}>Сформировать пакет документов</button>
+      <button type="submit" {% if not action_availability.can_package %}disabled title="{{ disabled_reasons.package }}"{% endif %}>Сформировать пакет документов</button>
+      {% if not action_availability.can_package %}
+      <div class="hint">{{ disabled_reasons.package }}</div>
+      {% endif %}
     </form>
   </div>
 </section>
@@ -198,6 +224,16 @@
 
 <section class="card">
   <h2>Документы</h2>
+  <form method="post" action="/web/tenders/{{ tender.id }}/documents/upload" enctype="multipart/form-data" class="grid-form">
+    <label>Тип документа
+      <input type="text" name="doc_type" placeholder="tz / contract / other" />
+    </label>
+    <label>Файл
+      <input type="file" name="file" required />
+    </label>
+    <button type="submit">Загрузить документ</button>
+  </form>
+
   {% if documents %}
   <table>
     <thead>

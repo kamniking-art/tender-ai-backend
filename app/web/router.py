@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import Integer, and_, cast, func, or_, select
@@ -33,7 +33,13 @@ from app.tender_analysis.model import TenderAnalysis
 from app.tender_analysis.service import AnalysisConflictError, ScopedNotFoundError, get_analysis_scoped
 from app.tender_decisions.model import TenderDecision
 from app.tender_decisions.service import get_decision_scoped
-from app.tender_documents.service import get_document_scoped, list_documents_for_tender
+from app.tender_documents.service import (
+    DocumentStorageError,
+    ScopedNotFoundError as DocumentScopedNotFoundError,
+    create_document_for_tender,
+    get_document_scoped,
+    list_documents_for_tender,
+)
 from app.tender_finance.schemas import TenderFinanceUpsert
 from app.tender_finance.service import (
     ScopedNotFoundError as FinanceScopedNotFoundError,
@@ -195,6 +201,7 @@ def _humanize_risk_flag(flag: str) -> str:
 
 def _translate_action_name(action: str | None) -> str:
     action_map = {
+        "upload": "загрузка документа",
         "extract": "извлечение требований",
         "risk": "расчет риска",
         "engine": "пересчет рекомендации",
@@ -209,6 +216,96 @@ def _is_recommendation_category(category: str | None) -> bool:
         return False
     normalized = str(category)
     return normalized in {"go", "no_go", "unsure"} or normalized.startswith("recommendation")
+
+
+def _has_finance_values(finance) -> bool:
+    if not finance:
+        return False
+    return any(
+        getattr(finance, field, None) is not None
+        for field in ("cost_estimate", "participation_cost", "win_probability")
+    )
+
+
+def _build_detail_flow(
+    *,
+    documents_count: int,
+    analysis,
+    risk_score: int | None,
+    finance,
+    decision,
+    package,
+) -> tuple[list[dict[str, str]], dict[str, bool], dict[str, str], str | None]:
+    has_documents = documents_count > 0
+    analysis_status = analysis.status if analysis else "none"
+    requirements = analysis.requirements if analysis and isinstance(analysis.requirements, dict) else {}
+    has_requirements = bool(analysis and (requirements or analysis_status in {"ready", "approved"}))
+    has_risk = risk_score is not None
+    has_finance = _has_finance_values(finance)
+    recommendation = decision.recommendation if decision else None
+    has_recommendation = recommendation in {"go", "no_go", "unsure"}
+    is_go = recommendation == "go"
+    has_package = bool(package and package.files)
+
+    can_extract = has_documents
+    can_risk = has_requirements
+    can_recompute = has_finance
+    can_package = has_documents and has_requirements and is_go
+
+    reasons = {
+        "extract": "" if can_extract else "Сначала загрузите документы тендера",
+        "risk": "" if can_risk else "Сначала извлеките требования",
+        "recompute": "" if can_recompute else "Заполните финансовые параметры",
+        "package": "",
+    }
+    if not can_package:
+        if not has_documents:
+            reasons["package"] = "Загрузите документы"
+        elif not has_requirements:
+            reasons["package"] = "Сначала извлеките требования"
+        else:
+            reasons["package"] = "Пакет доступен только при решении «Участвовать»"
+
+    steps = [
+        {"name": "Документы", "state": "готово" if has_documents else "нужно"},
+        {"name": "Требования", "state": "готово" if has_requirements else "нужно"},
+        {"name": "Риск", "state": "готово" if has_risk else "нужно"},
+        {"name": "Финансовые параметры", "state": "готово" if has_finance else "нужно"},
+        {"name": "Рекомендация", "state": "готово" if has_recommendation else "нужно"},
+        {"name": "Пакет документов", "state": "готово" if has_package else "нужно"},
+    ]
+
+    next_step = None
+    if not has_documents:
+        next_step = "Загрузите документы тендера"
+    elif not has_requirements:
+        next_step = "Извлеките требования"
+    elif not has_risk:
+        next_step = "Рассчитайте риск"
+    elif not has_finance:
+        next_step = "Заполните финансовые параметры"
+    elif not has_recommendation:
+        next_step = "Пересчитайте рекомендацию"
+    elif not has_package and is_go:
+        next_step = "Сформируйте пакет документов"
+
+    actions = {
+        "can_extract": can_extract,
+        "can_risk": can_risk,
+        "can_recompute": can_recompute,
+        "can_package": can_package,
+    }
+    return steps, actions, reasons, next_step
+
+
+def _friendly_extract_error(exc: Exception) -> tuple[str, str]:
+    text = str(exc)
+    normalized = text.lower()
+    if "no documents" in normalized or "документ" in normalized:
+        return "Загрузите документы тендера (шаг 1)", "Следующий шаг: загрузите хотя бы один документ"
+    if "no extractable text" in normalized:
+        return "Не удалось извлечь текст из документов", "Следующий шаг: загрузите документ в формате PDF/DOCX/TXT"
+    return "Извлечение не выполнено", text
 
 
 templates.env.filters["analysis_status_ru"] = lambda value: _translate(value, ANALYSIS_STATUS_RU)
@@ -648,6 +745,14 @@ async def tender_detail_page(
 
     risk_score = _extract_risk_score(analysis, decision)
     risk_flags_top = _top_risk_flags(analysis)
+    tender_flow_steps, action_availability, disabled_reasons, next_step = _build_detail_flow(
+        documents_count=len(documents),
+        analysis=analysis,
+        risk_score=risk_score,
+        finance=finance,
+        decision=decision,
+        package=package,
+    )
 
     return templates.TemplateResponse(
         "tender_detail.html",
@@ -672,6 +777,10 @@ async def tender_detail_page(
                 "ingestion": _ingestion_status(company) if company else {},
             },
             finance_meta=decision.engine_meta.get("finance") if decision and isinstance(decision.engine_meta, dict) else None,
+            tender_flow_steps=tender_flow_steps,
+            action_availability=action_availability,
+            disabled_reasons=disabled_reasons,
+            next_step=next_step,
             action_result={
                 "action": _translate_action_name(action),
                 "status": "успешно" if action_status == "ok" else ("ошибка" if action_status == "error" else "-"),
@@ -689,6 +798,19 @@ async def web_extract_tender(
     current_user: User = Depends(get_current_user_from_cookie),
 ):
     try:
+        documents = await list_documents_for_tender(db, company_id=current_user.company_id, tender_id=tender_id)
+    except DocumentScopedNotFoundError:
+        return _redirect_with_action(tender_id, "extract", False, "Тендер не найден")
+    if not documents:
+        return _redirect_with_action(
+            tender_id,
+            "extract",
+            False,
+            "Загрузите документы тендера (шаг 1)",
+            "Следующий шаг: загрузите хотя бы один документ и повторите извлечение",
+        )
+
+    try:
         analysis, _ = await run_extraction(
             db,
             company_id=current_user.company_id,
@@ -697,11 +819,18 @@ async def web_extract_tender(
             document_ids=None,
         )
         analysis_label = _translate(analysis.status, ANALYSIS_STATUS_RU)
-        return _redirect_with_action(tender_id, "extract", True, f"Извлечение завершено. Статус анализа: {analysis_label}")
+        return _redirect_with_action(
+            tender_id,
+            "extract",
+            True,
+            f"Извлечение завершено. Статус анализа: {analysis_label}",
+            "Следующий шаг: рассчитайте риск (шаг 3)",
+        )
     except (ScopedNotFoundError,):
         return _redirect_with_action(tender_id, "extract", False, "Тендер не найден")
     except (ExtractionBadRequestError, NoExtractableTextError) as exc:
-        return _redirect_with_action(tender_id, "extract", False, "Извлечение не выполнено", str(exc))
+        message, details = _friendly_extract_error(exc)
+        return _redirect_with_action(tender_id, "extract", False, message, details)
     except AnalysisConflictError as exc:
         return _redirect_with_action(tender_id, "extract", False, "Извлечение заблокировано", str(exc))
     except ExtractionProviderError as exc:
@@ -727,21 +856,39 @@ async def web_recompute_risk(
         )
     )
     if analysis is None:
-        return _redirect_with_action(tender_id, "risk", False, "Анализ не найден")
+        return _redirect_with_action(
+            tender_id,
+            "risk",
+            False,
+            "Сначала извлеките требования (шаг 2)",
+            "Следующий шаг: нажмите «Извлечь требования»",
+        )
 
     if analysis.status == "approved":
         return _redirect_with_action(tender_id, "risk", False, "Нельзя изменять утвержденный анализ")
 
     extracted_payload = (analysis.requirements or {}).get("extracted_v1")
     if extracted_payload is None:
-        return _redirect_with_action(tender_id, "risk", False, "Нет данных после извлечения")
+        return _redirect_with_action(
+            tender_id,
+            "risk",
+            False,
+            "Сначала извлеките требования (шаг 2)",
+            "Следующий шаг: запустите извлечение требований",
+        )
 
     try:
         from app.ai_extraction.schemas import ExtractedTenderV1
 
         extracted = ExtractedTenderV1.model_validate(extracted_payload)
     except Exception:
-        return _redirect_with_action(tender_id, "risk", False, "Некорректные данные extracted_v1")
+        return _redirect_with_action(
+            tender_id,
+            "risk",
+            False,
+            "Не удалось прочитать данные извлечения",
+            "Следующий шаг: повторите извлечение требований",
+        )
 
     risk_flags = compute_risk_flags(extracted, tender)
     risk_v1 = compute_risk_score_v1(extracted, tender)
@@ -807,9 +954,24 @@ async def web_generate_tender_package(
             f"Пакет сформирован ({len(generated_files)} файлов)",
         )
     except DocumentModuleNotFoundError as exc:
-        return _redirect_with_action(tender_id, "package", False, "Не удалось сформировать пакет", str(exc))
+        return _redirect_with_action(
+            tender_id,
+            "package",
+            False,
+            "Не удалось сформировать пакет",
+            "Следующий шаг: проверьте документы и извлечение требований",
+        )
     except DocumentModuleConflictError as exc:
-        return _redirect_with_action(tender_id, "package", False, "Формирование пакета заблокировано", str(exc))
+        detail = str(exc)
+        if "decision is not go" in detail.lower():
+            return _redirect_with_action(
+                tender_id,
+                "package",
+                False,
+                "Сначала получите решение «Участвовать» (шаг 5)",
+                "Следующий шаг: заполните финпараметры и пересчитайте рекомендацию",
+            )
+        return _redirect_with_action(tender_id, "package", False, "Формирование пакета заблокировано", detail)
     except DocumentModuleValidationError as exc:
         return _redirect_with_action(tender_id, "package", False, "Профиль компании заполнен не полностью", str(exc))
 
@@ -869,6 +1031,36 @@ async def web_upsert_finance(
             )
 
     return _redirect_with_action(tender_id, "finance", True, "Финансовые параметры сохранены")
+
+
+@router.post("/tenders/{tender_id}/documents/upload")
+async def web_upload_tender_document(
+    tender_id: UUID,
+    file: UploadFile = File(...),
+    doc_type: str | None = Form(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_cookie),
+):
+    try:
+        document = await create_document_for_tender(
+            db,
+            company_id=current_user.company_id,
+            tender_id=tender_id,
+            uploaded_by=current_user.id,
+            file=file,
+            doc_type=doc_type,
+        )
+        return _redirect_with_action(
+            tender_id,
+            "upload",
+            True,
+            f"Документ загружен: {document.file_name}",
+            "Следующий шаг: извлеките требования (шаг 2)",
+        )
+    except DocumentScopedNotFoundError:
+        return _redirect_with_action(tender_id, "upload", False, "Тендер не найден")
+    except DocumentStorageError as exc:
+        return _redirect_with_action(tender_id, "upload", False, "Не удалось сохранить файл", str(exc))
 
 
 @router.get("/tender-documents/{document_id}/download")
