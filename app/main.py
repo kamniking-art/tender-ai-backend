@@ -1,3 +1,8 @@
+import os
+from datetime import datetime, timezone
+
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from fastapi import FastAPI
 
 from app.auth import router as auth_router
@@ -14,6 +19,9 @@ from app.tenders import router as tenders_router
 from app.users import router as users_router
 
 app = FastAPI(title="Tender AI Backend Core", version="1.0.0")
+
+_APP_BUILT_AT = os.getenv("APP_BUILT_AT") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+_APP_VERSION = os.getenv("APP_VERSION", "unknown")
 
 app.include_router(auth_router)
 app.include_router(companies_router)
@@ -32,6 +40,23 @@ app.include_router(users_router)
 @app.get("/health")
 async def health() -> dict[str, bool]:
     return {"ok": True}
+
+
+def _get_migrations_head() -> str:
+    try:
+        script = ScriptDirectory.from_config(Config("alembic.ini"))
+        return script.get_current_head() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+@app.get("/version")
+async def version() -> dict[str, str]:
+    return {
+        "version": _APP_VERSION,
+        "built_at": _APP_BUILT_AT,
+        "migrations_head": _get_migrations_head(),
+    }
 
 
 @app.on_event("startup")

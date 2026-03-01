@@ -12,7 +12,11 @@ services:
       - tender_ai_pgdata:/var/lib/postgresql/data
 
   tender_ai_app:
-    build: .
+    build:
+      context: .
+      args:
+        APP_VERSION: ${APP_VERSION:-unknown}
+        APP_BUILT_AT: ${APP_BUILT_AT:-unknown}
     restart: unless-stopped
     env_file:
       - .env

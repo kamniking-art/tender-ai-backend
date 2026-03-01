@@ -19,7 +19,23 @@ docker compose up --build
 ```
 
 - API docs: <http://localhost:8000/docs>
+- Version: <http://localhost:8000/version>
 - PostgreSQL: `localhost:5433`
+
+## Standard deploy (git-based)
+
+Use deploy script from repo root:
+
+```bash
+cd /opt/tender_ai_backend
+./scripts/deploy.sh
+```
+
+Script does:
+- `git pull --ff-only`
+- `docker compose up -d --build`
+- `docker compose exec tender_ai_app alembic upgrade head`
+- `curl http://127.0.0.1:8000/version`
 
 ## Migrations
 
