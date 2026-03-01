@@ -365,3 +365,28 @@ To allow automatic demo import when `dataset_ids` is empty:
   }
 }
 ```
+
+## Tender alerts digest
+
+### Summary counts
+
+```bash
+curl "http://localhost:8000/alerts/summary" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Digest items
+
+```bash
+curl "http://localhost:8000/alerts/tenders?include_acknowledged=false" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Acknowledge alert item
+
+```bash
+curl -X POST "http://localhost:8000/alerts/tenders/<TENDER_ID>/ack" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"category":"deadline_soon"}'
+```

@@ -10,6 +10,7 @@ from app.tender_decisions import model as tender_decision  # noqa: F401
 from app.tender_tasks import model as tender_task  # noqa: F401
 from app.models import company, user  # noqa: F401
 from app.tender_documents import model as tender_document  # noqa: F401
+from app.tender_alerts import model as tender_alert  # noqa: F401
 from app.tenders import model as tender  # noqa: F401
 
 config = context.config
