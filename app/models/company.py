@@ -3,6 +3,7 @@ from datetime import datetime
 
 from sqlalchemy import DateTime, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -19,6 +20,7 @@ class Company(Base):
     bank_details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     scoring_settings: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     finance_settings: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    ingestion_settings: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     users: Mapped[list["User"]] = relationship("User", back_populates="company", cascade="all, delete-orphan")
