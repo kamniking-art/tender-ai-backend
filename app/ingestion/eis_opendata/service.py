@@ -41,7 +41,10 @@ async def list_available_datasets(settings: EISOpenDataSettings, q: str, limit: 
                 dataset_id=ds.dataset_id,
                 title=ds.title,
                 updated_at=ds.updated_at,
-                files_count=len(ds.resources),
+                files=[
+                    {"name": r.name, "url": r.url, "updated_at": r.updated_at, "size": r.size, "format": r.format}
+                    for r in ds.resources
+                ],
             )
             for ds in datasets
         ]

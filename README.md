@@ -324,3 +324,23 @@ curl -X POST "http://localhost:8000/ingestion/eis-opendata/run-once" \
 
 Expected log pattern:
 `EIS_OPENDATA ingestion done: company_id=... datasets=N files=M inserted=X updated=Y skipped=Z duration_ms=...`
+
+## EIS OpenData discovery (RU)
+
+```bash
+cd /opt/tender_ai_backend
+bash scripts/diag_eis_opendata_discovery.sh /root/opendata_discovery.txt
+```
+
+Script saves:
+- OpenData HTML status/body sample
+- script links from page
+- API-like strings from HTML/JS
+- probe of typical opendata URLs
+
+## EIS public maintenance cooldown
+
+If `eis_public` receives HTTP `434` or maintenance markers in body, ingestion sets:
+`ingestion_settings.eis_public.state.cooldown_until = now + 6h`
+
+Scheduler skips `eis_public` runs for the company until cooldown expires.

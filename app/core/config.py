@@ -17,5 +17,11 @@ class Settings(BaseSettings):
     documents_subdir: str = "tender_docs"
     task_sla_check_interval_minutes: int = 5
 
+    # EIS OpenData discovery/config
+    eis_opendata_base_url: str = "https://zakupki.gov.ru"
+    eis_opendata_search_path: str = "/epz/opendata/search/results.html"
+    eis_opendata_search_api_url: str | None = None
+    eis_opendata_dataset_api_url: str | None = None
+
 
 settings = Settings()

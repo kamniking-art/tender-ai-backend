@@ -6,6 +6,17 @@ import httpx
 
 logger = logging.getLogger("uvicorn.error")
 
+_MAINTENANCE_MARKERS = (
+    "регламентных работ",
+    "проведении регламентных работ",
+    "служба технической поддержки",
+    "недоступен официальный сайт",
+)
+
+
+class EISPublicMaintenanceError(Exception):
+    pass
+
 
 class EISPublicClient:
     def __init__(self, timeout_sec: int = 20, rate_limit_rps: float = 0.5) -> None:
@@ -32,13 +43,21 @@ class EISPublicClient:
                 response = await self._client.get(url, params=params)
                 logger.info("ingestion http: status=%s url=%s", response.status_code, str(response.url))
 
+                text = response.text or ""
+                if response.status_code == 434:
+                    raise EISPublicMaintenanceError("EIS public returned 434")
+                if _looks_like_maintenance(text):
+                    raise EISPublicMaintenanceError("EIS public maintenance page detected")
+
                 if response.status_code >= 500 and attempt < len(backoff):
                     await asyncio.sleep(backoff[attempt])
                     continue
                 if response.status_code >= 400:
                     return None
 
-                return response.text
+                return text
+            except EISPublicMaintenanceError:
+                raise
             except httpx.TimeoutException:
                 logger.warning("ingestion timeout: url=%s attempt=%s", url, attempt + 1)
                 if attempt < len(backoff):
@@ -59,3 +78,8 @@ class EISPublicClient:
         if elapsed < min_interval:
             await asyncio.sleep(min_interval - elapsed)
         self._last_request_ts = time.monotonic()
+
+
+def _looks_like_maintenance(text: str) -> bool:
+    lower = text.lower()
+    return any(marker in lower for marker in _MAINTENANCE_MARKERS)

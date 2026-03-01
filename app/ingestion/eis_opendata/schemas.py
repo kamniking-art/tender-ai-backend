@@ -37,11 +37,19 @@ class IngestionSettingsPatch(BaseModel):
     eis_opendata: EISOpenDataSettings | None = None
 
 
+class EISDatasetFile(BaseModel):
+    name: str | None = None
+    url: str
+    updated_at: datetime | None = None
+    size: int | None = None
+    format: str | None = None
+
+
 class EISDatasetSummary(BaseModel):
     dataset_id: str
     title: str | None = None
     updated_at: datetime | None = None
-    files_count: int = 0
+    files: list[EISDatasetFile] = Field(default_factory=list)
 
 
 @dataclass
@@ -50,6 +58,8 @@ class DatasetResource:
     name: str | None = None
     updated_at: datetime | None = None
     version: str | None = None
+    size: int | None = None
+    format: str | None = None
 
 
 @dataclass
