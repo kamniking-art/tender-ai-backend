@@ -5,7 +5,7 @@
 
 <section class="card">
   <h2>Фильтры</h2>
-  <form method="get" action="/web/tenders" class="filters">
+  <form method="get" action="/web/tenders" class="filters" id="tenders-filters-form">
     <label>Поиск
       <input type="text" name="q" value="{{ filters.q }}" placeholder="номер/название/заказчик" />
     </label>
@@ -133,4 +133,20 @@
   <p>Тендеры не найдены.</p>
   {% endif %}
 </section>
+<script>
+  (function () {
+    const form = document.getElementById('tenders-filters-form');
+    if (!form) return;
+    form.addEventListener('submit', function () {
+      const riskMin = form.querySelector('input[name=\"risk_min\"]');
+      const riskMax = form.querySelector('input[name=\"risk_max\"]');
+      if (riskMin && riskMin.value.trim() === '') {
+        riskMin.disabled = true;
+      }
+      if (riskMax && riskMax.value.trim() === '') {
+        riskMax.disabled = true;
+      }
+    });
+  })();
+</script>
 {% endblock %}

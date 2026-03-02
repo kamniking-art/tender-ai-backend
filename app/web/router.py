@@ -370,6 +370,32 @@ def _parse_bool(value: str | None) -> bool:
     return value.lower() in {"1", "true", "yes", "on"}
 
 
+def _parse_optional_int(value: str | None, *, field: str, ge: int | None = None, le: int | None = None) -> int | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if normalized == "":
+        return None
+    try:
+        parsed = int(normalized)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid integer for {field}: {value}",
+        ) from exc
+    if ge is not None and parsed < ge:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{field} must be >= {ge}",
+        )
+    if le is not None and parsed > le:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{field} must be <= {le}",
+        )
+    return parsed
+
+
 def _query_string(params: dict[str, object]) -> str:
     filtered = {k: v for k, v in params.items() if v not in (None, "", False)}
     if not filtered:
@@ -559,8 +585,8 @@ async def tenders_page(
     analysis_status: str | None = Query(default=None),
     decision_filter: str | None = Query(default=None, alias="decision"),
     source_filter: str | None = Query(default=None, alias="source"),
-    risk_min: int | None = Query(default=None, ge=0, le=100),
-    risk_max: int | None = Query(default=None, ge=0, le=100),
+    risk_min: str | None = Query(default=None),
+    risk_max: str | None = Query(default=None),
     risky_only: str | None = Query(default=None),
     deadline_from: str | None = Query(default=None),
     deadline_to: str | None = Query(default=None),
@@ -573,6 +599,8 @@ async def tenders_page(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_from_cookie),
 ):
+    parsed_risk_min = _parse_optional_int(risk_min, field="risk_min", ge=0, le=100)
+    parsed_risk_max = _parse_optional_int(risk_max, field="risk_max", ge=0, le=100)
     parsed_deadline_from = _parse_optional_datetime(deadline_from)
     parsed_deadline_to = _parse_optional_datetime(deadline_to)
     parsed_published_from = _parse_optional_datetime(published_from)
@@ -658,13 +686,13 @@ async def tenders_page(
         stmt = stmt.where(effective_risk_score >= 70)
         count_stmt = count_stmt.where(effective_risk_score >= 70)
 
-    if risk_min is not None:
-        stmt = stmt.where(effective_risk_score >= risk_min)
-        count_stmt = count_stmt.where(effective_risk_score >= risk_min)
+    if parsed_risk_min is not None:
+        stmt = stmt.where(effective_risk_score >= parsed_risk_min)
+        count_stmt = count_stmt.where(effective_risk_score >= parsed_risk_min)
 
-    if risk_max is not None:
-        stmt = stmt.where(effective_risk_score <= risk_max)
-        count_stmt = count_stmt.where(effective_risk_score <= risk_max)
+    if parsed_risk_max is not None:
+        stmt = stmt.where(effective_risk_score <= parsed_risk_max)
+        count_stmt = count_stmt.where(effective_risk_score <= parsed_risk_max)
 
     total = int((await db.execute(count_stmt)).scalar_one() or 0)
     offset = (page - 1) * page_size
@@ -682,8 +710,8 @@ async def tenders_page(
         "analysis_status": analysis_status or "",
         "decision": decision_filter or "",
         "source": source_filter or "",
-        "risk_min": risk_min if risk_min is not None else "",
-        "risk_max": risk_max if risk_max is not None else "",
+        "risk_min": parsed_risk_min if parsed_risk_min is not None else "",
+        "risk_max": parsed_risk_max if parsed_risk_max is not None else "",
         "risky_only": "true" if _parse_bool(risky_only) else "",
         "deadline_from": deadline_from or "",
         "deadline_to": deadline_to or "",
