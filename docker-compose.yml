@@ -17,6 +17,9 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      APP_VERSION: ${APP_VERSION:-unknown}
+      APP_BUILT_AT: ${APP_BUILT_AT:-unknown}
     depends_on:
       - tender_ai_db
     ports:
