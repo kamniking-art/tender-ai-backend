@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     ai_extractor_timeout_sec: int = 60
     ai_extractor_max_chars: int = 120000
     ai_extractor_mode: str = "mock"
+    auth_disabled: str = "false"
+    ingestion_run_once_cooldown_minutes: int = 10
+
+    @property
+    def auth_disabled_enabled(self) -> bool:
+        return str(self.auth_disabled).strip().lower() in {"1", "true", "yes", "on"}
 
 
 settings = Settings()
