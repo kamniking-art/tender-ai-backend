@@ -22,6 +22,52 @@ _RUN_ONCE_GUARD_LOCK = asyncio.Lock()
 _RUN_ONCE_LAST_CALLED_AT: dict[str, float] = {}
 
 
+async def _get_ingestion_current_user(
+    current_user: User | None = Depends(get_current_user_optional),
+) -> User | None:
+    if settings.auth_disabled_enabled:
+        return current_user
+    if current_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return current_user
+
+
+async def _get_company_for_user(db: AsyncSession, current_user: User | None) -> Company:
+    company: Company | None
+
+    if current_user is None:
+        company = await db.scalar(select(Company).order_by(Company.created_at.asc()))
+    else:
+        company = await db.scalar(select(Company).where(Company.id == current_user.company_id))
+
+    if company is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    return company
+
+
+async def _enforce_run_once_rate_limit(company: Company) -> None:
+    if not settings.auth_disabled_enabled:
+        return
+
+    cooldown_seconds = max(60, settings.ingestion_run_once_cooldown_minutes * 60)
+    now = time.monotonic()
+    key = str(company.id)
+
+    async with _RUN_ONCE_GUARD_LOCK:
+        last_called_at = _RUN_ONCE_LAST_CALLED_AT.get(key)
+        if last_called_at is not None and now - last_called_at < cooldown_seconds:
+            retry_after = int(cooldown_seconds - (now - last_called_at))
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Run-once rate limit is active. Retry in {retry_after} seconds.",
+            )
+        _RUN_ONCE_LAST_CALLED_AT[key] = now
+
+
 @settings_router.get("")
 async def get_ingestion_settings(
     db: AsyncSession = Depends(get_db),
@@ -118,52 +164,6 @@ async def get_ingestion_health(
         },
         "scheduler": snapshot,
     }
-
-
-async def _get_company_for_user(db: AsyncSession, current_user: User | None) -> Company:
-    company: Company | None
-
-    if current_user is None:
-        company = await db.scalar(select(Company).order_by(Company.created_at.asc()))
-    else:
-        company = await db.scalar(select(Company).where(Company.id == current_user.company_id))
-
-    if company is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
-    return company
-
-
-async def _get_ingestion_current_user(
-    current_user: User | None = Depends(get_current_user_optional),
-) -> User | None:
-    if settings.auth_disabled_enabled:
-        return current_user
-    if current_user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return current_user
-
-
-async def _enforce_run_once_rate_limit(company: Company) -> None:
-    if not settings.auth_disabled_enabled:
-        return
-
-    cooldown_seconds = max(60, settings.ingestion_run_once_cooldown_minutes * 60)
-    now = time.monotonic()
-    key = str(company.id)
-
-    async with _RUN_ONCE_GUARD_LOCK:
-        last_called_at = _RUN_ONCE_LAST_CALLED_AT.get(key)
-        if last_called_at is not None and now - last_called_at < cooldown_seconds:
-            retry_after = int(cooldown_seconds - (now - last_called_at))
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Run-once rate limit is active. Retry in {retry_after} seconds.",
-            )
-        _RUN_ONCE_LAST_CALLED_AT[key] = now
 
 
 def _extract_opendata_settings(settings: dict) -> EISOpenDataSettings:
