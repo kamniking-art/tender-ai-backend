@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_user, get_current_user_optional
+from app.ingestion.eis_opendata.client import EISOpenDataMaintenanceError
 from app.ingestion.eis_opendata.schemas import EISOpenDataSettings, IngestionSettingsPatch
 from app.ingestion.eis_opendata.service import list_available_datasets, run_eis_opendata_once_for_company
 from app.ingestion.scheduler import scheduler as ingestion_scheduler
@@ -107,7 +108,10 @@ async def get_eis_opendata_datasets(
 ) -> list[dict]:
     company = await _get_company_for_user(db, current_user)
     settings = _extract_opendata_settings(company.ingestion_settings or {})
-    datasets = await list_available_datasets(settings=settings, q=q, limit=limit)
+    try:
+        datasets = await list_available_datasets(settings=settings, q=q, limit=limit)
+    except EISOpenDataMaintenanceError:
+        return []
     return [item.model_dump(mode="json") for item in datasets]
 
 
