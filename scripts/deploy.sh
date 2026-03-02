@@ -13,10 +13,10 @@ fi
 
 git pull --ff-only
 
-export APP_VERSION="$(git rev-parse --short HEAD)"
-export APP_BUILT_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-
-docker compose up -d --build
-docker compose exec tender_ai_app alembic upgrade head
+docker compose pull tender_ai_app
+docker compose up -d
+docker compose exec -T tender_ai_app alembic upgrade head
+curl -fsS http://127.0.0.1:8000/health
+echo
 curl -fsS http://127.0.0.1:8000/version
 echo

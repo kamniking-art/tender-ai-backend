@@ -12,11 +12,8 @@ services:
       - tender_ai_pgdata:/var/lib/postgresql/data
 
   tender_ai_app:
-    build:
-      context: .
-      args:
-        APP_VERSION: ${APP_VERSION:-unknown}
-        APP_BUILT_AT: ${APP_BUILT_AT:-unknown}
+    image: ghcr.io/kamniking-art/tender-ai-backend:latest
+    pull_policy: always
     restart: unless-stopped
     env_file:
       - .env
