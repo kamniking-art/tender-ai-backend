@@ -101,6 +101,8 @@ class DiscoveryResult:
     search_api_url: str | None = None
     dataset_api_url: str | None = None
     last_error: str | None = None
+    catalog_url: str | None = None
+    http_status: int | None = None
 
 
 @dataclass
@@ -108,3 +110,4 @@ class ProbeResult:
     ok: bool
     status: Literal["unknown", "maintenance", "ok"]
     last_error: str | None = None
+    http_status: int | None = None

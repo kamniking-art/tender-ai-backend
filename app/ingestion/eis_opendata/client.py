@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import time
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urljoin
@@ -20,7 +21,20 @@ _MAINTENANCE_MARKERS = ("регламентных работ", "техничес
 
 
 class EISOpenDataMaintenanceError(Exception):
-    pass
+    def __init__(self, reason: str, http_status: int | None = None) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.http_status = http_status
+
+
+@dataclass
+class ClientDiagnostics:
+    source_status: str = "ok"
+    reason: str | None = None
+    catalog_url: str | None = None
+    http_status: int | None = None
+    error_count: int = 0
+    errors_sample: list[str] = field(default_factory=list)
 
 
 class EISOpenDataClient:
@@ -41,6 +55,7 @@ class EISOpenDataClient:
         self.dataset_api_url = dataset_api_url or settings.eis_opendata_dataset_api_url
         self._last_request_ts = 0.0
         self._discovered_search_api_url: str | None = None
+        self._diagnostics = ClientDiagnostics()
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(timeout_sec),
             headers={
@@ -55,15 +70,32 @@ class EISOpenDataClient:
     async def close(self) -> None:
         await self._client.aclose()
 
+    def get_diagnostics(self) -> ClientDiagnostics:
+        return self._diagnostics
+
+    def _record_error(self, message: str) -> None:
+        self._diagnostics.error_count += 1
+        if len(self._diagnostics.errors_sample) < 3:
+            self._diagnostics.errors_sample.append(message)
+
     async def discover_endpoints(self) -> DiscoveryResult:
         page_url = _build_page_url(self.base_url, self.search_page_path)
+        self._diagnostics.catalog_url = page_url
         html, error = await self._request_text_limited(page_url, max_bytes=300 * 1024, timeout_sec=min(20, self.timeout_sec))
         if error:
             if "maintenance" in error:
-                return DiscoveryResult(status="maintenance", last_error=error)
-            return DiscoveryResult(status="unknown", last_error=error)
+                self._diagnostics.source_status = "maintenance"
+                self._diagnostics.reason = "maintenance"
+                return DiscoveryResult(status="maintenance", last_error=error, catalog_url=page_url, http_status=self._diagnostics.http_status)
+            self._diagnostics.source_status = "error"
+            self._diagnostics.reason = "catalog_unreachable"
+            self._record_error(error)
+            return DiscoveryResult(status="unknown", last_error=error, catalog_url=page_url, http_status=self._diagnostics.http_status)
         if not html:
-            return DiscoveryResult(status="unknown", last_error="empty_html")
+            self._diagnostics.source_status = "error"
+            self._diagnostics.reason = "catalog_unreachable"
+            self._record_error("empty_html")
+            return DiscoveryResult(status="unknown", last_error="empty_html", catalog_url=page_url, http_status=self._diagnostics.http_status)
 
         scripts = _extract_script_urls(html, base=page_url)[:3]
         chunks = [html]
@@ -77,37 +109,72 @@ class EISOpenDataClient:
             probe = await self.probe_search_endpoint(endpoint)
             if probe.ok:
                 logger.info("EIS_OPENDATA discovery: status=ok search_api_url=%s", endpoint)
-                return DiscoveryResult(status="ok", search_api_url=endpoint, dataset_api_url=self.dataset_api_url)
+                self._diagnostics.source_status = "ok"
+                self._diagnostics.reason = None
+                return DiscoveryResult(
+                    status="ok",
+                    search_api_url=endpoint,
+                    dataset_api_url=self.dataset_api_url,
+                    catalog_url=page_url,
+                    http_status=probe.http_status,
+                )
             if probe.status == "maintenance":
-                return DiscoveryResult(status="maintenance", last_error=probe.last_error)
+                self._diagnostics.source_status = "maintenance"
+                self._diagnostics.reason = "maintenance"
+                return DiscoveryResult(
+                    status="maintenance",
+                    last_error=probe.last_error,
+                    catalog_url=page_url,
+                    http_status=probe.http_status,
+                )
 
         logger.warning("EIS_OPENDATA discovery: status=unknown reason=no_working_endpoint")
-        return DiscoveryResult(status="unknown", last_error="no_working_endpoint")
+        self._diagnostics.source_status = "error"
+        self._diagnostics.reason = "no_datasets_match_query"
+        return DiscoveryResult(
+            status="unknown",
+            last_error="no_working_endpoint",
+            catalog_url=page_url,
+            http_status=self._diagnostics.http_status,
+        )
 
     async def probe_search_endpoint(self, endpoint: str, q: str = "закуп", limit: int = 1) -> ProbeResult:
         response, error = await self._raw_get(endpoint, params={"q": q, "limit": limit, "offset": 0}, timeout_sec=min(20, self.timeout_sec))
         if error:
-            return ProbeResult(ok=False, status="unknown", last_error=error)
+            self._record_error(error)
+            return ProbeResult(ok=False, status="unknown", last_error=error, http_status=self._diagnostics.http_status)
         if response is None:
-            return ProbeResult(ok=False, status="unknown", last_error="no_response")
+            self._record_error("no_response")
+            return ProbeResult(ok=False, status="unknown", last_error="no_response", http_status=self._diagnostics.http_status)
 
         text = response.text or ""
         if response.status_code == 434 or _looks_like_maintenance(text):
-            return ProbeResult(ok=False, status="maintenance", last_error=f"maintenance_http_{response.status_code}")
+            return ProbeResult(
+                ok=False,
+                status="maintenance",
+                last_error=f"maintenance_http_{response.status_code}",
+                http_status=response.status_code,
+            )
         if response.status_code >= 400:
-            return ProbeResult(ok=False, status="unknown", last_error=f"http_{response.status_code}")
+            self._record_error(f"http_{response.status_code}")
+            return ProbeResult(ok=False, status="unknown", last_error=f"http_{response.status_code}", http_status=response.status_code)
 
         ctype = (response.headers.get("content-type") or "").lower()
         if "json" not in ctype and not text.lstrip().startswith(("{", "[")):
-            return ProbeResult(ok=False, status="unknown", last_error="non_json_response")
+            self._record_error("non_json_response")
+            return ProbeResult(ok=False, status="unknown", last_error="non_json_response", http_status=response.status_code)
 
         try:
             payload = response.json()
         except json.JSONDecodeError:
-            return ProbeResult(ok=False, status="unknown", last_error="invalid_json")
+            self._record_error("invalid_json")
+            return ProbeResult(ok=False, status="unknown", last_error="invalid_json", http_status=response.status_code)
 
-        _ = self._parse_datasets_from_payload(payload)
-        return ProbeResult(ok=True, status="ok")
+        parsed = self._parse_datasets_from_payload(payload)
+        if not parsed:
+            self._record_error("no_datasets_in_payload")
+            return ProbeResult(ok=False, status="unknown", last_error="no_datasets_in_payload", http_status=response.status_code)
+        return ProbeResult(ok=True, status="ok", http_status=response.status_code)
 
     async def search_datasets(self, q: str, limit: int = 20, offset: int = 0) -> list[DatasetMeta]:
         return await self.list_datasets(q=q, limit=limit, offset=offset)
@@ -117,10 +184,12 @@ class EISOpenDataClient:
         if not search_apis:
             discovery = await self.discover_endpoints()
             if discovery.status == "maintenance":
-                raise EISOpenDataMaintenanceError(discovery.last_error or "maintenance")
+                raise EISOpenDataMaintenanceError(discovery.last_error or "maintenance", http_status=discovery.http_status)
             if discovery.status == "ok" and discovery.search_api_url:
                 self._discovered_search_api_url = discovery.search_api_url
                 search_apis.append(discovery.search_api_url)
+            else:
+                self._record_error(discovery.last_error or "catalog_unreachable")
 
         for endpoint in search_apis:
             payload = await self._query_search_endpoint(endpoint, q=q, limit=limit, offset=offset)
@@ -140,6 +209,12 @@ class EISOpenDataClient:
                 parsed = self._parse_single_dataset(payload)
                 if parsed is not None:
                     return parsed
+            return DatasetMeta(
+                dataset_id=dataset_id,
+                title="Known dataset fallback",
+                updated_at=None,
+                resources=[DatasetResource(url=dataset_id, name=dataset_id.rsplit("/", 1)[-1] or "dataset.bin")],
+            )
 
         candidate_endpoints = [self.dataset_api_url, self._discovered_search_api_url, self.search_api_url]
         for endpoint in [x for x in candidate_endpoints if x]:
@@ -191,14 +266,17 @@ class EISOpenDataClient:
     async def _request_text_limited(self, url: str, max_bytes: int, timeout_sec: int) -> tuple[str | None, str | None]:
         response, error = await self._raw_get(url, params=None, timeout_sec=timeout_sec)
         if error:
+            self._record_error(error)
             return None, error
         if response is None:
+            self._record_error("no_response")
             return None, "no_response"
 
         body = response.text or ""
         if response.status_code == 434 or _looks_like_maintenance(body):
             return None, f"maintenance_http_{response.status_code}"
         if response.status_code >= 400:
+            self._record_error(f"http_{response.status_code}")
             return None, f"http_{response.status_code}"
         if len(body.encode("utf-8", errors="ignore")) > max_bytes:
             body = body[: max_bytes // 2]
@@ -211,6 +289,8 @@ class EISOpenDataClient:
             try:
                 response = await self._client.get(url, params=params, timeout=timeout_sec)
                 logger.info("eis_opendata http: status=%s url=%s", response.status_code, str(response.url))
+                self._diagnostics.http_status = response.status_code
+                self._diagnostics.catalog_url = str(response.url)
                 if response.status_code >= 500 and attempt < len(backoff):
                     await asyncio.sleep(backoff[attempt])
                     continue
@@ -219,11 +299,13 @@ class EISOpenDataClient:
                 if attempt < len(backoff):
                     await asyncio.sleep(backoff[attempt])
                     continue
+                self._record_error("timeout_or_network")
                 return None, "timeout_or_network"
             except httpx.HTTPError:
                 if attempt < len(backoff):
                     await asyncio.sleep(backoff[attempt])
                     continue
+                self._record_error("http_error")
                 return None, "http_error"
         return None, "unknown_error"
 
@@ -258,20 +340,24 @@ class EISOpenDataClient:
     async def _request_json(self, url: str, params: dict | None = None) -> dict | list | None:
         response, _ = await self._raw_get(url, params=params, timeout_sec=self.timeout_sec)
         if response is None:
+            self._record_error("no_response")
             return None
 
         text = response.text or ""
         if response.status_code == 434 or _looks_like_maintenance(text):
-            raise EISOpenDataMaintenanceError("maintenance")
+            raise EISOpenDataMaintenanceError("maintenance", http_status=response.status_code)
         if response.status_code >= 400:
+            self._record_error(f"http_{response.status_code}")
             return None
 
         ctype = (response.headers.get("content-type") or "").lower()
         if "json" not in ctype and not text.lstrip().startswith(("{", "[")):
+            self._record_error("non_json_response")
             return None
         try:
             return response.json()
         except json.JSONDecodeError:
+            self._record_error("invalid_json")
             return None
 
     async def _respect_rate_limit(self) -> None:

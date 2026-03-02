@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
@@ -10,9 +10,10 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings as app_settings
 from app.ingestion.eis_opendata.client import EISOpenDataClient, EISOpenDataMaintenanceError
 from app.ingestion.eis_opendata.parser import iter_candidates_from_file
-from app.ingestion.eis_opendata.schemas import EISDatasetSummary, EISOpenDataSettings, OpenDataCandidate
+from app.ingestion.eis_opendata.schemas import DatasetMeta, EISDatasetSummary, EISOpenDataSettings, OpenDataCandidate
 from app.ingestion.eis_opendata.state import mark_dataset_processed, should_process_resource
 from app.models import Company
 from app.tenders.model import Tender
@@ -28,9 +29,27 @@ class OpenDataRunStats:
     inserted_count: int = 0
     updated_count: int = 0
     skipped_count: int = 0
+    stage: str = "discover"
+    reason: str | None = None
+    source_status: str = "ok"
+    catalog_url: str | None = None
+    http_status: int | None = None
+    error_count: int = 0
+    errors_sample: list[str] = field(default_factory=list)
 
 
-async def list_available_datasets(settings: EISOpenDataSettings, q: str, limit: int = 20) -> list[EISDatasetSummary]:
+@dataclass
+class OpenDataDatasetsResult:
+    source_status: str
+    reason: str | None
+    catalog_url: str | None
+    http_status: int | None
+    items: list[EISDatasetSummary]
+    error_count: int = 0
+    errors_sample: list[str] = field(default_factory=list)
+
+
+async def list_available_datasets(settings: EISOpenDataSettings, q: str, limit: int = 20) -> OpenDataDatasetsResult:
     client = EISOpenDataClient(
         timeout_sec=settings.download_timeout_sec,
         rate_limit_rps=settings.rate_limit_rps,
@@ -39,7 +58,12 @@ async def list_available_datasets(settings: EISOpenDataSettings, q: str, limit: 
     )
     try:
         datasets = await client.list_datasets(q=q, limit=limit)
-        return [
+        if not datasets and app_settings.allow_known_datasets_fallback and app_settings.known_datasets_list:
+            datasets = [
+                await _build_known_dataset_meta(client=client, dataset_ref=dataset_ref)
+                for dataset_ref in app_settings.known_datasets_list[:3]
+            ]
+        items = [
             EISDatasetSummary(
                 dataset_id=ds.dataset_id,
                 title=ds.title,
@@ -51,6 +75,28 @@ async def list_available_datasets(settings: EISOpenDataSettings, q: str, limit: 
             )
             for ds in datasets
         ]
+        diag = client.get_diagnostics()
+        reason = diag.reason if items == [] else None
+        return OpenDataDatasetsResult(
+            source_status=diag.source_status,
+            reason=reason,
+            catalog_url=diag.catalog_url,
+            http_status=diag.http_status,
+            items=items,
+            error_count=diag.error_count,
+            errors_sample=diag.errors_sample[:3],
+        )
+    except EISOpenDataMaintenanceError as exc:
+        diag = client.get_diagnostics()
+        return OpenDataDatasetsResult(
+            source_status="maintenance",
+            reason=exc.reason,
+            catalog_url=diag.catalog_url,
+            http_status=exc.http_status or diag.http_status,
+            items=[],
+            error_count=diag.error_count,
+            errors_sample=diag.errors_sample[:3],
+        )
     finally:
         await client.close()
 
@@ -70,25 +116,43 @@ async def run_eis_opendata_ingestion(db: AsyncSession, company: Company, setting
     )
 
     dataset_ids = list(settings.dataset_ids)
+    stats.catalog_url = client.get_diagnostics().catalog_url
 
     try:
         if not dataset_ids:
             if not settings.allow_demo:
-                logger.warning("EIS_OPENDATA run: inserted=0 updated=0 skipped=0 candidates=0 reason=dataset_ids_empty company_id=%s", company.id)
-                return stats
+                if app_settings.allow_known_datasets_fallback and app_settings.known_datasets_list:
+                    dataset_ids = app_settings.known_datasets_list[:3]
+                    stats.reason = "using_known_datasets_fallback"
+                else:
+                    stats.reason = "dataset_ids_empty"
+                    stats.source_status = "error"
+                    stats.stage = "discover"
+                    logger.warning("EIS_OPENDATA run: inserted=0 updated=0 skipped=0 candidates=0 reason=dataset_ids_empty company_id=%s", company.id)
+                    _fill_stats_from_client(stats, client)
+                    return stats
 
-            search_q = " OR ".join(settings.keywords) if settings.keywords else "закуп"
-            demo_list = await client.search_datasets(q=search_q, limit=20)
-            dataset_ids = [x.dataset_id for x in demo_list[:2]]
             if not dataset_ids:
-                logger.warning("EIS_OPENDATA run: inserted=0 updated=0 skipped=0 candidates=0 reason=demo_no_datasets company_id=%s", company.id)
-                return stats
-            logger.info("dataset_ids empty, using demo datasets: %s", dataset_ids)
+                search_q = " OR ".join(settings.keywords) if settings.keywords else "закуп"
+                demo_list = await client.search_datasets(q=search_q, limit=20)
+                dataset_ids = [x.dataset_id for x in demo_list[:2]]
+                if not dataset_ids:
+                    stats.reason = "no_datasets_match_query"
+                    stats.source_status = "error"
+                    stats.stage = "discover"
+                    logger.warning("EIS_OPENDATA run: inserted=0 updated=0 skipped=0 candidates=0 reason=demo_no_datasets company_id=%s", company.id)
+                    _fill_stats_from_client(stats, client)
+                    return stats
+                logger.info("dataset_ids empty, using demo datasets: %s", dataset_ids)
 
+        stats.stage = "download"
         for dataset_id in dataset_ids:
             dataset = await client.get_dataset(dataset_id)
             if dataset is None:
                 logger.warning("EIS_OPENDATA error: dataset_id=%s reason=dataset_not_found", dataset_id)
+                stats.error_count += 1
+                if len(stats.errors_sample) < 3:
+                    stats.errors_sample.append(f"dataset_not_found:{dataset_id}")
                 continue
 
             stats.datasets_count += 1
@@ -105,14 +169,19 @@ async def run_eis_opendata_ingestion(db: AsyncSession, company: Company, setting
                 ok = await client.download_to(resource.url, download_path)
                 if not ok:
                     logger.warning("EIS_OPENDATA error: dataset_id=%s reason=download_failed file=%s", dataset.dataset_id, resource.url)
+                    stats.error_count += 1
+                    if len(stats.errors_sample) < 3:
+                        stats.errors_sample.append(f"download_failed:{dataset.dataset_id}")
                     continue
 
+                stats.stage = "parse"
                 inserted, updated, skipped, candidates = await _process_downloaded_file(
                     db=db,
                     company_id=company.id,
                     file_path=download_path,
                     settings=settings,
                 )
+                stats.stage = "insert"
                 stats.candidates_count += candidates
                 stats.inserted_count += inserted
                 stats.updated_count += updated
@@ -125,10 +194,19 @@ async def run_eis_opendata_ingestion(db: AsyncSession, company: Company, setting
 
         _persist_company_state(company, settings)
         await db.commit()
+        _fill_stats_from_client(stats, client)
+        stats.stage = "done"
+        if stats.reason is None:
+            stats.reason = "ok"
+        if stats.source_status == "ok" and stats.datasets_count == 0:
+            stats.reason = "no_datasets_match_query"
 
         duration_ms = int((time.perf_counter() - start) * 1000)
         logger.info(
-            "EIS_OPENDATA run: inserted=%s updated=%s skipped=%s candidates=%s company_id=%s datasets=%s files=%s duration_ms=%s",
+            "EIS_OPENDATA run: stage=%s reason=%s source_status=%s inserted=%s updated=%s skipped=%s candidates=%s company_id=%s datasets=%s files=%s duration_ms=%s",
+            stats.stage,
+            stats.reason,
+            stats.source_status,
             stats.inserted_count,
             stats.updated_count,
             stats.skipped_count,
@@ -140,8 +218,22 @@ async def run_eis_opendata_ingestion(db: AsyncSession, company: Company, setting
         )
         return stats
     except EISOpenDataMaintenanceError as exc:
+        stats.stage = "discover"
+        stats.reason = exc.reason
+        stats.source_status = "maintenance"
+        stats.http_status = exc.http_status
+        _fill_stats_from_client(stats, client)
         logger.warning("EIS_OPENDATA run: inserted=0 updated=0 skipped=%s candidates=%s reason=%s company_id=%s", stats.skipped_count, stats.candidates_count, str(exc), company.id)
         return stats
+    except Exception as exc:
+        stats.stage = "error"
+        stats.reason = "job_failed"
+        stats.source_status = "error"
+        stats.error_count += 1
+        if len(stats.errors_sample) < 3:
+            stats.errors_sample.append(exc.__class__.__name__)
+        _fill_stats_from_client(stats, client)
+        raise
     finally:
         await client.close()
 
@@ -268,3 +360,31 @@ def _cleanup_path(path: Path) -> None:
             path.unlink()
     except OSError:
         logger.warning("eis_opendata cleanup warning: path=%s", path)
+
+
+def _fill_stats_from_client(stats: OpenDataRunStats, client: EISOpenDataClient) -> None:
+    diag = client.get_diagnostics()
+    stats.catalog_url = diag.catalog_url
+    stats.http_status = diag.http_status
+    if stats.source_status == "ok":
+        stats.source_status = diag.source_status
+    if stats.reason is None:
+        stats.reason = diag.reason
+    stats.error_count = max(stats.error_count, diag.error_count)
+    for item in diag.errors_sample:
+        if len(stats.errors_sample) >= 3:
+            break
+        if item not in stats.errors_sample:
+            stats.errors_sample.append(item)
+
+
+async def _build_known_dataset_meta(client: EISOpenDataClient, dataset_ref: str) -> DatasetMeta:
+    dataset = await client.get_dataset(dataset_ref)
+    if dataset is not None:
+        return dataset
+    return DatasetMeta(
+        dataset_id=dataset_ref,
+        title="Known dataset fallback",
+        updated_at=None,
+        resources=[],
+    )

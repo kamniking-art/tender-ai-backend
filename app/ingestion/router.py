@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_user, get_current_user_optional
-from app.ingestion.eis_opendata.client import EISOpenDataMaintenanceError
 from app.ingestion.eis_opendata.schemas import EISOpenDataSettings, IngestionSettingsPatch
 from app.ingestion.eis_opendata.service import list_available_datasets, run_eis_opendata_once_for_company
 from app.ingestion.scheduler import scheduler as ingestion_scheduler
@@ -41,7 +40,13 @@ async def _get_company_for_user(db: AsyncSession, current_user: User | None) -> 
     company: Company | None
 
     if current_user is None:
-        company = await db.scalar(select(Company).order_by(Company.created_at.asc()))
+        company_id = await db.scalar(
+            select(User.company_id).where(User.email == settings.auth_disabled_company_email).limit(1)
+        )
+        if company_id is not None:
+            company = await db.scalar(select(Company).where(Company.id == company_id))
+        else:
+            company = await db.scalar(select(Company).order_by(Company.created_at.asc()))
     else:
         company = await db.scalar(select(Company).where(Company.id == current_user.company_id))
 
@@ -105,14 +110,19 @@ async def get_eis_opendata_datasets(
     limit: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(_get_ingestion_current_user),
-) -> list[dict]:
+) -> dict:
     company = await _get_company_for_user(db, current_user)
     settings = _extract_opendata_settings(company.ingestion_settings or {})
-    try:
-        datasets = await list_available_datasets(settings=settings, q=q, limit=limit)
-    except EISOpenDataMaintenanceError:
-        return []
-    return [item.model_dump(mode="json") for item in datasets]
+    result = await list_available_datasets(settings=settings, q=q, limit=limit)
+    return {
+        "source_status": result.source_status,
+        "reason": result.reason,
+        "catalog_url": result.catalog_url,
+        "http_status": result.http_status,
+        "error_count": result.error_count,
+        "errors_sample": result.errors_sample,
+        "items": [item.model_dump(mode="json") for item in result.items],
+    }
 
 
 @opendata_router.post("/run-once")
@@ -124,6 +134,13 @@ async def run_eis_opendata_once(
     await _enforce_run_once_rate_limit(company)
     stats = await run_eis_opendata_once_for_company(db, company)
     return {
+        "stage": stats.stage,
+        "reason": stats.reason,
+        "source_status": stats.source_status,
+        "catalog_url": stats.catalog_url,
+        "http_status": stats.http_status,
+        "error_count": stats.error_count,
+        "errors_sample": stats.errors_sample,
         "datasets": stats.datasets_count,
         "files": stats.files_count,
         "candidates": stats.candidates_count,
