@@ -175,11 +175,13 @@ async def run_eis_opendata_ingestion(db: AsyncSession, company: Company, setting
                     continue
 
                 stats.stage = "parse"
+                source_name = "fallback" if stats.reason == "using_known_datasets_fallback" else "eis_opendata"
                 inserted, updated, skipped, candidates = await _process_downloaded_file(
                     db=db,
                     company_id=company.id,
                     file_path=download_path,
                     settings=settings,
+                    source_name=source_name,
                 )
                 stats.stage = "insert"
                 stats.candidates_count += candidates
@@ -250,6 +252,7 @@ async def _process_downloaded_file(
     company_id: UUID,
     file_path: Path,
     settings: EISOpenDataSettings,
+    source_name: str,
 ) -> tuple[int, int, int, int]:
     inserted = 0
     updated = 0
@@ -270,7 +273,7 @@ async def _process_downloaded_file(
         existing = await db.scalar(
             select(Tender).where(
                 Tender.company_id == company_id,
-                Tender.source == "eis_opendata",
+                Tender.source == source_name,
                 Tender.external_id == candidate.external_id,
             )
         )
@@ -279,7 +282,7 @@ async def _process_downloaded_file(
             db.add(
                 Tender(
                     company_id=company_id,
-                    source="eis_opendata",
+                    source=source_name,
                     external_id=candidate.external_id,
                     title=candidate.title,
                     customer_name=candidate.customer_name,

@@ -25,6 +25,7 @@ from app.document_module.service import (
     get_package_for_tender,
     generate_package_for_tender,
 )
+from app.ingestion.eis_site.service import run_eis_site_once_for_company
 from app.models import Company, User
 from app.risk.service import compute_risk_flags, compute_risk_score_v1
 from app.tender_alerts.schemas import AlertCategory
@@ -131,8 +132,10 @@ TASK_TYPE_RU = {
 
 SOURCE_RU = {
     "eis": "ЕИС",
+    "eis_site": "ЕИС (сайт)",
     "eis_public": "ЕИС (публичный поиск)",
     "eis_opendata": "ЕИС (открытые данные)",
+    "fallback": "fallback (тестовые CSV)",
     "manual": "вручную",
     "other": "другое",
 }
@@ -550,6 +553,40 @@ async def dashboard(
     )
 
 
+@router.post("/ingestion/eis-site/run-once")
+async def web_run_eis_site_once(
+    q: str | None = Form(default=None),
+    limit: int = Form(default=50),
+    region: str | None = Form(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_cookie),
+):
+    company = await db.scalar(select(Company).where(Company.id == current_user.company_id))
+    if company is None:
+        return RedirectResponse(
+            url="/web/tenders?ingest_status=error&ingest_message=Компания не найдена",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    stats = await run_eis_site_once_for_company(
+        db,
+        company,
+        query=q or None,
+        limit=max(1, min(200, int(limit or 50))),
+        region=region or None,
+    )
+    if stats.source_status == "ok":
+        message = f"Добавлено: {stats.inserted}, обновлено: {stats.updated}, пропущено: {stats.skipped}"
+        qs = urlencode({"ingest_status": "ok", "ingest_message": message})
+        return RedirectResponse(url=f"/web/tenders?{qs}", status_code=status.HTTP_303_SEE_OTHER)
+
+    reason = stats.reason or "неизвестно"
+    message = f"Источник недоступен: {stats.source_status} ({reason})"
+    details = ",".join(stats.errors_sample) if stats.errors_sample else ""
+    qs = urlencode({"ingest_status": "error", "ingest_message": message, "ingest_details": details})
+    return RedirectResponse(url=f"/web/tenders?{qs}", status_code=status.HTTP_303_SEE_OTHER)
+
+
 @router.post("/alerts/{tender_id}/ack")
 async def web_ack_alert(
     request: Request,
@@ -594,6 +631,9 @@ async def tenders_page(
     published_to: str | None = Query(default=None),
     created_from: str | None = Query(default=None),
     created_to: str | None = Query(default=None),
+    ingest_status: str | None = Query(default=None),
+    ingest_message: str | None = Query(default=None),
+    ingest_details: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -725,6 +765,20 @@ async def tenders_page(
     prev_qs = _query_string({**base_filters, "page": page - 1}) if page > 1 else ""
     next_qs = _query_string({**base_filters, "page": page + 1}) if page < total_pages else ""
 
+    source_values = ["eis_site", "manual", "eis_opendata", "fallback", "eis_public", "eis", "other"]
+    distinct_sources = list(
+        (
+            await db.scalars(
+                select(Tender.source).where(Tender.company_id == current_user.company_id).distinct()
+            )
+        ).all()
+    )
+    for src in sorted({s for s in distinct_sources if s}):
+        if src not in source_values:
+            source_values.append(src)
+    if "fallback" not in {s for s in distinct_sources if s}:
+        source_values = [s for s in source_values if s != "fallback"]
+
     return templates.TemplateResponse(
         "tenders.html",
         _template_context(
@@ -741,11 +795,16 @@ async def tenders_page(
             statuses=[status.value for status in TenderStatus],
             analysis_statuses=["none", "draft", "ready", "approved"],
             decision_statuses=["none", "go", "no_go", "unsure"],
-            source_values=["eis", "eis_public", "eis_opendata", "manual", "other"],
+            source_values=source_values,
             analysis_status_labels=ANALYSIS_STATUS_RU,
             decision_status_labels=DECISION_STATUS_RU,
             tender_status_labels=TENDER_STATUS_RU,
             source_labels=SOURCE_RU,
+            ingest_result={
+                "status": ingest_status,
+                "message": ingest_message,
+                "details": ingest_details,
+            },
         ),
     )
 

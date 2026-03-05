@@ -4,6 +4,34 @@
 <h1>Тендеры</h1>
 
 <section class="card">
+  <h2>Импорт реальных тендеров</h2>
+  <form method="post" action="/web/ingestion/eis-site/run-once" class="filters">
+    <label>Поиск ЕИС
+      <input type="text" name="q" placeholder="гранит OR памятник OR плита" />
+    </label>
+    <label>Лимит
+      <input type="number" name="limit" min="1" max="200" value="50" />
+    </label>
+    <label>Регион
+      <input type="text" name="region" placeholder="например: Санкт-Петербург" />
+    </label>
+    <button type="submit">Загрузить реальные тендеры (run once)</button>
+  </form>
+  {% if ingest_result and ingest_result.message %}
+    <p>
+      <strong>{% if ingest_result.status == "ok" %}Успешно{% else %}Ошибка{% endif %}:</strong>
+      {{ ingest_result.message }}
+    </p>
+    {% if ingest_result.details %}
+      <details>
+        <summary>Подробности</summary>
+        <pre>{{ ingest_result.details }}</pre>
+      </details>
+    {% endif %}
+  {% endif %}
+</section>
+
+<section class="card">
   <h2>Фильтры</h2>
   <form method="get" action="/web/tenders" class="filters" id="tenders-filters-form">
     <label>Поиск
