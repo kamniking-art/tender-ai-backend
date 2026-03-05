@@ -39,11 +39,12 @@ class EISSiteRunStats:
 @dataclass
 class EISSiteSettings:
     query: str = ""
-    limit: int = 50
+    limit: int = 1000
+    max_pages: int = 50
     region: str | None = None
     timeout_sec: int = 20
     rate_limit_rps: float = 0.4
-    records_per_page: int = 50
+    records_per_page: int = 20
 
 
 async def run_eis_site_once_for_company(
@@ -51,13 +52,19 @@ async def run_eis_site_once_for_company(
     company: Company,
     *,
     query: str | None = None,
-    limit: int = 50,
+    limit: int = 1000,
+    pages: int | None = None,
+    page_size: int | None = None,
     region: str | None = None,
 ) -> EISSiteRunStats:
     cfg = _extract_settings(company.ingestion_settings or {})
     if query is not None:
         cfg.query = query
-    cfg.limit = max(1, min(200, int(limit or cfg.limit)))
+    cfg.limit = max(1, min(5000, int(limit or cfg.limit)))
+    if pages is not None:
+        cfg.max_pages = max(1, min(200, int(pages)))
+    if page_size is not None:
+        cfg.records_per_page = max(10, min(50, int(page_size)))
     if region is not None:
         cfg.region = region or None
 
@@ -66,8 +73,9 @@ async def run_eis_site_once_for_company(
 
     try:
         collected: list[EISSiteCandidate] = []
-        page = 1
-        while len(collected) < cfg.limit:
+        for page in range(1, cfg.max_pages + 1):
+            if len(collected) >= cfg.limit:
+                break
             params = _build_search_params(cfg, page)
             html_text = await client.fetch_search_page(EIS_SITE_SEARCH_URL, params=params)
             stats.pages += 1
@@ -89,9 +97,6 @@ async def run_eis_site_once_for_company(
 
             collected.extend(parsed.candidates)
             if len(parsed.candidates) < cfg.records_per_page:
-                break
-            page += 1
-            if page > 5:
                 break
 
         deduped: list[EISSiteCandidate] = []
@@ -154,11 +159,12 @@ def _extract_settings(payload: dict[str, Any]) -> EISSiteSettings:
     raw = payload.get("eis_site") if isinstance(payload.get("eis_site"), dict) else {}
     return EISSiteSettings(
         query=str(raw.get("query", "") or ""),
-        limit=int(raw.get("limit", 50) or 50),
+        limit=int(raw.get("limit", 1000) or 1000),
+        max_pages=max(1, min(200, int(raw.get("max_pages", 50) or 50))),
         region=str(raw.get("region")) if raw.get("region") else None,
         timeout_sec=int(raw.get("timeout_sec", 20) or 20),
         rate_limit_rps=float(raw.get("rate_limit_rps", 0.4) or 0.4),
-        records_per_page=max(10, min(50, int(raw.get("records_per_page", 50) or 50))),
+        records_per_page=max(10, min(50, int(raw.get("records_per_page", 20) or 20))),
     )
 
 
@@ -193,6 +199,7 @@ async def _upsert_tender(db: AsyncSession, company_id: UUID, candidate: EISSiteC
                 source_url=source_url,
                 title=candidate.title,
                 customer_name=candidate.customer_name,
+                region=candidate.region,
                 nmck=_normalize_decimal(candidate.nmck),
                 published_at=candidate.published_at,
                 submission_deadline=candidate.submission_deadline,
@@ -202,7 +209,7 @@ async def _upsert_tender(db: AsyncSession, company_id: UUID, candidate: EISSiteC
         return "inserted"
 
     changed = False
-    for field in ("title", "customer_name", "published_at", "submission_deadline"):
+    for field in ("title", "customer_name", "region", "published_at", "submission_deadline"):
         value = getattr(candidate, field)
         if value is not None and getattr(existing, field) != value:
             setattr(existing, field, value)

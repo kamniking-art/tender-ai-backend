@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
+from random import randint
 
 import httpx
 
@@ -19,6 +20,11 @@ _BLOCKED_MARKERS = (
     "доступ ограничен",
     "access denied",
     "bot protection",
+)
+_USER_AGENTS = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 )
 
 
@@ -43,7 +49,6 @@ class EISSiteClient:
             timeout=httpx.Timeout(timeout_sec),
             follow_redirects=True,
             headers={
-                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
             },
@@ -64,7 +69,8 @@ class EISSiteClient:
         for attempt in range(len(backoff) + 1):
             await self._respect_rate_limit()
             try:
-                response = await self._client.get(url, params=params)
+                headers = {"User-Agent": _USER_AGENTS[attempt % len(_USER_AGENTS)]}
+                response = await self._client.get(url, params=params, headers=headers)
                 text = response.text or ""
                 self.diagnostics.http_status = response.status_code
                 self.diagnostics.fetched_bytes += len(text.encode("utf-8", errors="ignore"))
@@ -77,6 +83,15 @@ class EISSiteClient:
                 if response.status_code == 434:
                     self.diagnostics.source_status = "blocked"
                     self.diagnostics.reason = "http_434"
+                    return None
+
+                if response.status_code == 403:
+                    self.diagnostics.source_status = "blocked"
+                    self.diagnostics.reason = "http_403"
+                    self._record_error(self.diagnostics.reason)
+                    if attempt < len(backoff):
+                        await asyncio.sleep(backoff[attempt] + randint(1, 2))
+                        continue
                     return None
 
                 if response.status_code >= 400:

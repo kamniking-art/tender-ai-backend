@@ -98,6 +98,16 @@
         —
       {% endif %}
     </div>
+    <div>
+      <strong>Документы с источника:</strong>
+      {% if tender.source_url %}
+      <form method="post" action="/web/tenders/{{ tender.id }}/source-documents/import" class="action-form">
+        <button type="submit">Скачать документы</button>
+      </form>
+      {% else %}
+      —
+      {% endif %}
+    </div>
   </div>
 </section>
 

@@ -1,14 +1,18 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+import mimetypes
 from pathlib import Path
+import re
 from uuid import UUID
-from urllib.parse import urlencode
+from urllib.parse import unquote, urlencode, urljoin, urlparse
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+import httpx
 from sqlalchemy import Integer, and_, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,6 +41,7 @@ from app.tender_decisions.service import get_decision_scoped
 from app.tender_documents.service import (
     DocumentStorageError,
     ScopedNotFoundError as DocumentScopedNotFoundError,
+    create_document_from_bytes,
     create_document_for_tender,
     get_document_scoped,
     list_documents_for_tender,
@@ -205,6 +210,7 @@ def _humanize_risk_flag(flag: str) -> str:
 def _translate_action_name(action: str | None) -> str:
     action_map = {
         "upload": "загрузка документа",
+        "source_docs": "скачивание документов с ЕИС",
         "extract": "извлечение требований",
         "risk": "расчет риска",
         "engine": "пересчет рекомендации",
@@ -399,11 +405,110 @@ def _parse_optional_int(value: str | None, *, field: str, ge: int | None = None,
     return parsed
 
 
+def _parse_optional_decimal(value: str | None, *, field: str, ge: Decimal | None = None) -> Decimal | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if normalized == "":
+        return None
+    try:
+        parsed = Decimal(normalized.replace(",", "."))
+    except (InvalidOperation, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid decimal for {field}: {value}",
+        ) from exc
+    if ge is not None and parsed < ge:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{field} must be >= {ge}",
+        )
+    return parsed
+
+
 def _query_string(params: dict[str, object]) -> str:
     filtered = {k: v for k, v in params.items() if v not in (None, "", False)}
     if not filtered:
         return ""
     return urlencode(filtered)
+
+
+_DOC_HREF_RE = re.compile(r'href=["\']([^"\']+)["\']', re.IGNORECASE)
+_DOC_EXT_RE = re.compile(r"\.(pdf|docx?|rtf|zip)(?:$|\?)", re.IGNORECASE)
+_SOURCE_DOC_UA = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+)
+
+
+def _guess_filename_from_url(url: str, index: int) -> str:
+    path_name = Path(urlparse(url).path).name
+    file_name = unquote(path_name) if path_name else ""
+    if not file_name or "." not in file_name:
+        file_name = f"source_doc_{index}.bin"
+    return file_name[:200]
+
+
+async def _fetch_source_documents(source_url: str, *, max_docs: int = 10) -> tuple[list[tuple[str, bytes, str | None]], str | None]:
+    timeout = httpx.Timeout(20)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        html_text: str | None = None
+        for attempt in range(3):
+            try:
+                page = await client.get(
+                    source_url,
+                    headers={
+                        "User-Agent": _SOURCE_DOC_UA[attempt % len(_SOURCE_DOC_UA)],
+                        "Accept": "text/html,application/xhtml+xml",
+                        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+                    },
+                )
+                lower = (page.text or "").lower()
+                if page.status_code in {403, 434} or "captcha" in lower:
+                    if attempt < 2:
+                        await asyncio.sleep(1 + attempt)
+                        continue
+                    return [], "Источник временно недоступен (ограничение доступа)"
+                if page.status_code >= 400:
+                    return [], f"Ошибка источника: HTTP {page.status_code}"
+                html_text = page.text or ""
+                break
+            except httpx.HTTPError:
+                if attempt < 2:
+                    await asyncio.sleep(1 + attempt)
+                    continue
+                return [], "Не удалось открыть страницу источника"
+
+        if not html_text:
+            return [], "Страница источника пустая"
+
+        links: list[str] = []
+        for href in _DOC_HREF_RE.findall(html_text):
+            if not _DOC_EXT_RE.search(href):
+                continue
+            links.append(urljoin(source_url, href))
+        links = list(dict.fromkeys(links))
+        if not links:
+            return [], "На странице не найдены ссылки на PDF/DOC/DOCX"
+
+        files: list[tuple[str, bytes, str | None]] = []
+        for idx, link in enumerate(links[:max_docs], start=1):
+            try:
+                resp = await client.get(
+                    link,
+                    headers={"User-Agent": _SOURCE_DOC_UA[idx % len(_SOURCE_DOC_UA)]},
+                )
+                if resp.status_code >= 400 or not resp.content:
+                    continue
+                file_name = _guess_filename_from_url(link, idx)
+                content_type = resp.headers.get("content-type") or mimetypes.guess_type(file_name)[0]
+                files.append((file_name, resp.content, content_type))
+            except httpx.HTTPError:
+                continue
+
+        if not files:
+            return [], "Не удалось скачать документы из найденных ссылок"
+        return files, None
 
 
 def _redirect_with_action(tender_id: UUID, action: str, ok: bool, message: str, details: str | None = None) -> RedirectResponse:
@@ -556,7 +661,9 @@ async def dashboard(
 @router.post("/ingestion/eis-site/run-once")
 async def web_run_eis_site_once(
     q: str | None = Form(default=None),
-    limit: int = Form(default=50),
+    limit: int = Form(default=1000),
+    pages: int = Form(default=50),
+    page_size: int = Form(default=20),
     region: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_from_cookie),
@@ -572,7 +679,9 @@ async def web_run_eis_site_once(
         db,
         company,
         query=q or None,
-        limit=max(1, min(200, int(limit or 50))),
+        limit=max(1, min(5000, int(limit or 1000))),
+        pages=max(1, min(200, int(pages or 50))),
+        page_size=max(10, min(50, int(page_size or 20))),
         region=region or None,
     )
     if stats.source_status == "ok":
@@ -622,6 +731,9 @@ async def tenders_page(
     analysis_status: str | None = Query(default=None),
     decision_filter: str | None = Query(default=None, alias="decision"),
     source_filter: str | None = Query(default=None, alias="source"),
+    region_filter: str | None = Query(default=None, alias="region"),
+    price_min: str | None = Query(default=None),
+    price_max: str | None = Query(default=None),
     risk_min: str | None = Query(default=None),
     risk_max: str | None = Query(default=None),
     risky_only: str | None = Query(default=None),
@@ -641,6 +753,8 @@ async def tenders_page(
 ):
     parsed_risk_min = _parse_optional_int(risk_min, field="risk_min", ge=0, le=100)
     parsed_risk_max = _parse_optional_int(risk_max, field="risk_max", ge=0, le=100)
+    parsed_price_min = _parse_optional_decimal(price_min, field="price_min", ge=Decimal("0"))
+    parsed_price_max = _parse_optional_decimal(price_max, field="price_max", ge=Decimal("0"))
     parsed_deadline_from = _parse_optional_datetime(deadline_from)
     parsed_deadline_to = _parse_optional_datetime(deadline_to)
     parsed_published_from = _parse_optional_datetime(published_from)
@@ -683,6 +797,19 @@ async def tenders_page(
     if source_filter:
         stmt = stmt.where(Tender.source == source_filter)
         count_stmt = count_stmt.where(Tender.source == source_filter)
+
+    if region_filter:
+        pattern = f"%{region_filter.strip()}%"
+        stmt = stmt.where(Tender.region.ilike(pattern))
+        count_stmt = count_stmt.where(Tender.region.ilike(pattern))
+
+    if parsed_price_min is not None:
+        stmt = stmt.where(Tender.nmck >= parsed_price_min)
+        count_stmt = count_stmt.where(Tender.nmck >= parsed_price_min)
+
+    if parsed_price_max is not None:
+        stmt = stmt.where(Tender.nmck <= parsed_price_max)
+        count_stmt = count_stmt.where(Tender.nmck <= parsed_price_max)
 
     if analysis_status:
         if analysis_status == "none":
@@ -750,6 +877,9 @@ async def tenders_page(
         "analysis_status": analysis_status or "",
         "decision": decision_filter or "",
         "source": source_filter or "",
+        "region": region_filter or "",
+        "price_min": str(parsed_price_min) if parsed_price_min is not None else "",
+        "price_max": str(parsed_price_max) if parsed_price_max is not None else "",
         "risk_min": parsed_risk_min if parsed_risk_min is not None else "",
         "risk_max": parsed_risk_max if parsed_risk_max is not None else "",
         "risky_only": "true" if _parse_bool(risky_only) else "",
@@ -1150,6 +1280,61 @@ async def web_upload_tender_document(
         return _redirect_with_action(tender_id, "upload", False, "Тендер не найден")
     except DocumentStorageError as exc:
         return _redirect_with_action(tender_id, "upload", False, "Не удалось сохранить файл", str(exc))
+
+
+@router.post("/tenders/{tender_id}/source-documents/import")
+async def web_import_source_documents(
+    tender_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_cookie),
+):
+    tender = await get_tender_by_id_scoped(db, current_user.company_id, tender_id)
+    if tender is None:
+        return _redirect_with_action(tender_id, "source_docs", False, "Тендер не найден")
+    if not tender.source_url:
+        return _redirect_with_action(tender_id, "source_docs", False, "У тендера отсутствует ссылка на источник")
+
+    try:
+        existing_documents = await list_documents_for_tender(db, company_id=current_user.company_id, tender_id=tender_id)
+    except DocumentScopedNotFoundError:
+        return _redirect_with_action(tender_id, "source_docs", False, "Тендер не найден")
+
+    existing_names = {doc.file_name for doc in existing_documents}
+    files, error_message = await _fetch_source_documents(tender.source_url, max_docs=10)
+    if error_message:
+        return _redirect_with_action(tender_id, "source_docs", False, "Не удалось скачать документы", error_message)
+
+    created = 0
+    skipped = 0
+    for file_name, content, content_type in files:
+        if file_name in existing_names:
+            skipped += 1
+            continue
+        try:
+            await create_document_from_bytes(
+                db,
+                company_id=current_user.company_id,
+                tender_id=tender_id,
+                uploaded_by=current_user.id,
+                file_name=file_name,
+                content=content,
+                content_type=content_type,
+                doc_type="source_import",
+            )
+            existing_names.add(file_name)
+            created += 1
+        except (DocumentScopedNotFoundError, DocumentStorageError):
+            skipped += 1
+
+    if created == 0 and skipped == 0:
+        return _redirect_with_action(tender_id, "source_docs", False, "Документы не найдены на странице источника")
+
+    return _redirect_with_action(
+        tender_id,
+        "source_docs",
+        True,
+        f"Импорт документов завершен: добавлено {created}, пропущено {skipped}",
+    )
 
 
 @router.get("/tender-documents/{document_id}/download")

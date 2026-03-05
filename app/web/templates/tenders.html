@@ -9,8 +9,14 @@
     <label>Поиск ЕИС
       <input type="text" name="q" placeholder="гранит OR памятник OR плита" />
     </label>
-    <label>Лимит
-      <input type="number" name="limit" min="1" max="200" value="50" />
+    <label>Страниц
+      <input type="number" name="pages" min="1" max="200" value="50" />
+    </label>
+    <label>На странице
+      <input type="number" name="page_size" min="10" max="50" value="20" />
+    </label>
+    <label>Лимит (макс. записей)
+      <input type="number" name="limit" min="1" max="5000" value="1000" />
     </label>
     <label>Регион
       <input type="text" name="region" placeholder="например: Санкт-Петербург" />
@@ -74,6 +80,18 @@
       </select>
     </label>
 
+    <label>Регион
+      <input type="text" name="region" value="{{ filters.region }}" placeholder="Санкт-Петербург" />
+    </label>
+
+    <label>Цена от
+      <input type="number" name="price_min" min="0" step="0.01" value="{{ filters.price_min }}" />
+    </label>
+
+    <label>Цена до
+      <input type="number" name="price_max" min="0" step="0.01" value="{{ filters.price_max }}" />
+    </label>
+
     <label>Риск от
       <input type="number" name="risk_min" min="0" max="100" value="{{ filters.risk_min }}" />
     </label>
@@ -135,6 +153,8 @@
         <th>Название</th>
         <th>Статус</th>
         <th>Источник / Внешний ID</th>
+        <th>Регион</th>
+        <th>Заказчик</th>
         <th>Дедлайн</th>
         <th>Публикация</th>
         <th>НМЦК</th>
@@ -147,6 +167,8 @@
         <td><a href="/web/tenders/{{ tender.id }}">{{ tender.title or '-' }}</a></td>
         <td>{{ tender.status | tender_status_ru }}</td>
         <td>{{ tender.source | source_ru }} / {{ tender.external_id }}</td>
+        <td>{{ tender.region or '-' }}</td>
+        <td>{{ tender.customer_name or '-' }}</td>
         <td>{{ tender.submission_deadline | ru_dt }}</td>
         <td>{{ tender.published_at | ru_dt }}</td>
         <td>{{ tender.nmck | ru_money("RUB") }}</td>

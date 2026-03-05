@@ -69,7 +69,9 @@ async def _enforce_run_once_rate_limit(company: Company) -> None:
 @router.post("/run-once")
 async def run_eis_site_once(
     q: str | None = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=200),
+    limit: int = Query(default=1000, ge=1, le=5000),
+    pages: int = Query(default=50, ge=1, le=200),
+    page_size: int = Query(default=20, ge=10, le=50),
     region: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(_get_ingestion_current_user),
@@ -77,7 +79,15 @@ async def run_eis_site_once(
     company = await _get_company_for_user(db, current_user)
     await _enforce_run_once_rate_limit(company)
 
-    stats = await run_eis_site_once_for_company(db, company, query=q, limit=limit, region=region)
+    stats = await run_eis_site_once_for_company(
+        db,
+        company,
+        query=q,
+        limit=limit,
+        pages=pages,
+        page_size=page_size,
+        region=region,
+    )
     return {
         "stage": stats.stage,
         "reason": stats.reason,
@@ -106,6 +116,8 @@ async def get_eis_site_health(
         "company_id": str(company.id),
         "enabled": bool(eis_site.get("enabled", True)),
         "query": eis_site.get("query", ""),
-        "limit": int(eis_site.get("limit", 50) or 50),
+        "limit": int(eis_site.get("limit", 1000) or 1000),
+        "pages": int(eis_site.get("max_pages", 50) or 50),
+        "page_size": int(eis_site.get("records_per_page", 20) or 20),
         "region": eis_site.get("region"),
     }

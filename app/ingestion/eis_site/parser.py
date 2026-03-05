@@ -51,6 +51,7 @@ class EISSiteCandidate:
     submission_deadline: datetime | None = None
     nmck: Decimal | None = None
     customer_name: str | None = None
+    region: str | None = None
 
 
 @dataclass
@@ -137,6 +138,15 @@ def parse_search_page(html_text: str, base_url: str) -> ParseResult:
             title = _extract_title(block)
             url = _extract_url(block, external_id, base_url)
             customer_name = _extract_by_labels(block, ["Заказчик", "Организация"])
+            region = _extract_by_labels(
+                block,
+                [
+                    "Субъект РФ",
+                    "Место поставки товара, выполнения работы или оказания услуги",
+                    "Место поставки",
+                    "Регион",
+                ],
+            )
 
             published_at = _parse_datetime(
                 _extract_by_labels(block, ["Размещено", "Дата размещения", "Дата размещения извещения"])
@@ -181,6 +191,7 @@ def parse_search_page(html_text: str, base_url: str) -> ParseResult:
                     submission_deadline=deadline,
                     nmck=nmck,
                     customer_name=customer_name,
+                    region=region,
                 )
             )
 
@@ -217,10 +228,10 @@ def _extract_url(block: str, external_id: str, base_url: str) -> str | None:
 
 
 def _extract_by_labels(block: str, labels: list[str]) -> str | None:
-    normalized = {label.lower() for label in labels}
+    normalized = [label.lower() for label in labels]
     for match in _FIELD_BY_TITLE_RE.finditer(block):
         label = _clean_text(match.group("label")).lower()
-        if label not in normalized:
+        if not any(marker in label for marker in normalized):
             continue
         return _clean_title(match.group("body"))
     return None
