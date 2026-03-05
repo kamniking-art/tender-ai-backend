@@ -96,8 +96,6 @@ async def run_eis_site_once_for_company(
                 break
 
             collected.extend(parsed.candidates)
-            if len(parsed.candidates) < cfg.records_per_page:
-                break
 
         deduped: list[EISSiteCandidate] = []
         seen: set[str] = set()
