@@ -86,10 +86,24 @@
 </section>
 
 <section class="card">
-  <h2>Тендер</h2>
+  <h2>Источник</h2>
   <div class="kv-grid">
     <div><strong>Источник:</strong> {{ tender.source | source_ru }}</div>
     <div><strong>Внешний ID:</strong> {{ tender.external_id }}</div>
+    <div>
+      <strong>Ссылка:</strong>
+      {% if tender.source_url %}
+        <a href="{{ tender.source_url }}" target="_blank" rel="noopener noreferrer">Открыть на ЕИС</a>
+      {% else %}
+        —
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Тендер</h2>
+  <div class="kv-grid">
     <div><strong>Статус:</strong> {{ tender.status | tender_status_ru }}</div>
     <div><strong>Опубликован:</strong> {{ tender.published_at | ru_dt }}</div>
     <div><strong>Дедлайн:</strong> {{ tender.submission_deadline | ru_dt }}</div>

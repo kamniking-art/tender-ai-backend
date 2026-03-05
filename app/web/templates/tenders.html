@@ -138,6 +138,7 @@
         <th>Дедлайн</th>
         <th>Публикация</th>
         <th>НМЦК</th>
+        <th>Ссылка</th>
       </tr>
     </thead>
     <tbody>
@@ -149,6 +150,13 @@
         <td>{{ tender.submission_deadline | ru_dt }}</td>
         <td>{{ tender.published_at | ru_dt }}</td>
         <td>{{ tender.nmck | ru_money("RUB") }}</td>
+        <td>
+          {% if tender.source_url %}
+            <a href="{{ tender.source_url }}" target="_blank" rel="noopener noreferrer">Открыть на ЕИС</a>
+          {% else %}
+            —
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>

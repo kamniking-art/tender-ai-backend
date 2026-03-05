@@ -61,6 +61,7 @@ class TenderRead(BaseModel):
     company_id: UUID
     source: str
     external_id: str
+    source_url: str | None
     title: str | None
     customer_name: str | None
     region: str | None

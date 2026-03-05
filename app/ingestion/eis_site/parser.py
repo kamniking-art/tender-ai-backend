@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from html.parser import HTMLParser
 from urllib.parse import urljoin
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -12,9 +13,24 @@ _SPACE_RE = re.compile(r"\s+")
 
 # ЕИС обычно использует 19-значные номера извещений
 _EXTERNAL_ID_RE = re.compile(r"\b\d{19}\b")
-_LINK_RE = re.compile(r'<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>', re.IGNORECASE | re.DOTALL)
+_LINK_BLOCK_RE = re.compile(r'(<a[^>]+href="([^"]+)"[^>]*>.*?</a>)', re.IGNORECASE | re.DOTALL)
 _DATE_RE = re.compile(r"(\d{2}\.\d{2}\.\d{4})(?:\s+(\d{2}:\d{2}))?")
 _MONEY_RE = re.compile(r"(\d[\d\s.,]{2,})")
+_TRAILING_TAG_GARBAGE_RE = re.compile(r"<[^>]*$")
+_ID_LINE_RE = re.compile(rf"([^\n\r<>]{{0,400}}{_EXTERNAL_ID_RE.pattern}[^\n\r<>]{{0,400}})")
+
+
+class _TextExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.parts: list[str] = []
+
+    def handle_data(self, data: str) -> None:
+        if data:
+            self.parts.append(data)
+
+    def text(self) -> str:
+        return " ".join(self.parts)
 
 
 @dataclass
@@ -35,7 +51,22 @@ class ParseResult:
 
 
 def _clean_text(value: str) -> str:
-    return _SPACE_RE.sub(" ", html.unescape(_TAG_RE.sub(" ", value))).strip()
+    extractor = _TextExtractor()
+    extractor.feed(value)
+    extracted = extractor.text()
+    text = html.unescape(extracted if extracted.strip() else _TAG_RE.sub(" ", value))
+    text = _TRAILING_TAG_GARBAGE_RE.sub(" ", text)
+    text = text.replace("<", " ").replace(">", " ")
+    return _SPACE_RE.sub(" ", text).strip()
+
+
+def _clean_title(value: str | None) -> str | None:
+    if not value:
+        return None
+    text = _clean_text(value)
+    if not text:
+        return None
+    return text[:500]
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
@@ -67,7 +98,10 @@ def parse_search_page(html_text: str, base_url: str) -> ParseResult:
     errors: list[str] = []
     try:
         ids = _EXTERNAL_ID_RE.findall(html_text)
-        links = [(_href, _clean_text(text)) for _href, text in _LINK_RE.findall(html_text)]
+        links = []
+        for full_anchor, href in _LINK_BLOCK_RE.findall(html_text):
+            anchor_text = _clean_title(full_anchor)
+            links.append((href, anchor_text))
         seen: set[str] = set()
         candidates: list[EISSiteCandidate] = []
 
@@ -80,15 +114,19 @@ def parse_search_page(html_text: str, base_url: str) -> ParseResult:
             url: str | None = None
 
             for href, text in links:
-                if external_id in href or external_id in text:
-                    title = text or title
+                if external_id in href or (text and external_id in text):
+                    title = _clean_title(text) or title
                     url = urljoin(base_url, href)
                     break
 
             context_idx = html_text.find(external_id)
             context = html_text[max(0, context_idx - 800) : context_idx + 800] if context_idx >= 0 else ""
             if not title and context:
-                title = _clean_text(context)[:240]
+                context_title = None
+                id_line = _ID_LINE_RE.search(context)
+                if id_line:
+                    context_title = _clean_title(id_line.group(1))
+                title = context_title or _clean_title(context[:600])
 
             date_matches = _DATE_RE.findall(context)
             published_at = None
@@ -104,7 +142,7 @@ def parse_search_page(html_text: str, base_url: str) -> ParseResult:
             for marker in ("Заказчик", "Организация"):
                 marker_pos = context.lower().find(marker.lower())
                 if marker_pos >= 0:
-                    snippet = _clean_text(context[marker_pos : marker_pos + 220])
+                    snippet = _clean_title(context[marker_pos : marker_pos + 220]) or ""
                     customer_name = snippet.replace(marker, "").strip(" :.-") or None
                     break
 

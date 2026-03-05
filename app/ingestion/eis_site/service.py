@@ -189,6 +189,7 @@ async def _upsert_tender(db: AsyncSession, company_id: UUID, candidate: EISSiteC
                 company_id=company_id,
                 source="eis_site",
                 external_id=candidate.external_id,
+                source_url=candidate.url,
                 title=candidate.title,
                 customer_name=candidate.customer_name,
                 nmck=_normalize_decimal(candidate.nmck),
@@ -200,7 +201,7 @@ async def _upsert_tender(db: AsyncSession, company_id: UUID, candidate: EISSiteC
         return "inserted"
 
     changed = False
-    for field in ("title", "customer_name", "published_at", "submission_deadline"):
+    for field in ("title", "customer_name", "published_at", "submission_deadline", "source_url"):
         value = getattr(candidate, field)
         if value is not None and getattr(existing, field) != value:
             setattr(existing, field, value)
