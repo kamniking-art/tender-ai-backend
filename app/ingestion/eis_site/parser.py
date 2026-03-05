@@ -75,6 +75,16 @@ def _clean_title(value: str | None) -> str | None:
     text = _clean_text(value)
     if not text:
         return None
+    lower = text.lower()
+    if (
+        "href=" in lower
+        or "img src" in lower
+        or "custom-tooltip" in lower
+        or lower.startswith("a data-")
+        or lower.startswith(">")
+        or lower in {"подача заявок"}
+    ):
+        return None
     return text[:500]
 
 
