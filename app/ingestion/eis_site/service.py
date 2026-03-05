@@ -175,6 +175,7 @@ def _build_search_params(cfg: EISSiteSettings, page: int) -> dict[str, str | int
 
 
 async def _upsert_tender(db: AsyncSession, company_id: UUID, candidate: EISSiteCandidate) -> str:
+    source_url = candidate.url or _default_source_url(candidate.external_id)
     existing = await db.scalar(
         select(Tender).where(
             Tender.company_id == company_id,
@@ -189,7 +190,7 @@ async def _upsert_tender(db: AsyncSession, company_id: UUID, candidate: EISSiteC
                 company_id=company_id,
                 source="eis_site",
                 external_id=candidate.external_id,
-                source_url=candidate.url,
+                source_url=source_url,
                 title=candidate.title,
                 customer_name=candidate.customer_name,
                 nmck=_normalize_decimal(candidate.nmck),
@@ -207,8 +208,8 @@ async def _upsert_tender(db: AsyncSession, company_id: UUID, candidate: EISSiteC
             setattr(existing, field, value)
             changed = True
 
-    if candidate.url is not None and existing.source_url != candidate.url:
-        existing.source_url = candidate.url
+    if source_url is not None and existing.source_url != source_url:
+        existing.source_url = source_url
         changed = True
 
     nmck = _normalize_decimal(candidate.nmck)
@@ -226,3 +227,9 @@ def _normalize_decimal(value: Decimal | None) -> Decimal | None:
         return Decimal(value)
     except Exception:
         return None
+
+
+def _default_source_url(external_id: str | None) -> str | None:
+    if not external_id:
+        return None
+    return f"https://zakupki.gov.ru/epz/order/notice/ea20/view/common-info.html?regNumber={external_id}"
