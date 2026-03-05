@@ -1,5 +1,11 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+DEFAULT_EIS_KNOWN_DATASETS = [
+    "https://raw.githubusercontent.com/kamniking-art/tender-ai-backend/main/app/ingestion/eis_opendata/known_datasets/fallback_tenders_1.csv",
+    "https://raw.githubusercontent.com/kamniking-art/tender-ai-backend/main/app/ingestion/eis_opendata/known_datasets/fallback_tenders_2.csv",
+    "https://raw.githubusercontent.com/kamniking-art/tender-ai-backend/main/app/ingestion/eis_opendata/known_datasets/fallback_tenders_3.csv",
+]
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -46,7 +52,10 @@ class Settings(BaseSettings):
     @property
     def known_datasets_list(self) -> list[str]:
         values = [item.strip() for item in str(self.eis_opendata_known_datasets).split(",")]
-        return [item for item in values if item]
+        explicit = [item for item in values if item]
+        if explicit:
+            return explicit
+        return list(DEFAULT_EIS_KNOWN_DATASETS)
 
 
 settings = Settings()

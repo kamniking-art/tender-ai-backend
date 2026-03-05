@@ -18,6 +18,9 @@ from app.ingestion.eis_opendata.schemas import DatasetMeta, DatasetResource, Dis
 logger = logging.getLogger("uvicorn.error")
 
 _MAINTENANCE_MARKERS = ("регламентных работ", "технической поддержки", "недоступен официальный сайт")
+_KNOWN_JSON_DISCOVERY_ENDPOINTS = [
+    "https://data.gov.ru/portal-back/api/v1/dataset/page",
+]
 
 
 class EISOpenDataMaintenanceError(Exception):
@@ -79,6 +82,21 @@ class EISOpenDataClient:
             self._diagnostics.errors_sample.append(message)
 
     async def discover_endpoints(self) -> DiscoveryResult:
+        for endpoint in self._known_discovery_endpoints():
+            probe = await self.probe_search_endpoint(endpoint)
+            if probe.ok:
+                logger.info("EIS_OPENDATA discovery: status=ok search_api_url=%s", endpoint)
+                self._diagnostics.catalog_url = endpoint
+                self._diagnostics.source_status = "ok"
+                self._diagnostics.reason = None
+                return DiscoveryResult(
+                    status="ok",
+                    search_api_url=endpoint,
+                    dataset_api_url=self.dataset_api_url,
+                    catalog_url=endpoint,
+                    http_status=probe.http_status,
+                )
+
         page_url = _build_page_url(self.base_url, self.search_page_path)
         self._diagnostics.catalog_url = page_url
         html, error = await self._request_text_limited(page_url, max_bytes=300 * 1024, timeout_sec=min(20, self.timeout_sec))
@@ -129,11 +147,11 @@ class EISOpenDataClient:
                 )
 
         logger.warning("EIS_OPENDATA discovery: status=unknown reason=no_working_endpoint")
-        self._diagnostics.source_status = "error"
-        self._diagnostics.reason = "no_datasets_match_query"
+        self._diagnostics.source_status = "maintenance"
+        self._diagnostics.reason = "catalog_html_response"
         return DiscoveryResult(
-            status="unknown",
-            last_error="no_working_endpoint",
+            status="maintenance",
+            last_error="catalog_html_response",
             catalog_url=page_url,
             http_status=self._diagnostics.http_status,
         )
@@ -313,6 +331,7 @@ class EISOpenDataClient:
         variants = [
             {"q": q, "limit": limit, "offset": offset},
             {"query": q, "limit": limit, "offset": offset},
+            {"search": q, "size": limit, "number": max(0, offset // max(limit, 1))},
             {"searchString": q, "pageNumber": max(1, offset // max(limit, 1) + 1), "recordsPerPage": limit},
             {"text": q, "page": max(1, offset // max(limit, 1) + 1), "size": limit},
         ]
@@ -412,6 +431,7 @@ class EISOpenDataClient:
         updated_at = _parse_dt(
             raw.get("updated_at")
             or raw.get("updatedAt")
+            or raw.get("lastChangeDate")
             or raw.get("modified")
             or raw.get("metadata_modified")
             or raw.get("lastUpdate")
@@ -419,7 +439,7 @@ class EISOpenDataClient:
 
         resources: list[DatasetResource] = []
         raw_resources = None
-        for key in ("files", "resources", "attachments", "downloads"):
+        for key in ("files", "resources", "attachments", "downloads", "data"):
             if isinstance(raw.get(key), list):
                 raw_resources = raw.get(key)
                 break
@@ -430,7 +450,7 @@ class EISOpenDataClient:
         for res in raw_resources:
             if not isinstance(res, dict):
                 continue
-            url = res.get("url") or res.get("downloadUrl") or res.get("href")
+            url = res.get("url") or res.get("downloadUrl") or res.get("href") or res.get("source")
             if not isinstance(url, str) or not url:
                 continue
             resources.append(
@@ -447,6 +467,13 @@ class EISOpenDataClient:
             )
 
         return DatasetMeta(dataset_id=dataset_id, title=title, updated_at=updated_at, resources=resources)
+
+    def _known_discovery_endpoints(self) -> list[str]:
+        endpoints: list[str] = []
+        for endpoint in [self.search_api_url, self.dataset_api_url, *_KNOWN_JSON_DISCOVERY_ENDPOINTS]:
+            if isinstance(endpoint, str) and endpoint and endpoint not in endpoints:
+                endpoints.append(endpoint)
+        return endpoints
 
 
 def _build_page_url(base_url: str, path: str) -> str:
