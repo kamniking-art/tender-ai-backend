@@ -135,8 +135,8 @@ def compute_relevance_v1(
     customer_text = _norm(tender.customer_name)
     docs_text = _extract_docs_text(extracted, analysis)
 
-    positive_weights = {"title": 14, "customer": 6, "docs": 18}
-    positive_cap = {"title": 35, "customer": 20, "docs": 70}
+    positive_weights = {"title": 20, "customer": 8, "docs": 25}
+    positive_cap = {"title": 60, "customer": 20, "docs": 80}
 
     category_counter: Counter[str] = Counter()
     matched_keywords: set[str] = set()
@@ -165,7 +165,17 @@ def compute_relevance_v1(
     negative_hits = set(_matches(" ".join([title_text, customer_text, docs_text]), NEGATIVE_KEYWORDS))
     penalty = min(len(negative_hits) * 18, 65)
 
-    score = max(0, min(100, positive_score - penalty))
+    bonus = 0
+    if "гранит" in matched_keywords and {"плита", "плитка", "керамогранит"} & matched_keywords:
+        bonus += 35
+    if {"памятник", "мемориал", "мемориальный", "надгробие"} & matched_keywords:
+        bonus += 35
+    if "гранит" in matched_keywords and {"щебень", "бордюр"} & matched_keywords:
+        bonus += 25
+    if "благоустройство" in matched_keywords and {"камень", "плита", "плитка", "гранит"} & matched_keywords:
+        bonus += 20
+
+    score = max(0, min(100, positive_score + bonus - penalty))
     if positive_score == 0 and penalty > 0:
         score = 5
 
