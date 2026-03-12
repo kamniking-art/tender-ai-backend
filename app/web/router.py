@@ -39,6 +39,7 @@ from app.tender_documents.service import (
     DocumentStorageError,
     ScopedNotFoundError as DocumentScopedNotFoundError,
     SourceFetchError,
+    SourceFetchResult,
     create_document_from_bytes,
     create_document_for_tender,
     enforce_source_fetch_rate_limit,
@@ -1275,17 +1276,21 @@ async def web_import_source_documents(
     except DocumentScopedNotFoundError:
         return _redirect_with_action(tender_id, "source_docs", False, "Тендер не найден")
 
-    existing_names = {doc.file_name for doc in existing_documents}
+    existing_signatures = {(doc.file_name.lower(), doc.file_size or -1) for doc in existing_documents}
     try:
-        files, _ = await fetch_source_documents(tender.source_url, max_docs=20)
+        result: SourceFetchResult = await fetch_source_documents(tender.source_url, max_docs=20)
     except SourceFetchError as exc:
-        return _redirect_with_action(tender_id, "source_docs", False, "Не удалось скачать документы", str(exc))
+        details = f"Страниц проверено: {exc.attempted_pages}, ссылок найдено: {exc.found_links_count}"
+        if exc.errors_sample:
+            details = f"{details}. Ошибки: {'; '.join(exc.errors_sample[:3])}"
+        return _redirect_with_action(tender_id, "source_docs", False, str(exc), details)
 
     created = 0
-    skipped = 0
-    for file_name, content, content_type in files:
-        if file_name in existing_names:
-            skipped += 1
+    skipped_duplicates = 0
+    for file_item in result.files:
+        signature = (file_item.file_name.lower(), len(file_item.content))
+        if signature in existing_signatures:
+            skipped_duplicates += 1
             continue
         try:
             await create_document_from_bytes(
@@ -1293,24 +1298,32 @@ async def web_import_source_documents(
                 company_id=current_user.company_id,
                 tender_id=tender_id,
                 uploaded_by=current_user.id,
-                file_name=file_name,
-                content=content,
-                content_type=content_type,
+                file_name=file_item.file_name,
+                content=file_item.content,
+                content_type=file_item.content_type,
                 doc_type="source_import",
             )
-            existing_names.add(file_name)
+            existing_signatures.add(signature)
             created += 1
         except (DocumentScopedNotFoundError, DocumentStorageError):
-            skipped += 1
+            skipped_duplicates += 1
 
-    if created == 0 and skipped == 0:
+    if created == 0 and skipped_duplicates == 0:
         return _redirect_with_action(tender_id, "source_docs", False, "Документы не найдены на странице источника")
+
+    details = (
+        f"Страниц проверено: {result.attempted_pages}, ссылок найдено: {result.found_links_count}, "
+        f"скачано: {created}, дубликатов: {skipped_duplicates}"
+    )
+    if result.errors_sample:
+        details = f"{details}. Ошибки: {'; '.join(result.errors_sample[:3])}"
 
     return _redirect_with_action(
         tender_id,
         "source_docs",
         True,
-        f"Импорт документов завершен: добавлено {created}, пропущено {skipped}",
+        f"Импорт документов завершен: добавлено {created}, пропущено {skipped_duplicates}",
+        details,
     )
 
 

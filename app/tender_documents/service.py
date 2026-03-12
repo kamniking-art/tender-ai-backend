@@ -3,6 +3,7 @@ import mimetypes
 import re
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urljoin, urlparse
 from uuid import UUID
@@ -26,9 +27,38 @@ class DocumentStorageError(Exception):
 
 
 class SourceFetchError(Exception):
-    def __init__(self, message: str, source_status: str = "error") -> None:
+    def __init__(
+        self,
+        message: str,
+        source_status: str = "error",
+        *,
+        found_links_count: int = 0,
+        attempted_pages: int = 0,
+        errors_sample: list[str] | None = None,
+    ) -> None:
         super().__init__(message)
         self.source_status = source_status
+        self.found_links_count = found_links_count
+        self.attempted_pages = attempted_pages
+        self.errors_sample = errors_sample or []
+
+
+@dataclass
+class SourceFetchedFile:
+    file_name: str
+    content: bytes
+    content_type: str | None
+    source_link: str
+
+
+@dataclass
+class SourceFetchResult:
+    source_status: str
+    message: str
+    attempted_pages: int
+    found_links_count: int
+    files: list[SourceFetchedFile]
+    errors_sample: list[str]
 
 
 _SOURCE_FETCH_GUARD_LOCK = asyncio.Lock()
@@ -183,11 +213,39 @@ async def delete_document_scoped(db: AsyncSession, *, company_id: UUID, document
 
 
 _DOC_HREF_RE = re.compile(r'href=["\']([^"\']+)["\']', re.IGNORECASE)
-_DOC_EXT_RE = re.compile(r"\.(pdf|docx?|rtf|zip)(?:$|\?)", re.IGNORECASE)
+_DOC_EXT_RE = re.compile(r"\.(pdf|docx?|xlsx?|zip|rar)(?:$|\?)", re.IGNORECASE)
+_ANCHOR_RE = re.compile(r"<a\b([^>]+)>(.*?)</a>", re.IGNORECASE | re.DOTALL)
+_ATTR_LINK_RE = re.compile(
+    r'(?:href|data-href|data-url|data-link|src)\s*=\s*["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+_ONCLICK_LINK_RE = re.compile(
+    r"""(?:open|location(?:\.href)?|window\.open)\s*\(\s*['"]([^'"]+)['"]""",
+    re.IGNORECASE,
+)
+_RAW_JS_LINK_RE = re.compile(
+    r"""['"]((?:https?://|/)[^'"]+(?:\.(?:pdf|docx?|xlsx?|zip|rar)|documents?|attachments?)[^'"]*)['"]""",
+    re.IGNORECASE,
+)
+_DOC_PAGE_KEYWORDS = (
+    "document",
+    "documents",
+    "docs",
+    "attachment",
+    "attachments",
+    "влож",
+    "документ",
+    "документац",
+    "документация",
+    "файл",
+    "скачат",
+    "прикреп",
+)
 _SOURCE_DOC_UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
 )
+_ALLOWED_DOC_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".rar"}
 
 
 def _guess_filename_from_url(url: str, index: int) -> str:
@@ -198,74 +256,255 @@ def _guess_filename_from_url(url: str, index: int) -> str:
     return sanitize_filename(file_name[:200])
 
 
-async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> tuple[list[tuple[str, bytes, str | None]], str]:
+def _normalize_link(base_url: str, link: str) -> str | None:
+    raw = (link or "").strip()
+    if not raw or raw.startswith(("javascript:", "mailto:", "#")):
+        return None
+    return urljoin(base_url, raw)
+
+
+def _is_doc_link(link: str) -> bool:
+    path = urlparse(link).path.lower()
+    ext = Path(path).suffix.lower()
+    return ext in _ALLOWED_DOC_EXTENSIONS
+
+
+def _clean_html_text(value: str) -> str:
+    no_tags = re.sub(r"<[^>]+>", " ", value or "", flags=re.DOTALL)
+    return " ".join(no_tags.split()).strip().lower()
+
+
+def _extract_candidate_links(base_url: str, html_text: str) -> tuple[list[str], list[str]]:
+    doc_links: list[str] = []
+    page_links: list[str] = []
+
+    for link in _ATTR_LINK_RE.findall(html_text):
+        full = _normalize_link(base_url, link)
+        if not full:
+            continue
+        if _is_doc_link(full):
+            doc_links.append(full)
+        elif any(token in full.lower() for token in _DOC_PAGE_KEYWORDS):
+            page_links.append(full)
+
+    for link in _DOC_HREF_RE.findall(html_text):
+        full = _normalize_link(base_url, link)
+        if not full:
+            continue
+        if _is_doc_link(full):
+            doc_links.append(full)
+
+    for attrs, inner_html in _ANCHOR_RE.findall(html_text):
+        text = _clean_html_text(inner_html)
+        href_match = _ATTR_LINK_RE.search(attrs)
+        href = href_match.group(1) if href_match else ""
+        full = _normalize_link(base_url, href)
+        if not full:
+            continue
+        if _is_doc_link(full):
+            doc_links.append(full)
+            continue
+        if any(token in text or token in full.lower() for token in _DOC_PAGE_KEYWORDS):
+            page_links.append(full)
+
+    for link in _ONCLICK_LINK_RE.findall(html_text):
+        full = _normalize_link(base_url, link)
+        if not full:
+            continue
+        if _is_doc_link(full):
+            doc_links.append(full)
+        elif any(token in full.lower() for token in _DOC_PAGE_KEYWORDS):
+            page_links.append(full)
+
+    for link in _RAW_JS_LINK_RE.findall(html_text):
+        full = _normalize_link(base_url, link)
+        if not full:
+            continue
+        if _is_doc_link(full):
+            doc_links.append(full)
+        elif any(token in full.lower() for token in _DOC_PAGE_KEYWORDS):
+            page_links.append(full)
+
+    return list(dict.fromkeys(doc_links)), list(dict.fromkeys(page_links))
+
+
+def _guess_related_document_pages(source_url: str) -> list[str]:
+    parsed = urlparse(source_url)
+    path = parsed.path or ""
+    candidates = [source_url]
+    if "common-info" in path:
+        candidates.append(source_url.replace("common-info", "documents-info"))
+        candidates.append(source_url.replace("common-info", "docs"))
+        candidates.append(source_url.replace("common-info", "attachments"))
+    candidates.append(urljoin(source_url, "./documents.html"))
+    candidates.append(urljoin(source_url, "./docs.html"))
+    return list(dict.fromkeys(candidates))
+
+
+async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> SourceFetchResult:
     timeout = httpx.Timeout(25)
+    errors: list[str] = []
+
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         html_text: str | None = None
-        for attempt in range(3):
-            try:
-                page = await client.get(
-                    source_url,
-                    headers={
-                        "User-Agent": _SOURCE_DOC_UA[attempt % len(_SOURCE_DOC_UA)],
-                        "Accept": "text/html,application/xhtml+xml",
-                        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
-                    },
-                )
-                lower = (page.text or "").lower()
-                if page.status_code in {403, 434} or "captcha" in lower:
-                    if attempt < 2:
+        attempted_pages = 0
+        related_pages_to_try: list[str] = []
+        all_doc_links: list[str] = []
+        visited_page_links: set[str] = set()
+
+        async def fetch_html(page_url: str, retries: int = 2) -> str:
+            nonlocal attempted_pages
+            attempted_pages += 1
+            for attempt in range(retries + 1):
+                try:
+                    page = await client.get(
+                        page_url,
+                        headers={
+                            "User-Agent": _SOURCE_DOC_UA[attempt % len(_SOURCE_DOC_UA)],
+                            "Accept": "text/html,application/xhtml+xml",
+                            "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+                        },
+                    )
+                    lower = (page.text or "").lower()
+                    if page.status_code in {403, 429, 434} or "captcha" in lower:
+                        if attempt < retries:
+                            await asyncio.sleep(1 + attempt)
+                            continue
+                        raise SourceFetchError(
+                            "Источник временно недоступен",
+                            source_status="blocked",
+                            attempted_pages=attempted_pages,
+                            errors_sample=errors[:3],
+                        )
+                    if any(marker in lower for marker in ("регламентных работ", "технических работ")):
+                        raise SourceFetchError(
+                            "Источник на техработах",
+                            source_status="maintenance",
+                            attempted_pages=attempted_pages,
+                            errors_sample=errors[:3],
+                        )
+                    if page.status_code >= 400:
+                        if attempt < retries:
+                            await asyncio.sleep(1 + attempt)
+                            continue
+                        raise SourceFetchError(
+                            f"Ошибка источника: HTTP {page.status_code}",
+                            source_status="error",
+                            attempted_pages=attempted_pages,
+                            errors_sample=errors[:3],
+                        )
+                    return page.text or ""
+                except httpx.HTTPError as exc:
+                    errors.append(f"{page_url}: {exc.__class__.__name__}")
+                    if attempt < retries:
                         await asyncio.sleep(1 + attempt)
                         continue
-                    raise SourceFetchError("Источник временно недоступен", source_status="blocked")
-                if any(marker in lower for marker in ("регламентных работ", "технических работ")):
-                    raise SourceFetchError("Источник на техработах", source_status="maintenance")
-                if page.status_code >= 400:
-                    raise SourceFetchError(f"Ошибка источника: HTTP {page.status_code}", source_status="error")
-                html_text = page.text or ""
+                    raise SourceFetchError(
+                        "Не удалось открыть страницу источника",
+                        source_status="error",
+                        attempted_pages=attempted_pages,
+                        errors_sample=errors[:3],
+                    ) from exc
+            return ""
+
+        for attempt in range(3):
+            try:
+                html_text = await fetch_html(source_url)
                 break
-            except httpx.HTTPError:
+            except SourceFetchError:
                 if attempt < 2:
                     await asyncio.sleep(1 + attempt)
                     continue
-                raise SourceFetchError("Не удалось открыть страницу источника", source_status="error")
+                raise
 
         if not html_text:
-            raise SourceFetchError("Страница источника пустая", source_status="error")
+            raise SourceFetchError(
+                "Страница источника пустая",
+                source_status="error",
+                attempted_pages=attempted_pages,
+                errors_sample=errors[:3],
+            )
 
-        links: list[str] = []
-        for href in _DOC_HREF_RE.findall(html_text):
-            if not _DOC_EXT_RE.search(href):
+        main_doc_links, page_links = _extract_candidate_links(source_url, html_text)
+        all_doc_links.extend(main_doc_links)
+        related_pages_to_try.extend(page_links)
+        related_pages_to_try.extend(_guess_related_document_pages(source_url))
+
+        max_related_pages = 5
+        for page_link in related_pages_to_try:
+            if len(visited_page_links) >= max_related_pages:
+                break
+            normalized = _normalize_link(source_url, page_link)
+            if not normalized or normalized in visited_page_links:
                 continue
-            links.append(urljoin(source_url, href))
-        links = list(dict.fromkeys(links))
-        if not links:
-            raise SourceFetchError("На странице не найдены ссылки на документы", source_status="ok")
+            visited_page_links.add(normalized)
+            if normalized == source_url:
+                continue
+            try:
+                page_html = await fetch_html(normalized, retries=1)
+            except SourceFetchError as exc:
+                if exc.source_status in {"blocked", "maintenance"}:
+                    raise
+                errors.append(f"{normalized}: {exc}")
+                continue
+            doc_links, _ = _extract_candidate_links(normalized, page_html)
+            all_doc_links.extend(doc_links)
 
-        files: list[tuple[str, bytes, str | None]] = []
+        unique_links = list(dict.fromkeys(link for link in all_doc_links if _DOC_EXT_RE.search(link)))
+        found_links_count = len(unique_links)
+        if not unique_links:
+            raise SourceFetchError(
+                "На карточке ЕИС документы не найдены",
+                source_status="ok",
+                found_links_count=0,
+                attempted_pages=attempted_pages,
+                errors_sample=errors[:3],
+            )
+
+        files: list[SourceFetchedFile] = []
+        seen_download_signatures: set[tuple[str, int]] = set()
         total_bytes = 0
         max_total_bytes = 100 * 1024 * 1024
-        for idx, link in enumerate(links[:max_docs], start=1):
+        for idx, link in enumerate(unique_links[:max_docs], start=1):
             try:
                 resp = await client.get(
                     link,
                     headers={"User-Agent": _SOURCE_DOC_UA[idx % len(_SOURCE_DOC_UA)]},
                 )
-            except httpx.HTTPError:
+            except httpx.HTTPError as exc:
+                errors.append(f"{link}: {exc.__class__.__name__}")
                 continue
             if resp.status_code >= 400 or not resp.content:
+                errors.append(f"{link}: http_{resp.status_code}")
                 continue
             if total_bytes + len(resp.content) > max_total_bytes:
                 break
             file_name = _guess_filename_from_url(link, idx)
+            signature = (file_name.lower(), len(resp.content))
+            if signature in seen_download_signatures:
+                continue
             content_type = resp.headers.get("content-type") or mimetypes.guess_type(file_name)[0]
-            files.append((file_name, resp.content, content_type))
+            files.append(SourceFetchedFile(file_name=file_name, content=resp.content, content_type=content_type, source_link=link))
+            seen_download_signatures.add(signature)
             total_bytes += len(resp.content)
 
         if not files:
-            raise SourceFetchError("Не удалось скачать документы из найденных ссылок", source_status="error")
+            raise SourceFetchError(
+                "Не удалось скачать документы из найденных ссылок",
+                source_status="error",
+                found_links_count=found_links_count,
+                attempted_pages=attempted_pages,
+                errors_sample=errors[:3],
+            )
 
-        return files, "ok"
+        return SourceFetchResult(
+            source_status="ok",
+            message="Документы загружены",
+            attempted_pages=attempted_pages,
+            found_links_count=found_links_count,
+            files=files,
+            errors_sample=errors[:3],
+        )
 
 
 async def enforce_source_fetch_rate_limit(scope_key: str, cooldown_seconds: int = 1800) -> int | None:

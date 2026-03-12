@@ -13,6 +13,7 @@ from app.tender_documents.service import (
     DocumentStorageError,
     ScopedNotFoundError,
     SourceFetchError,
+    SourceFetchResult,
     create_document_from_bytes,
     enforce_source_fetch_rate_limit,
     create_document_for_tender,
@@ -139,25 +140,29 @@ async def fetch_tender_documents_from_source(
         )
 
     documents = await list_documents_for_tender(db, company_id=current_user.company_id, tender_id=tender_id)
-    existing_names = {item.file_name for item in documents}
+    existing_signatures = {(item.file_name.lower(), item.file_size or -1) for item in documents}
 
     try:
-        files, source_status = await fetch_source_documents(tender.source_url, max_docs=20)
+        result: SourceFetchResult = await fetch_source_documents(tender.source_url, max_docs=20)
     except SourceFetchError as exc:
         return {
             "source_status": exc.source_status,
-            "downloaded_count": 0,
-            "skipped_count": 0,
-            "files": [],
             "message": str(exc),
+            "attempted_pages": exc.attempted_pages,
+            "found_links_count": exc.found_links_count,
+            "downloaded_count": 0,
+            "saved_files": [],
+            "skipped_duplicates": 0,
+            "errors_sample": exc.errors_sample[:3],
         }
 
     downloaded_count = 0
-    skipped_count = 0
-    file_names: list[str] = []
-    for file_name, content, content_type in files:
-        if file_name in existing_names:
-            skipped_count += 1
+    skipped_duplicates = 0
+    saved_files: list[str] = []
+    for file_item in result.files:
+        signature = (file_item.file_name.lower(), len(file_item.content))
+        if signature in existing_signatures:
+            skipped_duplicates += 1
             continue
         try:
             created = await create_document_from_bytes(
@@ -165,21 +170,29 @@ async def fetch_tender_documents_from_source(
                 company_id=current_user.company_id,
                 tender_id=tender_id,
                 uploaded_by=current_user.id,
-                file_name=file_name,
-                content=content,
-                content_type=content_type,
+                file_name=file_item.file_name,
+                content=file_item.content,
+                content_type=file_item.content_type,
                 doc_type="source_import",
             )
         except (ScopedNotFoundError, DocumentStorageError):
-            skipped_count += 1
+            result.errors_sample.append(f"{file_item.file_name}: save_failed")
             continue
-        existing_names.add(file_name)
+        existing_signatures.add(signature)
         downloaded_count += 1
-        file_names.append(created.file_name)
+        saved_files.append(created.file_name)
 
     return {
-        "source_status": source_status,
+        "source_status": result.source_status,
+        "message": (
+            "Документы загружены"
+            if downloaded_count > 0
+            else ("Все найденные файлы уже загружены" if result.found_links_count > 0 else "На карточке ЕИС документы не найдены")
+        ),
+        "attempted_pages": result.attempted_pages,
+        "found_links_count": result.found_links_count,
         "downloaded_count": downloaded_count,
-        "skipped_count": skipped_count,
-        "files": file_names,
+        "saved_files": saved_files,
+        "skipped_duplicates": skipped_duplicates,
+        "errors_sample": result.errors_sample[:3],
     }
