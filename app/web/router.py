@@ -28,6 +28,8 @@ from app.document_module.service import (
 )
 from app.ingestion.eis_site.service import run_eis_site_bulk_for_company, run_eis_site_once_for_company
 from app.models import Company, User
+from app.monitoring.schemas import MonitoringSettings, MonitoringSettingsPatch
+from app.monitoring.service import get_monitoring_notifications, get_monitoring_settings, patch_monitoring_settings, run_monitoring_cycle
 from app.risk.service import compute_risk_flags, compute_risk_score_v1
 from app.tender_alerts.schemas import AlertCategory
 from app.tender_alerts.service import ack_alert, build_alert_digest, ensure_tender_scoped
@@ -571,6 +573,9 @@ async def logout_submit():
 @router.get("")
 async def dashboard(
     request: Request,
+    monitor_status: str | None = Query(default=None),
+    monitor_message: str | None = Query(default=None),
+    monitor_details: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_from_cookie),
 ):
@@ -597,9 +602,98 @@ async def dashboard(
                 "recommendation_display": recommendation_display,
             }
         )
+    company = await db.scalar(select(Company).where(Company.id == current_user.company_id))
+    monitoring_settings = get_monitoring_settings(company) if company else MonitoringSettings()
+    monitoring_notifications = get_monitoring_notifications(company, limit=20) if company else []
+    monitoring_last_result = {}
+    if company and isinstance(company.profile, dict):
+        state = company.profile.get("monitoring_state")
+        if isinstance(state, dict) and isinstance(state.get("last_result"), dict):
+            monitoring_last_result = state.get("last_result") or {}
+
     return templates.TemplateResponse(
         "dashboard.html",
-        _template_context(request, current_user, counts=digest.counts, items=dashboard_items),
+        _template_context(
+            request,
+            current_user,
+            counts=digest.counts,
+            items=dashboard_items,
+            monitoring_settings=monitoring_settings,
+            monitoring_notifications=monitoring_notifications,
+            monitoring_last_result=monitoring_last_result,
+            monitor_result={
+                "status": monitor_status,
+                "message": monitor_message,
+                "details": monitor_details,
+            },
+        ),
+    )
+
+
+@router.post("/monitoring/settings")
+async def web_save_monitoring_settings(
+    enabled: bool = Form(default=False),
+    queries_text: str | None = Form(default=None),
+    pages_per_query: int = Form(default=5),
+    page_size: int = Form(default=20),
+    relevance_min: int = Form(default=45),
+    notify_only_new: bool = Form(default=False),
+    interval_minutes: int = Form(default=360),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_cookie),
+):
+    company = await db.scalar(select(Company).where(Company.id == current_user.company_id))
+    if company is None:
+        return RedirectResponse(
+            url="/web?monitor_status=error&monitor_message=Компания не найдена",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    queries = [line.strip() for line in (queries_text or "").splitlines() if line.strip()]
+    patch = MonitoringSettingsPatch(
+        enabled=bool(enabled),
+        queries=queries,
+        pages_per_query=max(1, min(50, int(pages_per_query or 5))),
+        page_size=max(10, min(50, int(page_size or 20))),
+        relevance_min=max(0, min(100, int(relevance_min or 45))),
+        notify_only_new=bool(notify_only_new),
+        interval_minutes=max(30, min(24 * 60, int(interval_minutes or 360))),
+    )
+    settings_payload = patch_monitoring_settings(company, patch)
+    await db.commit()
+    await db.refresh(company)
+
+    msg = (
+        f"Сохранено: запросов={len(settings_payload.queries)}, "
+        f"pages={settings_payload.pages_per_query}, page_size={settings_payload.page_size}, "
+        f"relevance_min={settings_payload.relevance_min}"
+    )
+    return RedirectResponse(
+        url=f"/web?{urlencode({'monitor_status': 'ok', 'monitor_message': msg})}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/monitoring/run-once")
+async def web_monitoring_run_once(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_cookie),
+):
+    company = await db.scalar(select(Company).where(Company.id == current_user.company_id))
+    if company is None:
+        return RedirectResponse(
+            url="/web?monitor_status=error&monitor_message=Компания не найдена",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    result = await run_monitoring_cycle(db, company=company, actor_user_id=current_user.id)
+    summary = (
+        f"Запросов: {result.queries_total}, импортировано: {result.imported_total}, "
+        f"новых: {result.new_tenders}, релевантных: {result.relevant_found}, уведомлений: {result.notifications_sent}"
+    )
+    return RedirectResponse(
+        url=f"/web?{urlencode({'monitor_status': 'ok', 'monitor_message': summary})}",
+        status_code=status.HTTP_303_SEE_OTHER,
     )
 
 

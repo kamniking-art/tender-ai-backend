@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     documents_subdir: str = "tender_docs"
     task_sla_check_interval_minutes: int = 5
     telegram_notify_interval_minutes: int = 5
+    monitoring_interval_minutes: int = 360
 
     # EIS OpenData discovery/config
     eis_opendata_base_url: str = "https://zakupki.gov.ru"

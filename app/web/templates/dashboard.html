@@ -54,4 +54,100 @@
   <p>Нет активных уведомлений.</p>
   {% endif %}
 </section>
+
+<section class="card">
+  <h2>Мониторинг тендеров</h2>
+  <form method="post" action="/web/monitoring/settings" class="filters">
+    <label>
+      <input type="checkbox" name="enabled" {% if monitoring_settings.enabled %}checked{% endif %} />
+      Включить мониторинг
+    </label>
+    <label>Ключевые запросы (по одному в строке)
+      <textarea name="queries_text" rows="8">{% for q in monitoring_settings.queries %}{{ q }}
+{% endfor %}</textarea>
+    </label>
+    <label>Страниц на запрос
+      <input type="number" name="pages_per_query" min="1" max="50" value="{{ monitoring_settings.pages_per_query }}" />
+    </label>
+    <label>Тендеров на страницу
+      <input type="number" name="page_size" min="10" max="50" value="{{ monitoring_settings.page_size }}" />
+    </label>
+    <label>Минимальная релевантность
+      <input type="number" name="relevance_min" min="0" max="100" value="{{ monitoring_settings.relevance_min }}" />
+    </label>
+    <label>Интервал (минуты)
+      <input type="number" name="interval_minutes" min="30" max="1440" value="{{ monitoring_settings.interval_minutes }}" />
+    </label>
+    <label>
+      <input type="checkbox" name="notify_only_new" {% if monitoring_settings.notify_only_new %}checked{% endif %} />
+      Только новые
+    </label>
+    <div class="actions-row">
+      <button type="submit">Сохранить настройки мониторинга</button>
+    </div>
+  </form>
+  <form method="post" action="/web/monitoring/run-once" class="inline-form" style="margin-top:12px;">
+    <button type="submit">Запустить мониторинг сейчас</button>
+    <a href="/web/tenders?status=new&relevant_only=true">Только новые релевантные</a>
+  </form>
+  {% if monitor_result and monitor_result.message %}
+  <p>
+    <strong>{% if monitor_result.status == "ok" %}Успешно{% else %}Ошибка{% endif %}:</strong>
+    {{ monitor_result.message }}
+  </p>
+  {% if monitor_result.details %}
+  <details>
+    <summary>Подробности</summary>
+    <pre>{{ monitor_result.details }}</pre>
+  </details>
+  {% endif %}
+  {% endif %}
+  {% if monitoring_last_result %}
+  <p>
+    Последний цикл:
+    запросов={{ monitoring_last_result.queries_total or 0 }},
+    импортировано={{ monitoring_last_result.imported_total or 0 }},
+    новых={{ monitoring_last_result.new_tenders or 0 }},
+    релевантных={{ monitoring_last_result.relevant_found or 0 }},
+    уведомлений={{ monitoring_last_result.notifications_sent or 0 }}
+  </p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Новые релевантные тендеры</h2>
+  {% if monitoring_notifications %}
+  <table>
+    <thead>
+      <tr>
+        <th>Тендер</th>
+        <th>Категория</th>
+        <th>Релевантность</th>
+        <th>Риск</th>
+        <th>Рекомендация</th>
+        <th>НМЦК</th>
+        <th>Ссылки</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in monitoring_notifications %}
+      <tr>
+        <td><a href="/web/tenders/{{ item.tender_id }}">{{ item.title or item.external_id or item.tender_id }}</a></td>
+        <td>{{ item.category or "-" }}</td>
+        <td>{{ item.relevance_score or "-" }}{% if item.relevance_label %} ({{ item.relevance_label }}){% endif %}</td>
+        <td>{{ item.risk_score or "-" }}</td>
+        <td>{% if item.recommendation %}{{ item.recommendation | decision_status_ru }}{% else %}-{% endif %}</td>
+        <td>{{ item.nmck | ru_money("RUB") }}</td>
+        <td>
+          {% if item.tender_url %}<a href="{{ item.tender_url }}">Tender AI</a>{% endif %}
+          {% if item.source_url %}<a href="{{ item.source_url }}" target="_blank" rel="noopener noreferrer">ЕИС</a>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>Новых релевантных тендеров пока нет.</p>
+  {% endif %}
+</section>
 {% endblock %}

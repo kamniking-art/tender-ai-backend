@@ -591,3 +591,51 @@ curl -X PUT "http://localhost:8000/tenders/<TENDER_ID>/finance" \
 curl "http://localhost:8000/tenders/<TENDER_ID>/finance" \
   -H "Authorization: Bearer $TOKEN"
 ```
+
+## Tender monitoring (auto import + relevance + notifications)
+
+Monitoring settings are stored in `company.profile.monitoring`.
+
+### Get monitoring settings
+
+```bash
+curl "http://localhost:8000/companies/me/monitoring-settings" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Update monitoring settings
+
+```bash
+curl -X PATCH "http://localhost:8000/companies/me/monitoring-settings" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "enabled": true,
+    "queries": ["гранит", "керамогранит", "памятник", "мемориал"],
+    "pages_per_query": 5,
+    "page_size": 20,
+    "relevance_min": 45,
+    "notify_only_new": true,
+    "interval_minutes": 360
+  }'
+```
+
+### Manual monitoring cycle
+
+```bash
+curl -X POST "http://localhost:8000/monitoring/run-once" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Response includes:
+- `queries_total`
+- `imported_total`
+- `new_tenders`
+- `relevance_checked`
+- `relevant_found`
+- `notifications_sent`
+
+Web UI:
+- Dashboard section `/web` includes monitoring settings form
+- Button `Запустить мониторинг сейчас`
+- Block `Новые релевантные тендеры` with generated notifications

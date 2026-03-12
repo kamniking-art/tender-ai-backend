@@ -25,6 +25,8 @@ from app.tender_tasks.scheduler import scheduler as tender_task_scheduler
 from app.tenders import router as tenders_router
 from app.telegram_notify import router as telegram_notify_router
 from app.telegram_notify.scheduler import scheduler as telegram_notify_scheduler
+from app.monitoring.router import router as monitoring_router, settings_router as monitoring_settings_router
+from app.monitoring.scheduler import scheduler as monitoring_scheduler
 from app.users import router as users_router
 from app.web import router as web_router
 
@@ -37,6 +39,8 @@ app.include_router(ingestion_settings_router)
 app.include_router(ingestion_opendata_router)
 app.include_router(ingestion_eis_site_router)
 app.include_router(ingestion_health_router)
+app.include_router(monitoring_settings_router)
+app.include_router(monitoring_router)
 app.include_router(tenders_router)
 app.include_router(tender_alerts_router)
 app.include_router(ai_extraction_router)
@@ -86,6 +90,7 @@ async def startup_event() -> None:
     await tender_task_scheduler.start()
     await ingestion_scheduler.start()
     await telegram_notify_scheduler.start()
+    await monitoring_scheduler.start()
 
 
 @app.on_event("shutdown")
@@ -93,3 +98,4 @@ async def shutdown_event() -> None:
     await tender_task_scheduler.stop()
     await ingestion_scheduler.stop()
     await telegram_notify_scheduler.stop()
+    await monitoring_scheduler.stop()
