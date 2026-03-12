@@ -153,6 +153,13 @@ FINANCE_RECOMMENDATION_RU = {
     "requires_analysis": "требует анализа",
 }
 
+RELEVANCE_CATEGORIES = [
+    "камень / гранит / памятники",
+    "благоустройство / строительство",
+    "строительные материалы",
+    "нерелевантно / прочее",
+]
+
 
 def _translate(value: str | None, mapping: dict[str, str], fallback: str = "-") -> str:
     if not value:
@@ -716,6 +723,7 @@ async def tenders_page(
     risk_min: str | None = Query(default=None),
     risk_max: str | None = Query(default=None),
     relevance_min: str | None = Query(default=None),
+    relevance_category: str | None = Query(default=None),
     relevant_only: str | None = Query(default=None),
     risky_only: str | None = Query(default=None),
     deadline_from: str | None = Query(default=None),
@@ -833,6 +841,7 @@ async def tenders_page(
     auto_risk_score = cast(TenderAnalysis.requirements["risk_v1"]["score_auto"].astext, Integer)
     effective_risk_score = func.coalesce(TenderDecision.risk_score, auto_risk_score)
     relevance_score = cast(TenderDecision.engine_meta["relevance"]["score"].astext, Integer)
+    relevance_category_expr = TenderDecision.engine_meta["relevance"]["category"].astext
 
     if _parse_bool(risky_only):
         stmt = stmt.where(effective_risk_score >= 70)
@@ -850,8 +859,11 @@ async def tenders_page(
         stmt = stmt.where(relevance_score >= parsed_relevance_min)
         count_stmt = count_stmt.where(relevance_score >= parsed_relevance_min)
     if _parse_bool(relevant_only):
-        stmt = stmt.where(relevance_score >= 60)
-        count_stmt = count_stmt.where(relevance_score >= 60)
+        stmt = stmt.where(relevance_score >= 45)
+        count_stmt = count_stmt.where(relevance_score >= 45)
+    if relevance_category:
+        stmt = stmt.where(relevance_category_expr == relevance_category)
+        count_stmt = count_stmt.where(relevance_category_expr == relevance_category)
 
     total = int((await db.execute(count_stmt)).scalar_one() or 0)
     offset = (page - 1) * page_size
@@ -875,6 +887,7 @@ async def tenders_page(
         "risk_min": parsed_risk_min if parsed_risk_min is not None else "",
         "risk_max": parsed_risk_max if parsed_risk_max is not None else "",
         "relevance_min": parsed_relevance_min if parsed_relevance_min is not None else "",
+        "relevance_category": relevance_category or "",
         "relevant_only": "true" if _parse_bool(relevant_only) else "",
         "risky_only": "true" if _parse_bool(risky_only) else "",
         "deadline_from": deadline_from or "",
@@ -932,6 +945,7 @@ async def tenders_page(
             tender_status_labels=TENDER_STATUS_RU,
             source_labels=SOURCE_RU,
             tender_relevance=tender_relevance,
+            relevance_categories=RELEVANCE_CATEGORIES,
             ingest_result={
                 "status": ingest_status,
                 "message": ingest_message,

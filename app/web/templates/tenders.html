@@ -132,6 +132,15 @@
       <input type="number" name="relevance_min" min="0" max="100" value="{{ filters.relevance_min }}" />
     </label>
 
+    <label>Категория релевантности
+      <select name="relevance_category">
+        <option value="">Все</option>
+        {% for category in relevance_categories %}
+          <option value="{{ category }}" {% if filters.relevance_category == category %}selected{% endif %}>{{ category }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
     <label>Только релевантные
       <select name="relevant_only">
         <option value="">Нет</option>
@@ -196,6 +205,7 @@
         <th>Место</th>
         <th>Заказчик</th>
         <th>Релевантность</th>
+        <th>Категория</th>
         <th>Дедлайн</th>
         <th>Публикация</th>
         <th>НМЦК</th>
@@ -215,6 +225,13 @@
           {% set rel = tender_relevance.get(tender.id|string) %}
           {% if rel %}
             {{ rel.get("score", "-") }}/100 ({{ rel.get("label", "-") }})
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td>
+          {% if rel %}
+            {{ rel.get("category", "-") }}
           {% else %}
             —
           {% endif %}
