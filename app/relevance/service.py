@@ -21,9 +21,15 @@ TEXT_SOURCE_WEIGHTS = {
 }
 
 KEYWORD_STRENGTH_WEIGHTS = {
-    "strong": 7,
+    "strong": 8,
     "medium": 4,
     "weak": 1,
+}
+
+CATEGORY_NICHE_MULTIPLIER = {
+    "stone_granite_memorial": 1.3,
+    "landscaping_construction": 0.8,
+    "building_materials": 0.9,
 }
 
 CATEGORY_RULES: dict[str, dict[str, Any]] = {
@@ -56,11 +62,7 @@ CATEGORY_RULES: dict[str, dict[str, Any]] = {
             "брусчатка",
             "щебень",
         ],
-        "weak": [
-            "поставка",
-            "материалы",
-            "работы",
-        ],
+        "weak": [],
     },
     "landscaping_construction": {
         "title": "благоустройство / строительство",
@@ -146,6 +148,8 @@ NEGATIVE_GROUPS: dict[str, list[str]] = {
     ],
     "питание/вода": [
         "питьевая вода",
+        "вода",
+        "водопровод",
         "продукты",
         "питание",
     ],
@@ -235,9 +239,10 @@ def _score_sources(
                 if not hits:
                     continue
                 hit_count = len(set(hits))
-                gain = hit_count * source_weight * KEYWORD_STRENGTH_WEIGHTS[strength]
+                base_gain = hit_count * source_weight * KEYWORD_STRENGTH_WEIGHTS[strength]
+                category_scores[category_code] += base_gain
+                gain = int(base_gain * CATEGORY_NICHE_MULTIPLIER[category_code])
                 score += gain
-                category_scores[category_code] += gain
                 matched_by_strength[strength].update(hits)
                 matched_sources.add(source_name)
                 matched_keywords_all.update(hits)
@@ -248,7 +253,7 @@ def _score_sources(
                 continue
             unique_hits = set(hits)
             negative_hits[group].update(unique_hits)
-            group_weight = 7 if source_name in {"title", "summary"} else 5
+            group_weight = 9 if source_name in {"title", "summary"} else 6
             negative_penalty += len(unique_hits) * group_weight
 
     if matched_sources >= {"title", "docs"}:
@@ -281,7 +286,7 @@ def _detect_category(category_scores: Counter[str], *, has_positive: bool, stron
         return "нерелевантно / прочее"
     category_code, _ = top[0]
     detected = CATEGORY_RULES[category_code]["title"]
-    if negative_penalty >= 30 and strong_hits == 0:
+    if negative_penalty >= 20 and strong_hits == 0:
         return "нерелевантно / прочее"
     return detected
 
@@ -326,6 +331,8 @@ def compute_relevance_v2(
         strong_hits=hits_count["strong"],
         negative_penalty=negative_penalty,
     )
+    if negative_keywords and hits_count["strong"] == 0 and score < 45:
+        detected_category = "нерелевантно / прочее"
 
     label = _label(score)
     is_relevant = score >= RELEVANCE_THRESHOLDS["medium"] and detected_category != "нерелевантно / прочее"
@@ -343,12 +350,12 @@ def compute_relevance_v2(
             f"Найдены совпадения ({', '.join(sorted(matched_keywords)[:6])}) {source_part or 'в тексте тендера'}; "
             f"сильных={hits_count['strong']}, средних={hits_count['medium']}, слабых={hits_count['weak']}."
         )
-        if negative_penalty > 0:
-            reason += " Есть нерелевантные маркеры, применен штраф."
+        if negative_keywords:
+            reason += f" Есть нерелевантные маркеры ({', '.join(sorted(negative_keywords)[:4])}), применен штраф."
     else:
         reason = "Релевантные признаки не обнаружены."
-        if negative_penalty > 0:
-            reason = "Тендер содержит признаки нерелевантных направлений."
+        if negative_keywords:
+            reason = f"Тендер содержит признаки нерелевантных направлений: {', '.join(sorted(negative_keywords)[:4])}."
 
     return {
         "score": score,
