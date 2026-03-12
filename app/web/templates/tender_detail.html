@@ -33,6 +33,7 @@
   <h2>Сводка статусов</h2>
   <div class="badges">
     <span class="badge">Анализ: {{ badges.analysis_status | analysis_status_ru }}</span>
+    <span class="badge">Релевантность: {% if badges.relevance_score is not none %}{{ badges.relevance_score }}/100 ({{ badges.relevance_label or '-' }}){% else %}-{% endif %}</span>
     <span class="badge">Риск: {{ badges.risk_score if badges.risk_score is not none else '-' }}</span>
     <span class="badge">Решение: {{ badges.decision | decision_status_ru }}</span>
     <span class="badge">Маржа %: {{ badges.margin_pct | ru_money if badges.margin_pct is not none else '-' }}</span>
@@ -90,6 +91,22 @@
       {% endif %}
     </form>
   </div>
+</section>
+
+<section class="card">
+  <h2>Релевантность</h2>
+  {% if relevance_meta %}
+  <div class="kv-grid">
+    <div><strong>Оценка:</strong> {{ relevance_meta.get("score", "-") }} / 100</div>
+    <div><strong>Уровень:</strong> {{ relevance_meta.get("label", "-") }}</div>
+    <div><strong>Категория:</strong> {{ relevance_meta.get("category", "-") }}</div>
+    <div><strong>Релевантен:</strong> {{ "да" if relevance_meta.get("is_relevant") else "нет" }}</div>
+  </div>
+  <p><strong>Совпадения:</strong> {{ (relevance_meta.get("matched_keywords") or []) | join(", ") if relevance_meta.get("matched_keywords") else "-" }}</p>
+  <p><strong>Обоснование:</strong> {{ relevance_meta.get("reason") or "-" }}</p>
+  {% else %}
+  <p>Релевантность не определена.</p>
+  {% endif %}
 </section>
 
 <section class="card">

@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai_extraction.schemas import ExtractedTenderV1
+from app.relevance.service import compute_relevance_v1
 from app.tender_analysis.model import TenderAnalysis
 from app.tender_decisions.model import TenderDecision
 from app.tender_finance.model import TenderFinance
@@ -251,10 +252,13 @@ def compute_decision_engine_v1(
 def _final_recommendation_from_finance(
     finance_recommendation: Literal["go", "no_go", "requires_analysis"],
     risk_score: int | None,
+    relevance_score: int | None,
 ) -> Literal["go", "no_go", "unsure"]:
     if finance_recommendation == "no_go":
         return "no_go"
     if finance_recommendation == "go" and risk_score is not None and risk_score <= RISK_GO_MAX:
+        if relevance_score is not None and relevance_score < 20:
+            return "unsure"
         return "go"
     return "unsure"
 
@@ -329,6 +333,7 @@ async def recompute_decision_engine_v1(
 
     analysis = await _get_analysis_scoped(db, company_id, tender_id)
     extracted = _extract_extracted(analysis)
+    relevance = compute_relevance_v1(tender=tender, analysis=analysis, extracted=extracted)
 
     risk_score = decision.risk_score if decision.risk_score is not None else _extract_auto_risk_score(analysis)
     short_deadline = _resolve_short_deadline(analysis, extracted)
@@ -353,13 +358,17 @@ async def recompute_decision_engine_v1(
     final_recommendation = _final_recommendation_from_finance(
         finance_recommendation=finance_result["finance_recommendation"],
         risk_score=risk_score,
+        relevance_score=relevance.get("score"),
     )
 
     engine["finance"] = finance_result
+    engine["relevance"] = relevance
     engine["recommendation_base"] = engine["recommendation"]
     engine["recommendation"] = final_recommendation
     engine["risk_go_max"] = RISK_GO_MAX
     engine["min_margin_pct"] = float(MIN_MARGIN_PCT)
+    if relevance.get("score") is not None and relevance["score"] < 20 and engine["recommendation_base"] == "go":
+        engine["explain"].append("relevance_guard=unsure (relevance_score<20)")
 
     decision.recommendation = engine["recommendation"]
     decision.engine_meta = engine

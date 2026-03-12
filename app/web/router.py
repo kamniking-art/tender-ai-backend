@@ -468,6 +468,15 @@ def _extract_risk_score(analysis: TenderAnalysis | None, decision: TenderDecisio
     return None
 
 
+def _extract_relevance(decision: TenderDecision | None) -> dict[str, object] | None:
+    if decision is None or not isinstance(decision.engine_meta, dict):
+        return None
+    payload = decision.engine_meta.get("relevance")
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
 def _top_risk_flags(analysis: TenderAnalysis | None, limit: int = 3) -> list[str]:
     if analysis is None or not isinstance(analysis.risk_flags, list):
         return []
@@ -706,6 +715,8 @@ async def tenders_page(
     price_max: str | None = Query(default=None),
     risk_min: str | None = Query(default=None),
     risk_max: str | None = Query(default=None),
+    relevance_min: str | None = Query(default=None),
+    relevant_only: str | None = Query(default=None),
     risky_only: str | None = Query(default=None),
     deadline_from: str | None = Query(default=None),
     deadline_to: str | None = Query(default=None),
@@ -723,6 +734,7 @@ async def tenders_page(
 ):
     parsed_risk_min = _parse_optional_int(risk_min, field="risk_min", ge=0, le=100)
     parsed_risk_max = _parse_optional_int(risk_max, field="risk_max", ge=0, le=100)
+    parsed_relevance_min = _parse_optional_int(relevance_min, field="relevance_min", ge=0, le=100)
     parsed_price_min = _parse_optional_decimal(price_min, field="price_min", ge=Decimal("0"))
     parsed_price_max = _parse_optional_decimal(price_max, field="price_max", ge=Decimal("0"))
     parsed_deadline_from = _parse_optional_datetime(deadline_from)
@@ -820,6 +832,7 @@ async def tenders_page(
 
     auto_risk_score = cast(TenderAnalysis.requirements["risk_v1"]["score_auto"].astext, Integer)
     effective_risk_score = func.coalesce(TenderDecision.risk_score, auto_risk_score)
+    relevance_score = cast(TenderDecision.engine_meta["relevance"]["score"].astext, Integer)
 
     if _parse_bool(risky_only):
         stmt = stmt.where(effective_risk_score >= 70)
@@ -832,6 +845,13 @@ async def tenders_page(
     if parsed_risk_max is not None:
         stmt = stmt.where(effective_risk_score <= parsed_risk_max)
         count_stmt = count_stmt.where(effective_risk_score <= parsed_risk_max)
+
+    if parsed_relevance_min is not None:
+        stmt = stmt.where(relevance_score >= parsed_relevance_min)
+        count_stmt = count_stmt.where(relevance_score >= parsed_relevance_min)
+    if _parse_bool(relevant_only):
+        stmt = stmt.where(relevance_score >= 60)
+        count_stmt = count_stmt.where(relevance_score >= 60)
 
     total = int((await db.execute(count_stmt)).scalar_one() or 0)
     offset = (page - 1) * page_size
@@ -854,6 +874,8 @@ async def tenders_page(
         "price_max": str(parsed_price_max) if parsed_price_max is not None else "",
         "risk_min": parsed_risk_min if parsed_risk_min is not None else "",
         "risk_max": parsed_risk_max if parsed_risk_max is not None else "",
+        "relevance_min": parsed_relevance_min if parsed_relevance_min is not None else "",
+        "relevant_only": "true" if _parse_bool(relevant_only) else "",
         "risky_only": "true" if _parse_bool(risky_only) else "",
         "deadline_from": deadline_from or "",
         "deadline_to": deadline_to or "",
@@ -881,6 +903,13 @@ async def tenders_page(
     if "fallback" not in {s for s in distinct_sources if s}:
         source_values = [s for s in source_values if s != "fallback"]
 
+    tender_relevance: dict[str, dict[str, object]] = {}
+    for tender in tenders:
+        decision = await get_decision_scoped(db, current_user.company_id, tender.id)
+        rel = _extract_relevance(decision)
+        if rel is not None:
+            tender_relevance[str(tender.id)] = rel
+
     return templates.TemplateResponse(
         "tenders.html",
         _template_context(
@@ -902,6 +931,7 @@ async def tenders_page(
             decision_status_labels=DECISION_STATUS_RU,
             tender_status_labels=TENDER_STATUS_RU,
             source_labels=SOURCE_RU,
+            tender_relevance=tender_relevance,
             ingest_result={
                 "status": ingest_status,
                 "message": ingest_message,
@@ -935,6 +965,7 @@ async def tender_detail_page(
     finance = await get_finance_scoped(db, company_id=current_user.company_id, tender_id=tender_id)
 
     risk_score = _extract_risk_score(analysis, decision)
+    relevance_meta = _extract_relevance(decision)
     risk_flags_top = _top_risk_flags(analysis)
     tender_flow_steps, action_availability, disabled_reasons, next_step = _build_detail_flow(
         documents_count=len(documents),
@@ -964,10 +995,13 @@ async def tender_detail_page(
                 "risk_flags": risk_flags_top,
                 "decision": decision.recommendation if decision else "none",
                 "margin_pct": decision.expected_margin_pct if decision else None,
+                "relevance_score": relevance_meta.get("score") if relevance_meta else None,
+                "relevance_label": relevance_meta.get("label") if relevance_meta else None,
                 "documents_count": len(documents),
                 "package_generated": bool(package.files),
                 "ingestion": _ingestion_status(company) if company else {},
             },
+            relevance_meta=relevance_meta,
             finance_meta=decision.engine_meta.get("finance") if decision and isinstance(decision.engine_meta, dict) else None,
             tender_flow_steps=tender_flow_steps,
             action_availability=action_availability,
@@ -1058,12 +1092,14 @@ async def web_analyze_from_source(
     steps = data.get("steps", {})
     fetch = steps.get("fetch_documents", {})
     extract = steps.get("extract", {})
+    relevance = steps.get("relevance", {})
     risk = steps.get("risk", {})
     engine = steps.get("recompute_engine", {})
 
     details_lines = [
         f"Документы: {fetch.get('downloaded_count', 0)} загружено, найдено ссылок: {fetch.get('found_links_count', 0)}",
         f"Извлечение: {extract.get('status', '-')}",
+        f"Релевантность: {relevance.get('relevance_score', '-')}/100 ({relevance.get('relevance_label', '-')})",
         f"Риск: {risk.get('risk_score', '-')}",
         f"Рекомендация: {engine.get('recommendation', '-')}",
     ]

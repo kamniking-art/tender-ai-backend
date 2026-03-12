@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.risk.service import compute_risk_flags, compute_risk_score_v1
+from app.relevance.service import compute_relevance_v1
 from app.tender_analysis.model import TenderAnalysis
 from app.tender_analysis.service import AnalysisConflictError, ScopedNotFoundError
 from app.tender_documents.service import (
@@ -185,6 +186,16 @@ async def analyze_from_source(
             int((time.monotonic() - started_at) * 1000),
         )
         return result
+
+    relevance_payload = compute_relevance_v1(tender=tender, analysis=analysis, extracted=extracted)
+    result["steps"]["relevance"] = _step(
+        "ok",
+        relevance_score=relevance_payload.get("score"),
+        relevance_label=relevance_payload.get("label"),
+        category=relevance_payload.get("category"),
+        matched_keywords=relevance_payload.get("matched_keywords", []),
+        is_relevant=relevance_payload.get("is_relevant"),
+    )
 
     try:
         risk_flags = compute_risk_flags(extracted, tender)

@@ -128,6 +128,17 @@
       <input type="number" name="risk_max" min="0" max="100" value="{{ filters.risk_max }}" />
     </label>
 
+    <label>Релевантность от
+      <input type="number" name="relevance_min" min="0" max="100" value="{{ filters.relevance_min }}" />
+    </label>
+
+    <label>Только релевантные
+      <select name="relevant_only">
+        <option value="">Нет</option>
+        <option value="true" {% if filters.relevant_only == "true" %}selected{% endif %}>Да</option>
+      </select>
+    </label>
+
     <label>Только рискованные
       <select name="risky_only">
         <option value="">Нет</option>
@@ -184,6 +195,7 @@
         <th>Регион</th>
         <th>Место</th>
         <th>Заказчик</th>
+        <th>Релевантность</th>
         <th>Дедлайн</th>
         <th>Публикация</th>
         <th>НМЦК</th>
@@ -199,6 +211,14 @@
         <td>{{ tender.region or '-' }}</td>
         <td>{{ tender.place_text or '-' }}</td>
         <td>{{ tender.customer_name or '-' }}</td>
+        <td>
+          {% set rel = tender_relevance.get(tender.id|string) %}
+          {% if rel %}
+            {{ rel.get("score", "-") }}/100 ({{ rel.get("label", "-") }})
+          {% else %}
+            —
+          {% endif %}
+        </td>
         <td>{{ tender.submission_deadline | ru_dt }}</td>
         <td>{{ tender.published_at | ru_dt }}</td>
         <td>{{ tender.nmck | ru_money("RUB") }}</td>
@@ -228,11 +248,15 @@
     form.addEventListener('submit', function () {
       const riskMin = form.querySelector('input[name=\"risk_min\"]');
       const riskMax = form.querySelector('input[name=\"risk_max\"]');
+      const relevanceMin = form.querySelector('input[name=\"relevance_min\"]');
       if (riskMin && riskMin.value.trim() === '') {
         riskMin.disabled = true;
       }
       if (riskMax && riskMax.value.trim() === '') {
         riskMax.disabled = true;
+      }
+      if (relevanceMin && relevanceMin.value.trim() === '') {
+        relevanceMin.disabled = true;
       }
     });
   })();
