@@ -108,10 +108,10 @@ async def run_extraction(
         logger.warning("Extraction missing files: tender_id=%s paths=%s", tender_id, missing_paths)
         raise ExtractionBadRequestError("Документ не найден на сервере")
 
-    supported_suffixes = {".pdf", ".docx", ".txt"}
+    supported_suffixes = {".pdf", ".docx", ".txt", ".xlsx"}
     has_supported = any((doc.file_name or "").lower().endswith(tuple(supported_suffixes)) for doc in documents)
     if not has_supported:
-        raise ExtractionProviderError("UNSUPPORTED_FORMAT", "No supported document formats (.pdf/.docx/.txt)")
+        raise ExtractionProviderError("UNSUPPORTED_FORMAT", "No supported document formats (.pdf/.docx/.txt/.xlsx)")
 
     merged_text = build_normalized_text(
         documents=documents,
