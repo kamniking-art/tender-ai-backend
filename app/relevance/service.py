@@ -17,7 +17,7 @@ TEXT_SOURCE_WEIGHTS = {
     "title": 5,
     "summary": 4,
     "docs": 3,
-    "customer": 1,
+    "customer": 0,
 }
 
 KEYWORD_STRENGTH_WEIGHTS = {
@@ -68,6 +68,7 @@ CATEGORY_RULES: dict[str, dict[str, Any]] = {
         "title": "благоустройство / строительство",
         "strong": [
             "благоустройство",
+            "благоустрой",
             "строительство",
             "малые архитектурные формы",
             "дорожные работы",
