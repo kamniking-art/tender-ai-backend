@@ -8,14 +8,6 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai_extraction.interfaces import ExtractionProviderError
-from app.ai_extraction.service import ExtractionBadRequestError, run_extraction
-from app.ai_extraction.text_extract import NoExtractableTextError
-from app.decision_engine.service import (
-    DecisionEngineBadRequestError,
-    ManualRecommendationConflictError,
-    recompute_decision_engine_v1,
-)
 from app.risk.service import compute_risk_flags, compute_risk_score_v1
 from app.tender_analysis.model import TenderAnalysis
 from app.tender_analysis.service import AnalysisConflictError, ScopedNotFoundError
@@ -164,6 +156,10 @@ async def analyze_from_source(
         return result
 
     try:
+        from app.ai_extraction.interfaces import ExtractionProviderError
+        from app.ai_extraction.service import ExtractionBadRequestError, run_extraction
+        from app.ai_extraction.text_extract import NoExtractableTextError
+
         analysis, extracted = await run_extraction(
             db,
             company_id=company_id,
@@ -210,6 +206,12 @@ async def analyze_from_source(
         return result
 
     try:
+        from app.decision_engine.service import (
+            DecisionEngineBadRequestError,
+            ManualRecommendationConflictError,
+            recompute_decision_engine_v1,
+        )
+
         decision, _ = await recompute_decision_engine_v1(
             db,
             company_id=company_id,
