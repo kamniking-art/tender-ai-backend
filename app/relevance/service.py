@@ -21,15 +21,15 @@ TEXT_SOURCE_WEIGHTS = {
 }
 
 KEYWORD_STRENGTH_WEIGHTS = {
-    "strong": 8,
+    "strong": 9,
     "medium": 4,
-    "weak": 1,
+    "weak": 0,
 }
 
 CATEGORY_NICHE_MULTIPLIER = {
-    "stone_granite_memorial": 1.3,
-    "landscaping_construction": 0.8,
-    "building_materials": 0.9,
+    "stone_granite_memorial": 1.35,
+    "landscaping_construction": 0.55,
+    "building_materials": 1.1,
 }
 
 CATEGORY_RULES: dict[str, dict[str, Any]] = {
@@ -53,14 +53,10 @@ CATEGORY_RULES: dict[str, dict[str, Any]] = {
             "мемориальный комплекс",
         ],
         "medium": [
-            "керамогранит",
-            "облицовка",
             "камень",
             "плита",
-            "плитка",
-            "бордюр",
-            "брусчатка",
-            "щебень",
+            "каменные изделия",
+            "изделия из камня",
         ],
         "weak": [],
     },
@@ -70,19 +66,21 @@ CATEGORY_RULES: dict[str, dict[str, Any]] = {
             "благоустройство",
             "благоустрой",
             "строительство",
+            "реконструкц",
             "малые архитектурные формы",
             "дорожные работы",
         ],
         "medium": [
             "тротуар",
             "покрытие",
-            "брусчатка",
             "озеленение",
             "территория",
             "ремонт",
-            "тротуар",
             "укладка",
             "монтаж",
+            "парк",
+            "общественная территория",
+            "стадион",
         ],
         "weak": [
             "поставка",
@@ -94,25 +92,40 @@ CATEGORY_RULES: dict[str, dict[str, Any]] = {
         "title": "строительные материалы",
         "strong": [
             "керамогранит",
+            "плитка",
+            "плитка гранитная",
+            "гранитная плитка",
+            "щебень",
+            "щебень гранитный",
+            "бордюр",
+            "бордюрный камень",
+            "брусчатка",
+            "тротуарная плитка",
             "строительные материалы",
+            "каменные изделия",
+            "изделия из камня",
             "облицовочные материалы",
             "стройматериалы",
+            "плиты облицовочные",
+            "облицовка",
         ],
         "medium": [
-            "плитка",
-            "щебень",
-            "бордюр",
+            "поставка материалов",
+            "строительный камень",
+            "отделочные материалы",
             "плита",
-            "цемент",
-            "бетон",
-            "кирпич",
-            "смесь",
-            "облицовка",
+            "плиты",
+            "покрытие",
+            "камень",
+            "материал",
+            "поставка",
         ],
         "weak": [
             "материалы",
             "поставка",
             "работы",
+            "ремонт",
+            "территория",
         ],
     },
 }
@@ -220,9 +233,24 @@ def _label(score: int) -> str:
 def _score_sources(
     *,
     text_sources: dict[str, str],
-) -> tuple[int, dict[str, int], dict[str, set[str]], set[str], Counter[str], set[str], int, set[str]]:
+) -> tuple[
+    int,
+    dict[str, int],
+    dict[str, set[str]],
+    set[str],
+    Counter[str],
+    dict[str, dict[str, int]],
+    dict[str, set[str]],
+    set[str],
+    int,
+    set[str],
+]:
     score = 0
     category_scores: Counter[str] = Counter()
+    category_hit_counts: dict[str, dict[str, int]] = {
+        code: {"strong": 0, "medium": 0, "weak": 0} for code in CATEGORY_RULES
+    }
+    category_keywords: dict[str, set[str]] = {code: set() for code in CATEGORY_RULES}
     matched_by_strength: dict[str, set[str]] = {"strong": set(), "medium": set(), "weak": set()}
     matched_sources: set[str] = set()
     matched_keywords_all: set[str] = set()
@@ -244,6 +272,8 @@ def _score_sources(
                 hit_count = len(set(hits))
                 base_gain = hit_count * source_weight * KEYWORD_STRENGTH_WEIGHTS[strength]
                 category_scores[category_code] += base_gain
+                category_hit_counts[category_code][strength] += hit_count
+                category_keywords[category_code].update(hits)
                 gain = int(base_gain * CATEGORY_NICHE_MULTIPLIER[category_code])
                 score += gain
                 matched_by_strength[strength].update(hits)
@@ -275,21 +305,46 @@ def _score_sources(
         matched_by_strength,
         matched_sources,
         category_scores,
+        category_hit_counts,
+        category_keywords,
         matched_keywords_all,
         negative_penalty + min(sum(len(v) for v in negative_hits.values()) * 4, 30),
         all_negative_hits,
     )
 
 
-def _detect_category(category_scores: Counter[str], *, has_positive: bool, strong_hits: int, negative_penalty: int) -> str:
+def _detect_category(
+    category_scores: Counter[str],
+    category_hit_counts: dict[str, dict[str, int]],
+    *,
+    has_positive: bool,
+    negative_penalty: int,
+) -> str:
     if not has_positive:
         return "нерелевантно / прочее"
+
+    stone_hits = category_hit_counts["stone_granite_memorial"]
+    materials_hits = category_hit_counts["building_materials"]
+    landscaping_hits = category_hit_counts["landscaping_construction"]
+
+    if stone_hits["strong"] > 0:
+        return CATEGORY_RULES["stone_granite_memorial"]["title"]
+
+    # Materials require concrete item signals, not only generic construction words.
+    has_materials_signal = materials_hits["strong"] > 0 or materials_hits["medium"] >= 2
+    if has_materials_signal:
+        return CATEGORY_RULES["building_materials"]["title"]
+
+    has_landscaping_signal = (landscaping_hits["strong"] + landscaping_hits["medium"]) > 0
+    if has_landscaping_signal:
+        return CATEGORY_RULES["landscaping_construction"]["title"]
+
     top = category_scores.most_common(1)
     if not top:
         return "нерелевантно / прочее"
     category_code, _ = top[0]
     detected = CATEGORY_RULES[category_code]["title"]
-    if negative_penalty >= 20 and strong_hits == 0:
+    if negative_penalty >= 20:
         return "нерелевантно / прочее"
     return detected
 
@@ -311,6 +366,8 @@ def compute_relevance_v2(
         matched_by_strength,
         matched_sources,
         category_scores,
+        category_hit_counts,
+        category_keywords,
         matched_keywords,
         negative_penalty,
         negative_keywords,
@@ -330,8 +387,8 @@ def compute_relevance_v2(
 
     detected_category = _detect_category(
         category_scores,
+        category_hit_counts,
         has_positive=has_positive,
-        strong_hits=hits_count["strong"],
         negative_penalty=negative_penalty,
     )
     if negative_keywords and hits_count["strong"] == 0 and score < 45:
@@ -348,11 +405,30 @@ def compute_relevance_v2(
     }
     source_part = ", ".join(source_labels[s] for s in ("title", "summary", "docs", "customer") if s in matched_sources)
 
+    stone_kw = sorted(category_keywords["stone_granite_memorial"])[:4]
+    materials_kw = sorted(category_keywords["building_materials"])[:5]
+    landscaping_kw = sorted(category_keywords["landscaping_construction"])[:4]
     if matched_keywords:
-        reason = (
-            f"Найдены совпадения ({', '.join(sorted(matched_keywords)[:6])}) {source_part or 'в тексте тендера'}; "
-            f"сильных={hits_count['strong']}, средних={hits_count['medium']}, слабых={hits_count['weak']}."
-        )
+        if detected_category == CATEGORY_RULES["building_materials"]["title"]:
+            reason = (
+                f"Найдены признаки поставки строительных материалов ({', '.join(materials_kw) or 'без детализации'}) "
+                f"{source_part or 'в тексте тендера'}."
+            )
+        elif detected_category == CATEGORY_RULES["stone_granite_memorial"]["title"]:
+            reason = (
+                f"Найдены признаки гранитной/мемориальной тематики ({', '.join(stone_kw) or 'без детализации'}) "
+                f"{source_part or 'в тексте тендера'}."
+            )
+        elif detected_category == CATEGORY_RULES["landscaping_construction"]["title"]:
+            reason = (
+                f"Есть общий строительный контекст ({', '.join(landscaping_kw) or 'благоустройство/ремонт'}) "
+                "без достаточного числа конкретных material-сигналов."
+            )
+        else:
+            reason = (
+                f"Найдены совпадения ({', '.join(sorted(matched_keywords)[:6])}) {source_part or 'в тексте тендера'}; "
+                f"сильных={hits_count['strong']}, средних={hits_count['medium']}, слабых={hits_count['weak']}."
+            )
         if negative_keywords:
             reason += f" Есть нерелевантные маркеры ({', '.join(sorted(negative_keywords)[:4])}), применен штраф."
     else:
