@@ -31,9 +31,6 @@ from app.web import router as web_router
 app = FastAPI(title="Tender AI Backend Core", version="1.0.0")
 app.mount("/static", StaticFiles(directory="app/web/static"), name="static")
 
-_APP_BUILT_AT = os.getenv("APP_BUILT_AT") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-_APP_VERSION = os.getenv("APP_VERSION", "unknown")
-
 app.include_router(auth_router)
 app.include_router(companies_router)
 app.include_router(ingestion_settings_router)
@@ -71,9 +68,15 @@ def _get_migrations_head() -> str:
 
 @app.get("/version")
 async def version() -> dict[str, str]:
+    built_at = (
+        os.getenv("APP_BUILT_AT_IMAGE")
+        or os.getenv("APP_BUILT_AT")
+        or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    )
+    version_value = os.getenv("APP_VERSION_IMAGE") or os.getenv("APP_VERSION") or "unknown"
     return {
-        "version": _APP_VERSION,
-        "built_at": _APP_BUILT_AT,
+        "version": version_value,
+        "built_at": built_at,
         "migrations_head": _get_migrations_head(),
     }
 

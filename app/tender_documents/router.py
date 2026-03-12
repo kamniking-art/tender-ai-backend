@@ -12,12 +12,17 @@ from app.tender_documents.schemas import TenderDocumentRead
 from app.tender_documents.service import (
     DocumentStorageError,
     ScopedNotFoundError,
+    SourceFetchError,
+    create_document_from_bytes,
+    enforce_source_fetch_rate_limit,
     create_document_for_tender,
+    fetch_source_documents,
     delete_document_scoped,
     get_document_scoped,
     list_documents_for_tender,
 )
 from app.core.config import settings
+from app.tenders.service import get_tender_by_id_scoped
 
 router = APIRouter(tags=["tender-documents"])
 
@@ -111,3 +116,70 @@ async def delete_tender_document(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
     return {"ok": True}
+
+
+@router.post("/tenders/{tender_id}/documents/fetch-from-source")
+async def fetch_tender_documents_from_source(
+    tender_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    tender = await get_tender_by_id_scoped(db, current_user.company_id, tender_id)
+    if tender is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Тендер не найден")
+    if not tender.source_url:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="У тендера нет source_url")
+
+    guard_key = f"{current_user.company_id}:{tender_id}"
+    retry_after = await enforce_source_fetch_rate_limit(guard_key, cooldown_seconds=30 * 60)
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Повторная загрузка доступна через {retry_after} сек.",
+        )
+
+    documents = await list_documents_for_tender(db, company_id=current_user.company_id, tender_id=tender_id)
+    existing_names = {item.file_name for item in documents}
+
+    try:
+        files, source_status = await fetch_source_documents(tender.source_url, max_docs=20)
+    except SourceFetchError as exc:
+        return {
+            "source_status": exc.source_status,
+            "downloaded_count": 0,
+            "skipped_count": 0,
+            "files": [],
+            "message": str(exc),
+        }
+
+    downloaded_count = 0
+    skipped_count = 0
+    file_names: list[str] = []
+    for file_name, content, content_type in files:
+        if file_name in existing_names:
+            skipped_count += 1
+            continue
+        try:
+            created = await create_document_from_bytes(
+                db,
+                company_id=current_user.company_id,
+                tender_id=tender_id,
+                uploaded_by=current_user.id,
+                file_name=file_name,
+                content=content,
+                content_type=content_type,
+                doc_type="source_import",
+            )
+        except (ScopedNotFoundError, DocumentStorageError):
+            skipped_count += 1
+            continue
+        existing_names.add(file_name)
+        downloaded_count += 1
+        file_names.append(created.file_name)
+
+    return {
+        "source_status": source_status,
+        "downloaded_count": downloaded_count,
+        "skipped_count": skipped_count,
+        "files": file_names,
+    }

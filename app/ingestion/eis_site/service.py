@@ -37,6 +37,27 @@ class EISSiteRunStats:
 
 
 @dataclass
+class EISSiteBulkQueryStats:
+    query: str
+    stage: str
+    reason: str | None
+    source_status: str
+    pages: int
+    candidates: int
+    inserted: int
+    updated: int
+    skipped: int
+
+
+@dataclass
+class EISSiteBulkRunStats:
+    totals: EISSiteRunStats = field(default_factory=EISSiteRunStats)
+    breakdown: list[EISSiteBulkQueryStats] = field(default_factory=list)
+    blocked_count: int = 0
+    maintenance_count: int = 0
+
+
+@dataclass
 class EISSiteSettings:
     query: str = ""
     limit: int = 1000
@@ -56,6 +77,7 @@ async def run_eis_site_once_for_company(
     pages: int | None = None,
     page_size: int | None = None,
     region: str | None = None,
+    dedupe_mode: str = "update",
 ) -> EISSiteRunStats:
     cfg = _extract_settings(company.ingestion_settings or {})
     if query is not None:
@@ -111,8 +133,9 @@ async def run_eis_site_once_for_company(
             if stats.candidates == 0 and not stats.reason:
                 stats.reason = "no_results"
 
+            update_existing = (dedupe_mode or "update").strip().lower() != "skip"
             for cand in deduped[: cfg.limit]:
-                outcome = await _upsert_tender(db, company.id, cand)
+                outcome = await _upsert_tender(db, company.id, cand, update_existing=update_existing)
                 if outcome == "inserted":
                     stats.inserted += 1
                 elif outcome == "updated":
@@ -178,7 +201,7 @@ def _build_search_params(cfg: EISSiteSettings, page: int) -> dict[str, str | int
     return params
 
 
-async def _upsert_tender(db: AsyncSession, company_id: UUID, candidate: EISSiteCandidate) -> str:
+async def _upsert_tender(db: AsyncSession, company_id: UUID, candidate: EISSiteCandidate, *, update_existing: bool = True) -> str:
     source_url = candidate.url or _default_source_url(candidate.external_id)
     existing = await db.scalar(
         select(Tender).where(
@@ -198,6 +221,7 @@ async def _upsert_tender(db: AsyncSession, company_id: UUID, candidate: EISSiteC
                 title=candidate.title,
                 customer_name=candidate.customer_name,
                 region=candidate.region,
+                place_text=candidate.place_text,
                 nmck=_normalize_decimal(candidate.nmck),
                 published_at=candidate.published_at,
                 submission_deadline=candidate.submission_deadline,
@@ -206,8 +230,11 @@ async def _upsert_tender(db: AsyncSession, company_id: UUID, candidate: EISSiteC
         )
         return "inserted"
 
+    if not update_existing:
+        return "skipped"
+
     changed = False
-    for field in ("title", "customer_name", "region", "published_at", "submission_deadline"):
+    for field in ("title", "customer_name", "region", "place_text", "published_at", "submission_deadline"):
         value = getattr(candidate, field)
         if value is not None and getattr(existing, field) != value:
             setattr(existing, field, value)
@@ -238,3 +265,76 @@ def _default_source_url(external_id: str | None) -> str | None:
     if not external_id:
         return None
     return f"https://zakupki.gov.ru/epz/order/notice/ea20/view/common-info.html?regNumber={external_id}"
+
+
+async def run_eis_site_bulk_for_company(
+    db: AsyncSession,
+    company: Company,
+    *,
+    queries: list[str],
+    pages_per_query: int = 10,
+    page_size: int = 20,
+    dedupe_mode: str = "update",
+    stop_if_blocked: bool = True,
+) -> EISSiteBulkRunStats:
+    clean_queries = [item.strip() for item in queries if item and item.strip()]
+    if not clean_queries:
+        return EISSiteBulkRunStats()
+
+    mode = dedupe_mode.strip().lower() if dedupe_mode else "update"
+    if mode not in {"update", "skip"}:
+        mode = "update"
+
+    bulk = EISSiteBulkRunStats()
+    for query in clean_queries:
+        stats = await run_eis_site_once_for_company(
+            db,
+            company,
+            query=query,
+            limit=max(1, min(5000, pages_per_query * page_size * 2)),
+            pages=max(1, min(200, pages_per_query)),
+            page_size=max(10, min(50, page_size)),
+            region=None,
+            dedupe_mode=mode,
+        )
+
+        bulk.breakdown.append(
+            EISSiteBulkQueryStats(
+                query=query,
+                stage=stats.stage,
+                reason=stats.reason,
+                source_status=stats.source_status,
+                pages=stats.pages,
+                candidates=stats.candidates,
+                inserted=stats.inserted,
+                updated=stats.updated,
+                skipped=stats.skipped,
+            )
+        )
+        bulk.totals.candidates += stats.candidates
+        bulk.totals.inserted += stats.inserted
+        bulk.totals.updated += stats.updated
+        bulk.totals.skipped += stats.skipped
+        bulk.totals.pages += stats.pages
+        bulk.totals.fetched_bytes += stats.fetched_bytes
+        bulk.totals.error_count += stats.error_count
+        if stats.source_status == "blocked":
+            bulk.blocked_count += 1
+        if stats.source_status == "maintenance":
+            bulk.maintenance_count += 1
+        if stats.errors_sample:
+            for err in stats.errors_sample:
+                if len(bulk.totals.errors_sample) >= 3:
+                    break
+                if err not in bulk.totals.errors_sample:
+                    bulk.totals.errors_sample.append(err)
+        if stop_if_blocked and stats.source_status in {"blocked", "maintenance"}:
+            bulk.totals.stage = stats.stage
+            bulk.totals.reason = stats.reason
+            bulk.totals.source_status = stats.source_status
+            break
+
+    bulk.totals.stage = "done"
+    bulk.totals.reason = "ok"
+    bulk.totals.source_status = "ok" if bulk.blocked_count == 0 and bulk.maintenance_count == 0 else "error"
+    return bulk

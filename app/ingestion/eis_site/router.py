@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_user_optional
-from app.ingestion.eis_site.service import run_eis_site_once_for_company
+from app.ingestion.eis_site.service import run_eis_site_bulk_for_company, run_eis_site_once_for_company
 from app.models import Company, User
 
 router = APIRouter(prefix="/ingestion/eis-site", tags=["ingestion"])
@@ -101,6 +101,61 @@ async def run_eis_site_once(
         "inserted": stats.inserted,
         "updated": stats.updated,
         "skipped": stats.skipped,
+    }
+
+
+@router.post("/run-bulk")
+async def run_eis_site_bulk(
+    queries: list[str] | None = Query(default=None),
+    pages_per_query: int = Query(default=10, ge=1, le=200),
+    page_size: int = Query(default=20, ge=10, le=50),
+    dedupe_mode: str = Query(default="update"),
+    stop_if_blocked: bool = Query(default=True),
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(_get_ingestion_current_user),
+) -> dict:
+    company = await _get_company_for_user(db, current_user)
+    await _enforce_run_once_rate_limit(company)
+
+    bulk = await run_eis_site_bulk_for_company(
+        db,
+        company,
+        queries=queries or settings.eis_site_queries_list,
+        pages_per_query=pages_per_query,
+        page_size=page_size,
+        dedupe_mode=dedupe_mode,
+        stop_if_blocked=stop_if_blocked,
+    )
+    return {
+        "stage": bulk.totals.stage,
+        "reason": bulk.totals.reason,
+        "source_status": bulk.totals.source_status,
+        "totals": {
+            "pages": bulk.totals.pages,
+            "candidates": bulk.totals.candidates,
+            "inserted": bulk.totals.inserted,
+            "updated": bulk.totals.updated,
+            "skipped": bulk.totals.skipped,
+            "fetched_bytes": bulk.totals.fetched_bytes,
+            "error_count": bulk.totals.error_count,
+            "errors_sample": bulk.totals.errors_sample,
+        },
+        "blocked_count": bulk.blocked_count,
+        "maintenance_count": bulk.maintenance_count,
+        "breakdown": [
+            {
+                "query": item.query,
+                "stage": item.stage,
+                "reason": item.reason,
+                "source_status": item.source_status,
+                "pages": item.pages,
+                "candidates": item.candidates,
+                "inserted": item.inserted,
+                "updated": item.updated,
+                "skipped": item.skipped,
+            }
+            for item in bulk.breakdown
+        ],
     }
 
 

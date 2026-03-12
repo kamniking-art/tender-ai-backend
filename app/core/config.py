@@ -6,6 +6,19 @@ DEFAULT_EIS_KNOWN_DATASETS = [
     "https://raw.githubusercontent.com/kamniking-art/tender-ai-backend/main/app/ingestion/eis_opendata/known_datasets/fallback_tenders_3.csv",
 ]
 
+DEFAULT_EIS_SITE_QUERIES = [
+    "гранит",
+    "керамогранит",
+    "плита гранитная",
+    "памятник",
+    "благоустройство",
+    "бордюр гранитный",
+    "щебень гранитный",
+    "мемориал",
+    "стела",
+    "облицовочная плитка",
+]
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -35,6 +48,7 @@ class Settings(BaseSettings):
     eis_opendata_dataset_api_url: str | None = None
     allow_known_datasets_fallback: bool = False
     eis_opendata_known_datasets: str = ""
+    eis_site_default_queries: str = ",".join(DEFAULT_EIS_SITE_QUERIES)
 
     ai_extractor_base_url: str | None = None
     ai_extractor_api_key: str | None = None
@@ -56,6 +70,14 @@ class Settings(BaseSettings):
         if explicit:
             return explicit
         return list(DEFAULT_EIS_KNOWN_DATASETS)
+
+    @property
+    def eis_site_queries_list(self) -> list[str]:
+        values = [item.strip() for item in str(self.eis_site_default_queries).split(",")]
+        explicit = [item for item in values if item]
+        if explicit:
+            return explicit
+        return list(DEFAULT_EIS_SITE_QUERIES)
 
 
 settings = Settings()

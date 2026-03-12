@@ -23,6 +23,34 @@
     </label>
     <button type="submit">Загрузить реальные тендеры (run once)</button>
   </form>
+</section>
+
+<section class="card">
+  <h2>Массовый импорт</h2>
+  <form method="post" action="/web/ingestion/eis-site/run-bulk" class="filters">
+    <label>Запросы (по одному в строке)
+      <textarea name="queries_text" rows="8" placeholder="гранит&#10;керамогранит&#10;памятник"></textarea>
+    </label>
+    <label>Страниц на запрос
+      <input type="number" name="pages_per_query" min="1" max="200" value="10" />
+    </label>
+    <label>На странице
+      <input type="number" name="page_size" min="10" max="50" value="20" />
+    </label>
+    <label>Дедупликация
+      <select name="dedupe_mode">
+        <option value="update" selected>update</option>
+        <option value="skip">skip</option>
+      </select>
+    </label>
+    <label>Остановить при блокировке
+      <select name="stop_if_blocked">
+        <option value="true" selected>Да</option>
+        <option value="false">Нет</option>
+      </select>
+    </label>
+    <button type="submit">Импортировать</button>
+  </form>
   {% if ingest_result and ingest_result.message %}
     <p>
       <strong>{% if ingest_result.status == "ok" %}Успешно{% else %}Ошибка{% endif %}:</strong>
@@ -41,7 +69,7 @@
   <h2>Фильтры</h2>
   <form method="get" action="/web/tenders" class="filters" id="tenders-filters-form">
     <label>Поиск
-      <input type="text" name="q" value="{{ filters.q }}" placeholder="номер/название/заказчик" />
+      <input type="text" name="q" value="{{ filters.q }}" placeholder="номер/название/заказчик/регион/место" />
     </label>
 
     <label>Статус тендера
@@ -154,6 +182,7 @@
         <th>Статус</th>
         <th>Источник / Внешний ID</th>
         <th>Регион</th>
+        <th>Место</th>
         <th>Заказчик</th>
         <th>Дедлайн</th>
         <th>Публикация</th>
@@ -168,6 +197,7 @@
         <td>{{ tender.status | tender_status_ru }}</td>
         <td>{{ tender.source | source_ru }} / {{ tender.external_id }}</td>
         <td>{{ tender.region or '-' }}</td>
+        <td>{{ tender.place_text or '-' }}</td>
         <td>{{ tender.customer_name or '-' }}</td>
         <td>{{ tender.submission_deadline | ru_dt }}</td>
         <td>{{ tender.published_at | ru_dt }}</td>

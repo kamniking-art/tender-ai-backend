@@ -1,18 +1,15 @@
-import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
-import mimetypes
 from pathlib import Path
 import re
 from uuid import UUID
-from urllib.parse import unquote, urlencode, urljoin, urlparse
+from urllib.parse import urlencode
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-import httpx
 from sqlalchemy import Integer, and_, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,7 +26,7 @@ from app.document_module.service import (
     get_package_for_tender,
     generate_package_for_tender,
 )
-from app.ingestion.eis_site.service import run_eis_site_once_for_company
+from app.ingestion.eis_site.service import run_eis_site_bulk_for_company, run_eis_site_once_for_company
 from app.models import Company, User
 from app.risk.service import compute_risk_flags, compute_risk_score_v1
 from app.tender_alerts.schemas import AlertCategory
@@ -41,8 +38,11 @@ from app.tender_decisions.service import get_decision_scoped
 from app.tender_documents.service import (
     DocumentStorageError,
     ScopedNotFoundError as DocumentScopedNotFoundError,
+    SourceFetchError,
     create_document_from_bytes,
     create_document_for_tender,
+    enforce_source_fetch_rate_limit,
+    fetch_source_documents,
     get_document_scoped,
     list_documents_for_tender,
 )
@@ -433,84 +433,6 @@ def _query_string(params: dict[str, object]) -> str:
     return urlencode(filtered)
 
 
-_DOC_HREF_RE = re.compile(r'href=["\']([^"\']+)["\']', re.IGNORECASE)
-_DOC_EXT_RE = re.compile(r"\.(pdf|docx?|rtf|zip)(?:$|\?)", re.IGNORECASE)
-_SOURCE_DOC_UA = (
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-)
-
-
-def _guess_filename_from_url(url: str, index: int) -> str:
-    path_name = Path(urlparse(url).path).name
-    file_name = unquote(path_name) if path_name else ""
-    if not file_name or "." not in file_name:
-        file_name = f"source_doc_{index}.bin"
-    return file_name[:200]
-
-
-async def _fetch_source_documents(source_url: str, *, max_docs: int = 10) -> tuple[list[tuple[str, bytes, str | None]], str | None]:
-    timeout = httpx.Timeout(20)
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        html_text: str | None = None
-        for attempt in range(3):
-            try:
-                page = await client.get(
-                    source_url,
-                    headers={
-                        "User-Agent": _SOURCE_DOC_UA[attempt % len(_SOURCE_DOC_UA)],
-                        "Accept": "text/html,application/xhtml+xml",
-                        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
-                    },
-                )
-                lower = (page.text or "").lower()
-                if page.status_code in {403, 434} or "captcha" in lower:
-                    if attempt < 2:
-                        await asyncio.sleep(1 + attempt)
-                        continue
-                    return [], "Источник временно недоступен (ограничение доступа)"
-                if page.status_code >= 400:
-                    return [], f"Ошибка источника: HTTP {page.status_code}"
-                html_text = page.text or ""
-                break
-            except httpx.HTTPError:
-                if attempt < 2:
-                    await asyncio.sleep(1 + attempt)
-                    continue
-                return [], "Не удалось открыть страницу источника"
-
-        if not html_text:
-            return [], "Страница источника пустая"
-
-        links: list[str] = []
-        for href in _DOC_HREF_RE.findall(html_text):
-            if not _DOC_EXT_RE.search(href):
-                continue
-            links.append(urljoin(source_url, href))
-        links = list(dict.fromkeys(links))
-        if not links:
-            return [], "На странице не найдены ссылки на PDF/DOC/DOCX"
-
-        files: list[tuple[str, bytes, str | None]] = []
-        for idx, link in enumerate(links[:max_docs], start=1):
-            try:
-                resp = await client.get(
-                    link,
-                    headers={"User-Agent": _SOURCE_DOC_UA[idx % len(_SOURCE_DOC_UA)]},
-                )
-                if resp.status_code >= 400 or not resp.content:
-                    continue
-                file_name = _guess_filename_from_url(link, idx)
-                content_type = resp.headers.get("content-type") or mimetypes.guess_type(file_name)[0]
-                files.append((file_name, resp.content, content_type))
-            except httpx.HTTPError:
-                continue
-
-        if not files:
-            return [], "Не удалось скачать документы из найденных ссылок"
-        return files, None
-
-
 def _redirect_with_action(tender_id: UUID, action: str, ok: bool, message: str, details: str | None = None) -> RedirectResponse:
     params = {
         "action": action,
@@ -696,6 +618,47 @@ async def web_run_eis_site_once(
     return RedirectResponse(url=f"/web/tenders?{qs}", status_code=status.HTTP_303_SEE_OTHER)
 
 
+@router.post("/ingestion/eis-site/run-bulk")
+async def web_run_eis_site_bulk(
+    queries_text: str | None = Form(default=None),
+    pages_per_query: int = Form(default=10),
+    page_size: int = Form(default=20),
+    dedupe_mode: str = Form(default="update"),
+    stop_if_blocked: bool = Form(default=True),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_cookie),
+):
+    company = await db.scalar(select(Company).where(Company.id == current_user.company_id))
+    if company is None:
+        return RedirectResponse(
+            url="/web/tenders?ingest_status=error&ingest_message=Компания не найдена",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    custom_queries = [line.strip() for line in (queries_text or "").splitlines() if line.strip()]
+    queries = custom_queries or settings.eis_site_queries_list
+    bulk = await run_eis_site_bulk_for_company(
+        db,
+        company,
+        queries=queries,
+        pages_per_query=max(1, min(200, int(pages_per_query or 10))),
+        page_size=max(10, min(50, int(page_size or 20))),
+        dedupe_mode=dedupe_mode or "update",
+        stop_if_blocked=_parse_bool(stop_if_blocked, default=True),
+    )
+
+    summary = (
+        f"Кандидаты: {bulk.totals.candidates}, добавлено: {bulk.totals.inserted}, "
+        f"обновлено: {bulk.totals.updated}, пропущено: {bulk.totals.skipped}"
+    )
+    details = "; ".join(
+        f"{item.query}: +{item.inserted}/~{item.updated}/={item.skipped} ({item.source_status})" for item in bulk.breakdown
+    )
+    status_value = "ok" if bulk.totals.source_status == "ok" else "error"
+    qs = urlencode({"ingest_status": status_value, "ingest_message": summary, "ingest_details": details[:2000]})
+    return RedirectResponse(url=f"/web/tenders?{qs}", status_code=status.HTTP_303_SEE_OTHER)
+
+
 @router.post("/alerts/{tender_id}/ack")
 async def web_ack_alert(
     request: Request,
@@ -786,6 +749,8 @@ async def tenders_page(
             Tender.title.ilike(pattern),
             Tender.customer_name.ilike(pattern),
             Tender.external_id.ilike(pattern),
+            Tender.region.ilike(pattern),
+            Tender.place_text.ilike(pattern),
         )
         stmt = stmt.where(cond)
         count_stmt = count_stmt.where(cond)
@@ -1294,15 +1259,27 @@ async def web_import_source_documents(
     if not tender.source_url:
         return _redirect_with_action(tender_id, "source_docs", False, "У тендера отсутствует ссылка на источник")
 
+    guard_key = f"{current_user.company_id}:{tender_id}"
+    retry_after = await enforce_source_fetch_rate_limit(guard_key, cooldown_seconds=30 * 60)
+    if retry_after is not None:
+        return _redirect_with_action(
+            tender_id,
+            "source_docs",
+            False,
+            "Слишком частый запуск загрузки документов",
+            f"Повторите через {retry_after} сек.",
+        )
+
     try:
         existing_documents = await list_documents_for_tender(db, company_id=current_user.company_id, tender_id=tender_id)
     except DocumentScopedNotFoundError:
         return _redirect_with_action(tender_id, "source_docs", False, "Тендер не найден")
 
     existing_names = {doc.file_name for doc in existing_documents}
-    files, error_message = await _fetch_source_documents(tender.source_url, max_docs=10)
-    if error_message:
-        return _redirect_with_action(tender_id, "source_docs", False, "Не удалось скачать документы", error_message)
+    try:
+        files, _ = await fetch_source_documents(tender.source_url, max_docs=20)
+    except SourceFetchError as exc:
+        return _redirect_with_action(tender_id, "source_docs", False, "Не удалось скачать документы", str(exc))
 
     created = 0
     skipped = 0

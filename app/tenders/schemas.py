@@ -34,6 +34,7 @@ class TenderCreate(BaseModel):
     title: str | None = None
     customer_name: str | None = None
     region: str | None = None
+    place_text: str | None = None
     procurement_type: str | None = None
     nmck: Decimal | None = None
     published_at: datetime | None = None
@@ -45,6 +46,7 @@ class TenderUpdate(BaseModel):
     title: str | None = None
     customer_name: str | None = None
     region: str | None = None
+    place_text: str | None = None
     procurement_type: str | None = None
     nmck: Decimal | None = None
     published_at: datetime | None = None
@@ -65,6 +67,7 @@ class TenderRead(BaseModel):
     title: str | None
     customer_name: str | None
     region: str | None
+    place_text: str | None
     procurement_type: str | None
     nmck: Decimal | None
     published_at: datetime | None

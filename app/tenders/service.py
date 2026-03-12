@@ -40,7 +40,15 @@ def _apply_filters(
         stmt = stmt.where(Tender.submission_deadline <= deadline_to)
     if q:
         pattern = f"%{q.strip()}%"
-        stmt = stmt.where(or_(Tender.title.ilike(pattern), Tender.customer_name.ilike(pattern)))
+        stmt = stmt.where(
+            or_(
+                Tender.title.ilike(pattern),
+                Tender.customer_name.ilike(pattern),
+                Tender.external_id.ilike(pattern),
+                Tender.region.ilike(pattern),
+                Tender.place_text.ilike(pattern),
+            )
+        )
 
     return stmt
 
@@ -53,6 +61,7 @@ async def create_tender(db: AsyncSession, company_id: UUID, payload: TenderCreat
         title=payload.title,
         customer_name=payload.customer_name,
         region=payload.region,
+        place_text=payload.place_text,
         procurement_type=payload.procurement_type,
         nmck=payload.nmck,
         published_at=payload.published_at,

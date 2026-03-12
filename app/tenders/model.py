@@ -30,6 +30,7 @@ class Tender(Base):
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     customer_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     region: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
+    place_text: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     procurement_type: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     nmck: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True, index=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)

@@ -52,6 +52,7 @@ class EISSiteCandidate:
     nmck: Decimal | None = None
     customer_name: str | None = None
     region: str | None = None
+    place_text: str | None = None
 
 
 @dataclass
@@ -142,9 +143,15 @@ def parse_search_page(html_text: str, base_url: str) -> ParseResult:
                 block,
                 [
                     "Субъект РФ",
+                    "Регион",
+                ],
+            )
+            place_text = _extract_by_labels(
+                block,
+                [
                     "Место поставки товара, выполнения работы или оказания услуги",
                     "Место поставки",
-                    "Регион",
+                    "Место выполнения",
                 ],
             )
 
@@ -192,6 +199,7 @@ def parse_search_page(html_text: str, base_url: str) -> ParseResult:
                     nmck=nmck,
                     customer_name=customer_name,
                     region=region,
+                    place_text=place_text,
                 )
             )
 

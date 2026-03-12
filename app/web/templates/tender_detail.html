@@ -120,6 +120,7 @@
     <div><strong>НМЦК:</strong> {{ tender.nmck | ru_money("RUB") }}</div>
     <div><strong>Заказчик:</strong> {{ tender.customer_name or '-' }}</div>
     <div><strong>Регион:</strong> {{ tender.region or '-' }}</div>
+    <div><strong>Место поставки:</strong> {{ tender.place_text or '-' }}</div>
     <div><strong>Тип закупки:</strong> {{ tender.procurement_type or '-' }}</div>
   </div>
 </section>

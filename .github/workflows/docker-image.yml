@@ -41,6 +41,8 @@ jobs:
           build-args: |
             APP_VERSION=${{ steps.vars.outputs.short_sha }}
             APP_BUILT_AT=${{ steps.vars.outputs.built_at }}
+            APP_VERSION_IMAGE=${{ steps.vars.outputs.short_sha }}
+            APP_BUILT_AT_IMAGE=${{ steps.vars.outputs.built_at }}
           tags: |
             ghcr.io/kamniking-art/tender-ai-backend:latest
             ghcr.io/kamniking-art/tender-ai-backend:sha-${{ steps.vars.outputs.short_sha }}
