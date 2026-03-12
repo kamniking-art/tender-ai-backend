@@ -92,14 +92,14 @@ CATEGORY_RULES: dict[str, dict[str, Any]] = {
         "title": "строительные материалы",
         "strong": [
             "керамогранит",
-            "плитка",
+            "плитк",
             "плитка гранитная",
             "гранитная плитка",
-            "щебень",
+            "щеб",
             "щебень гранитный",
             "бордюр",
             "бордюрный камень",
-            "брусчатка",
+            "брусчат",
             "тротуарная плитка",
             "строительные материалы",
             "каменные изделия",
@@ -107,7 +107,7 @@ CATEGORY_RULES: dict[str, dict[str, Any]] = {
             "облицовочные материалы",
             "стройматериалы",
             "плиты облицовочные",
-            "облицовка",
+            "облицов",
         ],
         "medium": [
             "поставка материалов",
@@ -118,7 +118,6 @@ CATEGORY_RULES: dict[str, dict[str, Any]] = {
             "покрытие",
             "камень",
             "материал",
-            "поставка",
         ],
         "weak": [
             "материалы",
@@ -338,6 +337,10 @@ def _detect_category(
     has_landscaping_signal = (landscaping_hits["strong"] + landscaping_hits["medium"]) > 0
     if has_landscaping_signal:
         return CATEGORY_RULES["landscaping_construction"]["title"]
+
+    # One weak material hint without concrete item is not enough for materials category.
+    if materials_hits["medium"] == 1 and materials_hits["strong"] == 0:
+        return "нерелевантно / прочее"
 
     top = category_scores.most_common(1)
     if not top:
