@@ -233,6 +233,8 @@ def _score_sources(
         if not text:
             continue
         source_weight = TEXT_SOURCE_WEIGHTS[source_name]
+        if source_weight <= 0:
+            continue
         for category_code, category_payload in CATEGORY_RULES.items():
             for strength in ("strong", "medium", "weak"):
                 keywords = category_payload.get(strength, [])
