@@ -1,0 +1,234 @@
+from __future__ import annotations
+
+import logging
+import time
+from typing import Any
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.ai_extraction.interfaces import ExtractionProviderError
+from app.ai_extraction.service import ExtractionBadRequestError, run_extraction
+from app.ai_extraction.text_extract import NoExtractableTextError
+from app.decision_engine.service import (
+    DecisionEngineBadRequestError,
+    ManualRecommendationConflictError,
+    recompute_decision_engine_v1,
+)
+from app.risk.service import compute_risk_flags, compute_risk_score_v1
+from app.tender_analysis.model import TenderAnalysis
+from app.tender_analysis.service import AnalysisConflictError, ScopedNotFoundError
+from app.tender_documents.service import (
+    DocumentStorageError,
+    SourceFetchError,
+    create_document_from_bytes,
+    fetch_source_documents,
+    list_documents_for_tender,
+)
+from app.tenders.service import get_tender_by_id_scoped
+
+logger = logging.getLogger(__name__)
+
+
+def _step(status: str, **kwargs: Any) -> dict[str, Any]:
+    data: dict[str, Any] = {"status": status}
+    data.update(kwargs)
+    return data
+
+
+async def fetch_and_store_source_documents(
+    db: AsyncSession,
+    *,
+    company_id: UUID,
+    user_id: UUID,
+    tender_id: UUID,
+    source_url: str,
+) -> dict[str, Any]:
+    existing_docs = await list_documents_for_tender(db, company_id=company_id, tender_id=tender_id)
+    existing_signatures = {(item.file_name.lower(), item.file_size or -1) for item in existing_docs}
+
+    try:
+        fetch_result = await fetch_source_documents(source_url, max_docs=20)
+    except SourceFetchError as exc:
+        return {
+            "source_status": exc.source_status,
+            "message": str(exc),
+            "attempted_pages": exc.attempted_pages,
+            "found_links_count": exc.found_links_count,
+            "downloaded_count": 0,
+            "saved_files": [],
+            "skipped_duplicates": 0,
+            "errors_sample": exc.errors_sample[:3],
+        }
+
+    downloaded_count = 0
+    skipped_duplicates = 0
+    saved_files: list[str] = []
+    errors_sample = list(fetch_result.errors_sample[:3])
+
+    for file_item in fetch_result.files:
+        signature = (file_item.file_name.lower(), len(file_item.content))
+        if signature in existing_signatures:
+            skipped_duplicates += 1
+            continue
+        try:
+            created = await create_document_from_bytes(
+                db,
+                company_id=company_id,
+                tender_id=tender_id,
+                uploaded_by=user_id,
+                file_name=file_item.file_name,
+                content=file_item.content,
+                content_type=file_item.content_type,
+                doc_type="source_import",
+            )
+        except (ScopedNotFoundError, DocumentStorageError):
+            errors_sample.append(f"{file_item.file_name}: save_failed")
+            continue
+        existing_signatures.add(signature)
+        downloaded_count += 1
+        saved_files.append(created.file_name)
+
+    return {
+        "source_status": fetch_result.source_status,
+        "message": (
+            "Документы загружены"
+            if downloaded_count > 0
+            else (
+                "Все найденные файлы уже загружены"
+                if fetch_result.found_links_count > 0
+                else "На карточке ЕИС документы не найдены"
+            )
+        ),
+        "attempted_pages": fetch_result.attempted_pages,
+        "found_links_count": fetch_result.found_links_count,
+        "downloaded_count": downloaded_count,
+        "saved_files": saved_files,
+        "skipped_duplicates": skipped_duplicates,
+        "errors_sample": errors_sample[:3],
+    }
+
+
+async def analyze_from_source(
+    db: AsyncSession,
+    *,
+    company_id: UUID,
+    user_id: UUID,
+    tender_id: UUID,
+) -> dict[str, Any]:
+    started_at = time.monotonic()
+    result: dict[str, Any] = {"status": "partial", "steps": {}, "next_step": "Проверьте данные тендера"}
+
+    tender = await get_tender_by_id_scoped(db, company_id, tender_id)
+    if tender is None:
+        return {
+            "status": "error",
+            "steps": {"fetch_documents": _step("error", message="Тендер не найден")},
+            "next_step": "Откройте корректную карточку тендера",
+        }
+    if not tender.source_url:
+        return {
+            "status": "partial",
+            "steps": {"fetch_documents": _step("error", message="У тендера нет source_url")},
+            "next_step": "Проверьте источник тендера",
+        }
+
+    fetch_payload = await fetch_and_store_source_documents(
+        db,
+        company_id=company_id,
+        user_id=user_id,
+        tender_id=tender_id,
+        source_url=tender.source_url,
+    )
+    fetch_ok = (fetch_payload.get("downloaded_count") or 0) > 0
+    result["steps"]["fetch_documents"] = _step(
+        "ok" if fetch_ok else "error",
+        downloaded_count=fetch_payload.get("downloaded_count", 0),
+        found_links_count=fetch_payload.get("found_links_count", 0),
+        attempted_pages=fetch_payload.get("attempted_pages", 0),
+        source_status=fetch_payload.get("source_status"),
+        message=fetch_payload.get("message"),
+    )
+    if fetch_payload.get("errors_sample"):
+        result["steps"]["fetch_documents"]["errors_sample"] = fetch_payload["errors_sample"]
+
+    if not fetch_ok:
+        result["next_step"] = "Документы на ЕИС не найдены"
+        logger.info(
+            "analyze_from_source done tender_id=%s external_id=%s stage=fetch status=partial downloaded=0 duration_ms=%s",
+            tender_id,
+            tender.external_id,
+            int((time.monotonic() - started_at) * 1000),
+        )
+        return result
+
+    try:
+        analysis, extracted = await run_extraction(
+            db,
+            company_id=company_id,
+            user_id=user_id,
+            tender_id=tender_id,
+            document_ids=None,
+        )
+        result["steps"]["extract"] = _step("ok", analysis_status=analysis.status)
+    except (
+        ScopedNotFoundError,
+        ExtractionBadRequestError,
+        NoExtractableTextError,
+        AnalysisConflictError,
+        ExtractionProviderError,
+    ) as exc:
+        result["steps"]["extract"] = _step("error", message=str(exc))
+        result["next_step"] = "Проверьте документы вручную"
+        logger.info(
+            "analyze_from_source done tender_id=%s external_id=%s stage=extract status=partial error=%s duration_ms=%s",
+            tender_id,
+            tender.external_id,
+            str(exc),
+            int((time.monotonic() - started_at) * 1000),
+        )
+        return result
+
+    try:
+        risk_flags = compute_risk_flags(extracted, tender)
+        risk_v1 = compute_risk_score_v1(extracted, tender)
+        req = dict(analysis.requirements or {})
+        req["risk_v1"] = risk_v1
+        analysis.requirements = req
+        analysis.risk_flags = risk_flags
+        analysis.updated_by = user_id
+        if analysis.status == "draft":
+            analysis.status = "ready"
+        await db.commit()
+        risk_score = risk_v1.get("score_auto")
+        result["steps"]["risk"] = _step("ok", risk_score=risk_score)
+    except Exception as exc:  # noqa: BLE001
+        result["steps"]["risk"] = _step("error", message="Не удалось рассчитать риск")
+        result["next_step"] = "Проверьте извлечённые требования"
+        logger.warning("analyze_from_source risk error tender_id=%s err=%s", tender_id, exc)
+        return result
+
+    try:
+        decision, _ = await recompute_decision_engine_v1(
+            db,
+            company_id=company_id,
+            tender_id=tender_id,
+            user_id=user_id,
+            force=True,
+        )
+        result["steps"]["recompute_engine"] = _step("ok", recommendation=decision.recommendation)
+    except (ManualRecommendationConflictError, DecisionEngineBadRequestError) as exc:
+        result["steps"]["recompute_engine"] = _step("error", message=str(exc))
+        result["next_step"] = "Проверьте извлечённые требования"
+        return result
+
+    result["status"] = "ok"
+    result["next_step"] = "Заполните финансовые параметры"
+    logger.info(
+        "analyze_from_source done tender_id=%s external_id=%s stage=done status=ok duration_ms=%s",
+        tender_id,
+        tender.external_id,
+        int((time.monotonic() - started_at) * 1000),
+    )
+    return result

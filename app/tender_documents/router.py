@@ -9,15 +9,12 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models import User
 from app.tender_documents.schemas import TenderDocumentRead
+from app.tender_documents.analyze import analyze_from_source, fetch_and_store_source_documents
 from app.tender_documents.service import (
     DocumentStorageError,
     ScopedNotFoundError,
-    SourceFetchError,
-    SourceFetchResult,
-    create_document_from_bytes,
     enforce_source_fetch_rate_limit,
     create_document_for_tender,
-    fetch_source_documents,
     delete_document_scoped,
     get_document_scoped,
     list_documents_for_tender,
@@ -139,60 +136,31 @@ async def fetch_tender_documents_from_source(
             detail=f"Повторная загрузка доступна через {retry_after} сек.",
         )
 
-    documents = await list_documents_for_tender(db, company_id=current_user.company_id, tender_id=tender_id)
-    existing_signatures = {(item.file_name.lower(), item.file_size or -1) for item in documents}
+    return await fetch_and_store_source_documents(
+        db,
+        company_id=current_user.company_id,
+        user_id=current_user.id,
+        tender_id=tender_id,
+        source_url=tender.source_url,
+    )
 
-    try:
-        result: SourceFetchResult = await fetch_source_documents(tender.source_url, max_docs=20)
-    except SourceFetchError as exc:
-        return {
-            "source_status": exc.source_status,
-            "message": str(exc),
-            "attempted_pages": exc.attempted_pages,
-            "found_links_count": exc.found_links_count,
-            "downloaded_count": 0,
-            "saved_files": [],
-            "skipped_duplicates": 0,
-            "errors_sample": exc.errors_sample[:3],
-        }
 
-    downloaded_count = 0
-    skipped_duplicates = 0
-    saved_files: list[str] = []
-    for file_item in result.files:
-        signature = (file_item.file_name.lower(), len(file_item.content))
-        if signature in existing_signatures:
-            skipped_duplicates += 1
-            continue
-        try:
-            created = await create_document_from_bytes(
-                db,
-                company_id=current_user.company_id,
-                tender_id=tender_id,
-                uploaded_by=current_user.id,
-                file_name=file_item.file_name,
-                content=file_item.content,
-                content_type=file_item.content_type,
-                doc_type="source_import",
-            )
-        except (ScopedNotFoundError, DocumentStorageError):
-            result.errors_sample.append(f"{file_item.file_name}: save_failed")
-            continue
-        existing_signatures.add(signature)
-        downloaded_count += 1
-        saved_files.append(created.file_name)
-
-    return {
-        "source_status": result.source_status,
-        "message": (
-            "Документы загружены"
-            if downloaded_count > 0
-            else ("Все найденные файлы уже загружены" if result.found_links_count > 0 else "На карточке ЕИС документы не найдены")
-        ),
-        "attempted_pages": result.attempted_pages,
-        "found_links_count": result.found_links_count,
-        "downloaded_count": downloaded_count,
-        "saved_files": saved_files,
-        "skipped_duplicates": skipped_duplicates,
-        "errors_sample": result.errors_sample[:3],
-    }
+@router.post("/tenders/{tender_id}/analyze-from-source")
+async def analyze_tender_from_source(
+    tender_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    guard_key = f"{current_user.company_id}:{tender_id}:analyze"
+    retry_after = await enforce_source_fetch_rate_limit(guard_key, cooldown_seconds=10 * 60)
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Повторный запуск временно ограничен. Повторите через {retry_after} сек.",
+        )
+    return await analyze_from_source(
+        db,
+        company_id=current_user.company_id,
+        user_id=current_user.id,
+        tender_id=tender_id,
+    )

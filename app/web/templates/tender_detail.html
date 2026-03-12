@@ -51,6 +51,13 @@
 <section class="card">
   <h2>Действия</h2>
   <div class="action-row">
+    <form method="post" action="/web/tenders/{{ tender.id }}/analyze-from-source" class="action-form">
+      <button type="submit" {% if not action_availability.can_analyze_source %}disabled title="{{ disabled_reasons.analyze_source }}"{% endif %}>Загрузить и проанализировать</button>
+      {% if not action_availability.can_analyze_source %}
+      <div class="hint">{{ disabled_reasons.analyze_source }}</div>
+      {% endif %}
+    </form>
+
     <form method="post" action="/web/tenders/{{ tender.id }}/extract" class="action-form">
       <button type="submit" {% if not action_availability.can_extract %}disabled title="{{ disabled_reasons.extract }}"{% endif %}>Извлечь требования</button>
       {% if not action_availability.can_extract %}

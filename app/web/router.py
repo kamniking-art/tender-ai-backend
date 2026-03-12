@@ -47,6 +47,7 @@ from app.tender_documents.service import (
     get_document_scoped,
     list_documents_for_tender,
 )
+from app.tender_documents.analyze import analyze_from_source
 from app.tender_finance.schemas import TenderFinanceUpsert
 from app.tender_finance.service import (
     ScopedNotFoundError as FinanceScopedNotFoundError,
@@ -212,6 +213,7 @@ def _translate_action_name(action: str | None) -> str:
     action_map = {
         "upload": "загрузка документа",
         "source_docs": "скачивание документов с ЕИС",
+        "analyze_source": "автоанализ с ЕИС",
         "extract": "извлечение требований",
         "risk": "расчет риска",
         "engine": "пересчет рекомендации",
@@ -240,6 +242,7 @@ def _has_finance_values(finance) -> bool:
 def _build_detail_flow(
     *,
     documents_count: int,
+    has_source_link: bool,
     analysis,
     risk_score: int | None,
     finance,
@@ -261,8 +264,10 @@ def _build_detail_flow(
     can_risk = has_requirements
     can_recompute = has_finance
     can_package = has_documents and has_requirements and is_go
+    can_analyze_source = has_source_link
 
     reasons = {
+        "analyze_source": "" if can_analyze_source else "У тендера отсутствует ссылка на источник",
         "extract": "" if can_extract else "Сначала загрузите документы тендера",
         "risk": "" if can_risk else "Сначала извлеките требования",
         "recompute": "" if can_recompute else "Заполните финансовые параметры",
@@ -300,6 +305,7 @@ def _build_detail_flow(
         next_step = "Сформируйте пакет документов"
 
     actions = {
+        "can_analyze_source": can_analyze_source,
         "can_extract": can_extract,
         "can_risk": can_risk,
         "can_recompute": can_recompute,
@@ -932,6 +938,7 @@ async def tender_detail_page(
     risk_flags_top = _top_risk_flags(analysis)
     tender_flow_steps, action_availability, disabled_reasons, next_step = _build_detail_flow(
         documents_count=len(documents),
+        has_source_link=bool(tender.source_url),
         analysis=analysis,
         risk_score=risk_score,
         finance=finance,
@@ -1022,6 +1029,57 @@ async def web_extract_tender(
         return _redirect_with_action(tender_id, "extract", False, f"Ошибка сервиса извлечения: {exc.code}", str(exc))
     except Exception as exc:
         return _redirect_with_action(tender_id, "extract", False, "Непредвиденная ошибка извлечения", str(exc))
+
+
+@router.post("/tenders/{tender_id}/analyze-from-source")
+async def web_analyze_from_source(
+    tender_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_cookie),
+):
+    guard_key = f"{current_user.company_id}:{tender_id}:analyze"
+    retry_after = await enforce_source_fetch_rate_limit(guard_key, cooldown_seconds=10 * 60)
+    if retry_after is not None:
+        return _redirect_with_action(
+            tender_id,
+            "analyze_source",
+            False,
+            "Повторный запуск временно ограничен",
+            f"Повторите через {retry_after} сек.",
+        )
+
+    data = await analyze_from_source(
+        db,
+        company_id=current_user.company_id,
+        user_id=current_user.id,
+        tender_id=tender_id,
+    )
+    status_ok = data.get("status") == "ok"
+    steps = data.get("steps", {})
+    fetch = steps.get("fetch_documents", {})
+    extract = steps.get("extract", {})
+    risk = steps.get("risk", {})
+    engine = steps.get("recompute_engine", {})
+
+    details_lines = [
+        f"Документы: {fetch.get('downloaded_count', 0)} загружено, найдено ссылок: {fetch.get('found_links_count', 0)}",
+        f"Извлечение: {extract.get('status', '-')}",
+        f"Риск: {risk.get('risk_score', '-')}",
+        f"Рекомендация: {engine.get('recommendation', '-')}",
+    ]
+    if fetch.get("message"):
+        details_lines.append(f"Сообщение источника: {fetch.get('message')}")
+    if data.get("next_step"):
+        details_lines.append(f"Следующий шаг: {data.get('next_step')}")
+
+    message = "Автоанализ завершён" if status_ok else "Автоанализ выполнен частично"
+    return _redirect_with_action(
+        tender_id,
+        "analyze_source",
+        status_ok,
+        message,
+        "\n".join(details_lines),
+    )
 
 
 @router.post("/tenders/{tender_id}/risk/recompute")
