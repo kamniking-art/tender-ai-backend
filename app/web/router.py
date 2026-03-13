@@ -80,7 +80,10 @@ ANALYSIS_STATUS_RU = {
 
 DECISION_STATUS_RU = {
     "none": "нет",
+    "strong_go": "точно смотреть",
     "go": "идём",
+    "review": "быстро проверить",
+    "weak": "сомнительно",
     "no_go": "не идём",
     "unsure": "сомнительно",
 }
@@ -236,7 +239,7 @@ def _is_recommendation_category(category: str | None) -> bool:
     if not category:
         return False
     normalized = str(category)
-    return normalized in {"go", "no_go", "unsure"} or normalized.startswith("recommendation")
+    return normalized in {"strong_go", "go", "review", "weak", "no_go", "unsure"} or normalized.startswith("recommendation")
 
 
 def _has_finance_values(finance) -> bool:
@@ -265,8 +268,8 @@ def _build_detail_flow(
     has_risk = risk_score is not None
     has_finance = _has_finance_values(finance)
     recommendation = decision.recommendation if decision else None
-    has_recommendation = recommendation in {"go", "no_go", "unsure"}
-    is_go = recommendation == "go"
+    has_recommendation = recommendation in {"strong_go", "go", "review", "weak", "no_go", "unsure"}
+    is_go = recommendation in {"strong_go", "go"}
     has_package = bool(package and package.files)
 
     can_extract = has_documents
@@ -1011,11 +1014,18 @@ async def tenders_page(
         source_values = [s for s in source_values if s != "fallback"]
 
     tender_relevance: dict[str, dict[str, object]] = {}
+    tender_decisions: dict[str, dict[str, object]] = {}
     for tender in tenders:
         decision = await get_decision_scoped(db, current_user.company_id, tender.id)
         rel = _extract_relevance(decision)
         if rel is not None:
             tender_relevance[str(tender.id)] = rel
+        if decision is not None:
+            tender_decisions[str(tender.id)] = {
+                "recommendation": decision.recommendation,
+                "decision_score": decision.decision_score,
+                "recommendation_reason": decision.recommendation_reason,
+            }
 
     return templates.TemplateResponse(
         "tenders.html",
@@ -1032,13 +1042,14 @@ async def tenders_page(
             filters=base_filters,
             statuses=[status.value for status in TenderStatus],
             analysis_statuses=["none", "draft", "ready", "approved"],
-            decision_statuses=["none", "go", "no_go", "unsure"],
+            decision_statuses=["none", "strong_go", "go", "review", "weak", "no_go", "unsure"],
             source_values=source_values,
             analysis_status_labels=ANALYSIS_STATUS_RU,
             decision_status_labels=DECISION_STATUS_RU,
             tender_status_labels=TENDER_STATUS_RU,
             source_labels=SOURCE_RU,
             tender_relevance=tender_relevance,
+            tender_decisions=tender_decisions,
             relevance_categories=RELEVANCE_CATEGORIES,
             ingest_result={
                 "status": ingest_status,
@@ -1102,6 +1113,8 @@ async def tender_detail_page(
                 "risk_score": risk_score,
                 "risk_flags": risk_flags_top,
                 "decision": decision.recommendation if decision else "none",
+                "decision_score": decision.decision_score if decision else None,
+                "recommendation_reason": decision.recommendation_reason if decision else None,
                 "margin_pct": decision.expected_margin_pct if decision else None,
                 "relevance_score": relevance_meta.get("score") if relevance_meta else None,
                 "relevance_label": relevance_meta.get("label") if relevance_meta else None,

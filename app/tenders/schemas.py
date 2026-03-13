@@ -73,6 +73,9 @@ class TenderRead(BaseModel):
     published_at: datetime | None
     submission_deadline: datetime | None
     status: TenderStatus
+    decision_score: int | None = None
+    recommendation: str | None = None
+    recommendation_reason: str | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

@@ -240,7 +240,7 @@ async def generate_package_for_tender(
         raise DocumentModuleNotFoundError("Tender not found")
 
     decision = await get_decision_scoped(db, company_id, tender_id)
-    if decision is None or decision.recommendation != "go":
+    if decision is None or decision.recommendation not in {"go", "strong_go"}:
         raise DocumentModuleConflictError("Decision is not GO")
 
     company = await _get_company_scoped(db, company_id)

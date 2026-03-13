@@ -218,6 +218,8 @@ async def run_monitoring_cycle(
         matched_keywords = [str(item) for item in rel_payload.get("matched_keywords", []) if isinstance(item, str)]
         tender_ai_url = f"{settings.public_base_url.rstrip('/')}/web/tenders/{tender.id}"
         recommendation = decision.recommendation if decision else None
+        decision_score = decision.decision_score if decision else None
+        recommendation_reason = decision.recommendation_reason if decision else None
         notification = MonitoringNotification(
             tender_id=tender.id,
             title=tender.title,
@@ -236,6 +238,8 @@ async def run_monitoring_cycle(
             matched_keywords=matched_keywords[:10],
             risk_score=risk_score,
             recommendation=recommendation,
+            decision_score=decision_score,
+            recommendation_reason=recommendation_reason,
             nmck=float(tender.nmck) if tender.nmck is not None else None,
             published_at=_format_dt(tender.published_at),
             deadline=_format_dt(tender.submission_deadline),

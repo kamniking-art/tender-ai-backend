@@ -5,13 +5,14 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai_extraction.schemas import ExtractedTenderV1
 from app.relevance.service import compute_relevance_v1
 from app.tender_analysis.model import TenderAnalysis
 from app.tender_decisions.model import TenderDecision
+from app.tender_documents.model import TenderDocument
 from app.tender_finance.model import TenderFinance
 from app.tenders.model import Tender
 from app.tenders.service import get_tender_by_id_scoped
@@ -102,47 +103,96 @@ def _resolve_harsh_penalties(analysis: TenderAnalysis | None) -> bool:
     return "harsh_penalties" in codes
 
 
-def _margin_score(margin_pct: Decimal | None) -> int:
-    if margin_pct is None:
+def _keyword_strength(matched_keywords: list[str]) -> int:
+    if not matched_keywords:
         return 0
-    if margin_pct >= Decimal("20"):
-        return 40
-    if margin_pct >= Decimal("10"):
-        return 25
-    if margin_pct >= Decimal("0"):
-        return 5
-    return -40
+
+    strong_terms = (
+        "гранит",
+        "памятник",
+        "мемориал",
+        "надгроб",
+        "изделия из камня",
+        "бордюрный камень",
+        "гранитная плитка",
+    )
+    normalized = [item.lower() for item in matched_keywords]
+    if any(any(term in kw for term in strong_terms) for kw in normalized):
+        return 30
+    if len(normalized) >= 2:
+        return 20
+    return 10
 
 
-def _risk_modifier(risk_score: int | None) -> int:
-    if risk_score is None:
-        return -5
-    if risk_score >= 80:
-        return -40
-    if risk_score >= 60:
-        return -25
-    if risk_score >= 40:
-        return -10
-    return 0
+def _nmck_factor(nmck: Decimal | None) -> int:
+    if nmck is None:
+        return 0
+    if nmck < Decimal("200000"):
+        return 0
+    if nmck < Decimal("1000000"):
+        return 10
+    if nmck <= Decimal("5000000"):
+        return 20
+    return 30
 
 
-def _penalties_modifier(short_deadline: bool, harsh_penalties: bool, high_security: bool) -> int:
-    score = 0
-    if short_deadline:
-        score -= 10
-    if harsh_penalties:
-        score -= 10
-    if high_security:
-        score -= 10
-    return score
+def _risk_penalty(risk_score: int | None) -> int:
+    if risk_score is None or risk_score <= 20:
+        return 0
+    if risk_score <= 40:
+        return 10
+    if risk_score <= 60:
+        return 20
+    return 30
 
 
-def _recommendation_for_score(score: int) -> Literal["go", "no_go", "unsure"]:
-    if score >= 20:
+def _recommendation_for_score(score: int) -> Literal["strong_go", "go", "review", "weak", "no_go"]:
+    if score >= 90:
+        return "strong_go"
+    if score >= 70:
         return "go"
-    if score <= -10:
-        return "no_go"
-    return "unsure"
+    if score >= 50:
+        return "review"
+    if score >= 30:
+        return "weak"
+    return "no_go"
+
+
+def _recommendation_reason(
+    *,
+    recommendation: str,
+    relevance_score: int,
+    category: str | None,
+    matched_keywords: list[str],
+    nmck: Decimal | None,
+    risk_score: int | None,
+    has_documents: bool,
+) -> str:
+    keywords = ", ".join(matched_keywords[:3]) if matched_keywords else "без явных ключевых совпадений"
+    nmck_text = f"НМЦК {int(nmck):,} ₽".replace(",", " ") if nmck is not None else "НМЦК не указана"
+    risk_text = f"риск {risk_score}" if risk_score is not None else "риск не рассчитан"
+    docs_text = "документы обработаны" if has_documents else "документы не обработаны"
+    category_text = category or "категория не определена"
+
+    if recommendation in {"strong_go", "go"}:
+        return (
+            f"Тендер имеет высокую бизнес-ценность: категория «{category_text}», "
+            f"совпадения ({keywords}), {nmck_text}, {risk_text}, {docs_text}."
+        )
+    if recommendation == "review":
+        return (
+            f"Требуется быстрая проверка: релевантность {relevance_score}/100, категория «{category_text}», "
+            f"совпадения ({keywords}), {risk_text}."
+        )
+    if recommendation == "weak":
+        return (
+            f"Сомнительный тендер: релевантность {relevance_score}/100, категория «{category_text}», "
+            f"{risk_text}, {docs_text}."
+        )
+    return (
+        f"Не рекомендуется к проработке: недостаточная релевантность/ценность "
+        f"(релевантность {relevance_score}/100, категория «{category_text}», {risk_text})."
+    )
 
 
 def _to_float(value: Decimal | None) -> float | None:
@@ -209,33 +259,62 @@ def compute_finance_v2(
 
 def compute_decision_engine_v1(
     *,
-    margin_pct: Decimal | None,
-    margin_value: Decimal | None,
+    relevance_score: int | None = None,
+    matched_keywords: list[str] | None = None,
+    nmck: Decimal | None = None,
+    has_documents: bool = False,
     risk_score: int | None,
-    short_deadline: bool,
-    harsh_penalties: bool,
-    high_security: bool,
+    category: str | None = None,
+    # Backward-compat inputs from v1:
+    margin_pct: Decimal | None = None,
+    margin_value: Decimal | None = None,
+    short_deadline: bool = False,
+    harsh_penalties: bool = False,
+    high_security: bool = False,
 ) -> dict:
-    margin_component = _margin_score(margin_pct)
-    risk_component = _risk_modifier(risk_score)
-    penalties_component = _penalties_modifier(short_deadline, harsh_penalties, high_security)
+    rel = relevance_score if relevance_score is not None else 0
+    rel = _clamp(rel, 0, 100)
+    kw = _keyword_strength(matched_keywords or [])
+    nmck_points = _nmck_factor(nmck)
+    doc_points = 10 if has_documents else 0
+    penalty = _risk_penalty(risk_score)
 
-    total_score = _clamp(margin_component + risk_component + penalties_component, -100, 100)
+    weighted = (Decimal(rel) * Decimal("0.6")) + (Decimal(kw) * Decimal("0.2")) + (Decimal(nmck_points) * Decimal("0.1")) + (Decimal(doc_points) * Decimal("0.1"))
+    total_score = _clamp(int(round(float(weighted - Decimal(penalty)))), 0, 100)
     recommendation = _recommendation_for_score(total_score)
 
     explain: list[str] = [
-        f"margin_score={margin_component} (margin_pct={margin_pct})",
-        f"risk_modifier={risk_component} (risk_score={risk_score})",
-        f"penalties_modifier={penalties_component} (short_deadline={short_deadline}, harsh_penalties={harsh_penalties}, high_security={high_security})",
-        f"final_score={total_score} -> recommendation={recommendation}",
+        f"relevance_component={rel}*0.6",
+        f"keyword_strength={kw}*0.2",
+        f"nmck_factor={nmck_points}*0.1",
+        f"document_factor={doc_points}*0.1",
+        f"risk_penalty=-{penalty} (risk_score={risk_score})",
+        f"decision_score={total_score} -> recommendation={recommendation}",
     ]
+    reason = _recommendation_reason(
+        recommendation=recommendation,
+        relevance_score=rel,
+        category=category,
+        matched_keywords=matched_keywords or [],
+        nmck=nmck,
+        risk_score=risk_score,
+        has_documents=has_documents,
+    )
 
     return {
         "score": total_score,
-        "margin_score": margin_component,
-        "risk_modifier": risk_component,
-        "penalties_modifier": penalties_component,
+        "decision_score": total_score,
+        "recommendation_reason": reason,
+        "relevance_component": rel,
+        "keyword_strength": kw,
+        "nmck_factor": nmck_points,
+        "document_factor": doc_points,
+        "risk_penalty": penalty,
         "inputs": {
+            "relevance_score": rel,
+            "matched_keywords": matched_keywords or [],
+            "nmck": float(nmck) if nmck is not None else None,
+            "has_documents": has_documents,
             "margin_pct": float(margin_pct) if margin_pct is not None else None,
             "margin_value": float(margin_value) if margin_value is not None else None,
             "risk_score": risk_score,
@@ -253,14 +332,21 @@ def _final_recommendation_from_finance(
     finance_recommendation: Literal["go", "no_go", "requires_analysis"],
     risk_score: int | None,
     relevance_score: int | None,
-) -> Literal["go", "no_go", "unsure"]:
+    base_recommendation: Literal["strong_go", "go", "review", "weak", "no_go"],
+) -> Literal["strong_go", "go", "review", "weak", "no_go"]:
     if finance_recommendation == "no_go":
         return "no_go"
-    if finance_recommendation == "go" and risk_score is not None and risk_score <= RISK_GO_MAX:
-        if relevance_score is not None and relevance_score < 20:
-            return "unsure"
-        return "go"
-    return "unsure"
+    if relevance_score is not None and relevance_score < 20:
+        if base_recommendation in {"strong_go", "go", "review"}:
+            return "weak"
+    if finance_recommendation == "requires_analysis":
+        if base_recommendation in {"strong_go", "go"}:
+            return "review"
+        return base_recommendation
+    if finance_recommendation == "go" and risk_score is not None and risk_score > RISK_GO_MAX:
+        if base_recommendation in {"strong_go", "go"}:
+            return "review"
+    return base_recommendation
 
 
 async def _get_analysis_scoped(db: AsyncSession, company_id: UUID, tender_id: UUID) -> TenderAnalysis | None:
@@ -288,6 +374,15 @@ async def _get_finance_scoped(db: AsyncSession, company_id: UUID, tender_id: UUI
             TenderFinance.tender_id == tender_id,
         )
     )
+
+
+async def _has_documents(db: AsyncSession, company_id: UUID, tender_id: UUID) -> bool:
+    count_stmt = select(func.count()).select_from(TenderDocument).where(
+        TenderDocument.company_id == company_id,
+        TenderDocument.tender_id == tender_id,
+    )
+    count = (await db.execute(count_stmt)).scalar_one()
+    return bool(count and count > 0)
 
 
 async def _get_or_create_decision(db: AsyncSession, company_id: UUID, tender_id: UUID, user_id: UUID) -> TenderDecision:
@@ -340,11 +435,18 @@ async def recompute_decision_engine_v1(
     harsh_penalties = _resolve_harsh_penalties(analysis)
     high_security = _resolve_high_security(extracted, decision, tender)
     finance = await _get_finance_scoped(db, company_id, tender_id)
+    has_documents = await _has_documents(db, company_id, tender_id)
+    matched_keywords = [str(item) for item in relevance.get("matched_keywords", []) if isinstance(item, str)]
 
     engine = compute_decision_engine_v1(
+        relevance_score=relevance.get("score"),
+        matched_keywords=matched_keywords,
+        nmck=tender.nmck,
+        has_documents=has_documents and extracted is not None,
         margin_pct=decision.expected_margin_pct,
         margin_value=decision.expected_margin_value,
         risk_score=risk_score,
+        category=relevance.get("category") if isinstance(relevance.get("category"), str) else None,
         short_deadline=short_deadline,
         harsh_penalties=harsh_penalties,
         high_security=high_security,
@@ -359,6 +461,7 @@ async def recompute_decision_engine_v1(
         finance_recommendation=finance_result["finance_recommendation"],
         risk_score=risk_score,
         relevance_score=relevance.get("score"),
+        base_recommendation=engine["recommendation"],
     )
 
     engine["finance"] = finance_result
@@ -367,10 +470,12 @@ async def recompute_decision_engine_v1(
     engine["recommendation"] = final_recommendation
     engine["risk_go_max"] = RISK_GO_MAX
     engine["min_margin_pct"] = float(MIN_MARGIN_PCT)
-    if relevance.get("score") is not None and relevance["score"] < 20 and engine["recommendation_base"] == "go":
-        engine["explain"].append("relevance_guard=unsure (relevance_score<20)")
+    if relevance.get("score") is not None and relevance["score"] < 20 and engine["recommendation_base"] in {"strong_go", "go", "review"}:
+        engine["explain"].append("relevance_guard=weak (relevance_score<20)")
 
     decision.recommendation = engine["recommendation"]
+    decision.decision_score = engine.get("decision_score")
+    decision.recommendation_reason = engine.get("recommendation_reason")
     decision.engine_meta = engine
     decision.updated_by = user_id
 

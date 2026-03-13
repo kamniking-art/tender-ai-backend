@@ -10,58 +10,56 @@ from app.decision_engine.service import (
 
 
 class DecisionEngineUnitTests(TestCase):
-    def test_margin_25_risk_30_no_flags_go(self) -> None:
+    def test_high_relevance_low_risk_is_go(self) -> None:
         result = compute_decision_engine_v1(
-            margin_pct=Decimal("25"),
-            margin_value=Decimal("100000"),
-            risk_score=30,
-            short_deadline=False,
-            harsh_penalties=False,
-            high_security=False,
+            relevance_score=85,
+            matched_keywords=["гранит", "мемориал"],
+            nmck=Decimal("2400000"),
+            has_documents=True,
+            risk_score=20,
+            category="камень / гранит / памятники",
         )
         self.assertEqual(result["recommendation"], "go")
-        self.assertEqual(result["score"], 40)
+        self.assertGreaterEqual(result["score"], 70)
 
-    def test_margin_5_risk_85_no_go(self) -> None:
+    def test_low_relevance_high_risk_is_no_go(self) -> None:
         result = compute_decision_engine_v1(
-            margin_pct=Decimal("5"),
-            margin_value=Decimal("30000"),
+            relevance_score=20,
+            matched_keywords=["поставка"],
+            nmck=Decimal("150000"),
+            has_documents=False,
             risk_score=85,
-            short_deadline=False,
-            harsh_penalties=False,
-            high_security=False,
+            category="нерелевантно / прочее",
         )
         self.assertEqual(result["recommendation"], "no_go")
-        self.assertLessEqual(result["score"], -10)
+        self.assertLess(result["score"], 30)
 
-    def test_margin_null_risk_null_unsure(self) -> None:
+    def test_mid_case_is_review_or_weak(self) -> None:
         result = compute_decision_engine_v1(
-            margin_pct=None,
-            margin_value=None,
-            risk_score=None,
-            short_deadline=False,
-            harsh_penalties=False,
-            high_security=False,
+            relevance_score=55,
+            matched_keywords=["плитка"],
+            nmck=Decimal("600000"),
+            has_documents=False,
+            risk_score=45,
+            category="строительные материалы",
         )
-        self.assertEqual(result["recommendation"], "unsure")
-        self.assertEqual(result["score"], -5)
+        self.assertIn(result["recommendation"], {"review", "weak"})
+        self.assertGreaterEqual(result["score"], 30)
 
     def test_flags_reduce_score(self) -> None:
         base = compute_decision_engine_v1(
-            margin_pct=Decimal("25"),
-            margin_value=Decimal("100000"),
+            relevance_score=80,
+            matched_keywords=["гранит", "памятник"],
+            nmck=Decimal("3000000"),
+            has_documents=True,
             risk_score=30,
-            short_deadline=False,
-            harsh_penalties=False,
-            high_security=False,
         )
         penalized = compute_decision_engine_v1(
-            margin_pct=Decimal("25"),
-            margin_value=Decimal("100000"),
-            risk_score=30,
-            short_deadline=True,
-            harsh_penalties=False,
-            high_security=True,
+            relevance_score=80,
+            matched_keywords=["гранит", "памятник"],
+            nmck=Decimal("3000000"),
+            has_documents=True,
+            risk_score=70,
         )
         self.assertLess(penalized["score"], base["score"])
 

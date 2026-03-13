@@ -21,7 +21,7 @@ class AlertTenderItem(BaseModel):
     category: AlertCategory
     deadline_at: datetime | None = None
     risk_score: int | None = None
-    recommendation: Literal["go", "no_go", "unsure"] | None = None
+    recommendation: Literal["strong_go", "go", "review", "weak", "no_go", "unsure"] | None = None
 
 
 class AlertCounts(BaseModel):

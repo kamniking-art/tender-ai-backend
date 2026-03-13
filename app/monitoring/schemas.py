@@ -60,6 +60,8 @@ class MonitoringNotification(BaseModel):
     matched_keywords: list[str] = Field(default_factory=list)
     risk_score: int | None = None
     recommendation: str | None = None
+    decision_score: int | None = None
+    recommendation_reason: str | None = None
     nmck: float | None = None
     published_at: str | None = None
     deadline: str | None = None

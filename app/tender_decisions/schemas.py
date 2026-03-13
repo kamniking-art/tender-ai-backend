@@ -6,7 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
-Recommendation = Literal["go", "no_go", "unsure"]
+Recommendation = Literal["strong_go", "go", "review", "weak", "no_go", "unsure"]
 
 
 class TenderDecisionCreate(BaseModel):
@@ -75,6 +75,8 @@ class TenderDecisionRead(BaseModel):
 
     risk_score: int
     risk_flags: list
+    decision_score: int | None
+    recommendation_reason: str | None
     engine_meta: dict
 
     need_bid_security: bool

@@ -162,14 +162,21 @@
           {% endif %}
         </td>
         <td>
-          {% if item.recommendation == "go" %}
+          {% if item.recommendation == "strong_go" or item.recommendation == "go" %}
             <span class="badge badge-good">{{ item.recommendation | decision_status_ru }}</span>
+          {% elif item.recommendation == "review" %}
+            <span class="badge badge-mid">{{ item.recommendation | decision_status_ru }}</span>
+          {% elif item.recommendation == "weak" %}
+            <span class="badge badge-low">{{ item.recommendation | decision_status_ru }}</span>
           {% elif item.recommendation == "no_go" %}
             <span class="badge badge-bad">{{ item.recommendation | decision_status_ru }}</span>
           {% elif item.recommendation %}
             <span class="badge badge-mid">{{ item.recommendation | decision_status_ru }}</span>
           {% else %}
             -
+          {% endif %}
+          {% if item.decision_score is not none %}
+            <div class="hint">Decision score: {{ item.decision_score }}</div>
           {% endif %}
         </td>
         <td>{{ item.nmck | ru_money("RUB") }}</td>
@@ -179,6 +186,9 @@
         </td>
         <td>
           <div>{{ item.summary_reason or "-" }}</div>
+          {% if item.recommendation_reason %}
+            <div class="hint">Причина рекомендации: {{ item.recommendation_reason }}</div>
+          {% endif %}
           {% if item.matched_keywords %}
             <div class="hint">Совпадения: {{ item.matched_keywords | join(", ") }}</div>
           {% endif %}

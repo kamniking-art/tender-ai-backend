@@ -10,10 +10,10 @@ class DecisionRecomputeRequest(BaseModel):
 
 
 class DecisionEngineReadResponse(BaseModel):
-    recommendation: Literal["go", "no_go", "unsure"]
+    recommendation: Literal["strong_go", "go", "review", "weak", "no_go", "unsure"]
     decision_engine_v1: dict | None
 
 
 class DecisionRecomputeResponse(BaseModel):
-    recommendation: Literal["go", "no_go", "unsure"]
+    recommendation: Literal["strong_go", "go", "review", "weak", "no_go", "unsure"]
     decision_engine_v1: dict

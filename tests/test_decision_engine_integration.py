@@ -24,7 +24,14 @@ class DecisionEngineIntegrationTests(IsolatedAsyncioTestCase):
         tender_id = uuid4()
         user_id = uuid4()
 
-        tender = SimpleNamespace(id=tender_id, company_id=company_id, nmck=Decimal("1000000"))
+        tender = SimpleNamespace(
+            id=tender_id,
+            company_id=company_id,
+            nmck=Decimal("1000000"),
+            title="Поставка гранитных плит для мемориала",
+            customer_name="Администрация",
+            external_id="test-1",
+        )
         decision = SimpleNamespace(
             recommendation="unsure",
             expected_margin_pct=Decimal("25"),
@@ -41,7 +48,7 @@ class DecisionEngineIntegrationTests(IsolatedAsyncioTestCase):
                 "risk_v1": {"score_auto": 30},
                 "extracted_v1": {
                     "schema_version": "v1",
-                    "subject": "x",
+                    "subject": "Поставка гранитных плит",
                     "nmck": "1000000",
                     "currency": "RUB",
                     "submission_deadline_at": (datetime.now(UTC) + timedelta(days=10)).isoformat(),
@@ -52,7 +59,7 @@ class DecisionEngineIntegrationTests(IsolatedAsyncioTestCase):
                     "contract_security_amount": None,
                     "contract_security_pct": None,
                     "qualification_requirements": [],
-                    "tech_parameters": [],
+                    "tech_parameters": ["гранитная плита"],
                     "penalties": [],
                     "confidence": {"overall": 0.5},
                     "evidence": {},
@@ -116,7 +123,8 @@ class DecisionEngineIntegrationTests(IsolatedAsyncioTestCase):
             engine_service._get_analysis_scoped = old_get_analysis
             engine_service._get_finance_scoped = old_get_finance
 
-        self.assertEqual(updated_decision.recommendation, "go")
-        self.assertEqual(engine_meta["recommendation"], "go")
+        self.assertIn(updated_decision.recommendation, {"go", "strong_go"})
+        self.assertIn(engine_meta["recommendation"], {"go", "strong_go"})
         self.assertIn("finance", engine_meta)
+        self.assertIn("decision_score", engine_meta)
         self.assertEqual(updated_decision.engine_meta["score"], engine_meta["score"])

@@ -206,6 +206,7 @@
         <th>Заказчик</th>
         <th>Релевантность</th>
         <th>Категория</th>
+        <th>Recommendation</th>
         <th>Дедлайн</th>
         <th>Публикация</th>
         <th>НМЦК</th>
@@ -232,6 +233,28 @@
         <td>
           {% if rel %}
             {{ rel.get("category", "-") }}
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td>
+          {% set d = tender_decisions.get(tender.id|string) %}
+          {% if d and d.get("recommendation") %}
+            {% set rec = d.get("recommendation") %}
+            {% if rec in ["strong_go", "go"] %}
+              <span class="badge badge-good">{{ rec | decision_status_ru }}</span>
+            {% elif rec == "review" %}
+              <span class="badge badge-mid">{{ rec | decision_status_ru }}</span>
+            {% elif rec == "weak" %}
+              <span class="badge badge-low">{{ rec | decision_status_ru }}</span>
+            {% elif rec == "no_go" %}
+              <span class="badge badge-bad">{{ rec | decision_status_ru }}</span>
+            {% else %}
+              <span class="badge">{{ rec }}</span>
+            {% endif %}
+            {% if d.get("decision_score") is not none %}
+              <div class="hint">score: {{ d.get("decision_score") }}</div>
+            {% endif %}
           {% else %}
             —
           {% endif %}

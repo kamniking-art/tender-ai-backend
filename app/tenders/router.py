@@ -26,8 +26,23 @@ from app.tenders.service import (
     set_tender_status,
     update_tender,
 )
+from app.tender_decisions.service import get_decision_scoped
 
 router = APIRouter(prefix="/tenders", tags=["tenders"])
+
+
+async def _to_tender_read(db: AsyncSession, company_id: UUID, tender) -> TenderRead:
+    payload = TenderRead.model_validate(tender)
+    decision = await get_decision_scoped(db, company_id, tender.id)
+    if decision is None:
+        return payload
+    return payload.model_copy(
+        update={
+            "decision_score": decision.decision_score,
+            "recommendation": decision.recommendation,
+            "recommendation_reason": decision.recommendation_reason,
+        }
+    )
 
 
 @router.post("", response_model=TenderRead, status_code=status.HTTP_201_CREATED)
@@ -42,7 +57,7 @@ async def create_tender_endpoint(
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tender already exists")
 
-    return TenderRead.model_validate(tender)
+    return await _to_tender_read(db, current_user.company_id, tender)
 
 
 @router.get("", response_model=TenderListResponse)
@@ -78,7 +93,10 @@ async def list_tenders_endpoint(
         limit=limit,
         offset=offset,
     )
-    return TenderListResponse(items=[TenderRead.model_validate(item) for item in items], total=total, limit=limit, offset=offset)
+    payload: list[TenderRead] = []
+    for item in items:
+        payload.append(await _to_tender_read(db, current_user.company_id, item))
+    return TenderListResponse(items=payload, total=total, limit=limit, offset=offset)
 
 
 @router.get("/{tender_id}", response_model=TenderRead)
@@ -90,7 +108,7 @@ async def get_tender_endpoint(
     tender = await get_tender_by_id_scoped(db, current_user.company_id, tender_id)
     if tender is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tender not found")
-    return TenderRead.model_validate(tender)
+    return await _to_tender_read(db, current_user.company_id, tender)
 
 
 @router.patch("/{tender_id}", response_model=TenderRead)
@@ -105,7 +123,7 @@ async def update_tender_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tender not found")
 
     updated = await update_tender(db, tender, payload)
-    return TenderRead.model_validate(updated)
+    return await _to_tender_read(db, current_user.company_id, updated)
 
 
 @router.patch("/{tender_id}/status", response_model=TenderRead)
@@ -120,4 +138,4 @@ async def set_tender_status_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tender not found")
 
     updated = await set_tender_status(db, tender, payload.status)
-    return TenderRead.model_validate(updated)
+    return await _to_tender_read(db, current_user.company_id, updated)

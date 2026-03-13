@@ -36,6 +36,7 @@
     <span class="badge">Релевантность: {% if badges.relevance_score is not none %}{{ badges.relevance_score }}/100 ({{ badges.relevance_label or '-' }}){% else %}-{% endif %}</span>
     <span class="badge">Риск: {{ badges.risk_score if badges.risk_score is not none else '-' }}</span>
     <span class="badge">Решение: {{ badges.decision | decision_status_ru }}</span>
+    <span class="badge">Decision score: {{ badges.decision_score if badges.decision_score is not none else '-' }}</span>
     <span class="badge">Маржа %: {{ badges.margin_pct | ru_money if badges.margin_pct is not none else '-' }}</span>
     <span class="badge">Документы: {{ badges.documents_count }}</span>
     <span class="badge">Пакет: {{ 'есть' if badges.package_generated else 'нет' }}</span>
@@ -154,6 +155,8 @@
   {% if decision %}
   <div class="kv-grid">
     <div><strong>Рекомендация:</strong> {{ decision.recommendation | decision_status_ru }}</div>
+    <div><strong>Decision score:</strong> {{ decision.decision_score if decision.decision_score is not none else '-' }}</div>
+    <div><strong>Причина рекомендации:</strong> {{ decision.recommendation_reason or '-' }}</div>
     <div><strong>Риск score:</strong> {{ decision.risk_score or '-' }}</div>
     <div><strong>Маржа (значение):</strong> {{ decision.expected_margin_value | ru_money("RUB") }}</div>
     <div><strong>Маржа (%):</strong> {{ decision.expected_margin_pct | ru_money }}</div>

@@ -103,7 +103,7 @@ def _alerts_union(company_id: UUID, user_id: UUID, since: datetime | None, inclu
         )
 
     if include(AlertCategory.GO.value):
-        where = [*_base_tender_condition(company_id, since), TenderDecision.recommendation == "go"]
+        where = [*_base_tender_condition(company_id, since), TenderDecision.recommendation.in_(["go", "strong_go"])]
         if not include_acknowledged:
             where.append(_ack_filter(company_id, user_id, AlertCategory.GO.value))
         queries.append(
