@@ -641,6 +641,10 @@ async def web_save_monitoring_settings(
     page_size: int = Form(default=20),
     relevance_min: int = Form(default=45),
     notify_only_new: bool = Form(default=False),
+    deep_analysis_enabled: bool = Form(default=False),
+    deep_analysis_limit_per_run: int = Form(default=5),
+    deep_analysis_only_new: bool = Form(default=False),
+    deep_analysis_timeout_seconds: int = Form(default=180),
     interval_minutes: int = Form(default=360),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_from_cookie),
@@ -660,6 +664,10 @@ async def web_save_monitoring_settings(
         page_size=max(10, min(50, int(page_size or 20))),
         relevance_min=max(0, min(100, int(relevance_min or 45))),
         notify_only_new=bool(notify_only_new),
+        deep_analysis_enabled=bool(deep_analysis_enabled),
+        deep_analysis_limit_per_run=max(0, min(20, int(deep_analysis_limit_per_run or 5))),
+        deep_analysis_only_new=bool(deep_analysis_only_new),
+        deep_analysis_timeout_seconds=max(30, min(900, int(deep_analysis_timeout_seconds or 180))),
         interval_minutes=max(30, min(24 * 60, int(interval_minutes or 360))),
     )
     settings_payload = patch_monitoring_settings(company, patch)
@@ -669,7 +677,8 @@ async def web_save_monitoring_settings(
     msg = (
         f"Сохранено: запросов={len(settings_payload.queries)}, "
         f"pages={settings_payload.pages_per_query}, page_size={settings_payload.page_size}, "
-        f"relevance_min={settings_payload.relevance_min}"
+        f"relevance_min={settings_payload.relevance_min}, "
+        f"deep={settings_payload.deep_analysis_enabled}, deep_limit={settings_payload.deep_analysis_limit_per_run}"
     )
     return RedirectResponse(
         url=f"/web?{urlencode({'monitor_status': 'ok', 'monitor_message': msg})}",
@@ -692,7 +701,9 @@ async def web_monitoring_run_once(
     result = await run_monitoring_cycle(db, company=company, actor_user_id=current_user.id)
     summary = (
         f"Запросов: {result.queries_total}, импортировано: {result.imported_total}, "
-        f"новых: {result.new_tenders}, релевантных: {result.relevant_found}, уведомлений: {result.notifications_sent}"
+        f"новых: {result.new_tenders}, релевантных: {result.relevant_found}, "
+        f"deep: {result.deep_analysis_attempted}/{result.deep_analysis_completed}/{result.deep_analysis_partial}, "
+        f"уведомлений: {result.notifications_sent}"
     )
     return RedirectResponse(
         url=f"/web?{urlencode({'monitor_status': 'ok', 'monitor_message': summary})}",

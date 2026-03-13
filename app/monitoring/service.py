@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import logging
 from datetime import UTC, datetime
@@ -15,6 +16,7 @@ from app.models import Company, User
 from app.monitoring.schemas import MonitoringNotification, MonitoringRunResponse, MonitoringSettings, MonitoringSettingsPatch
 from app.tender_analysis.model import TenderAnalysis
 from app.tender_decisions.model import TenderDecision
+from app.tender_documents.analyze import analyze_from_source
 from app.tenders.model import Tender
 
 logger = logging.getLogger("uvicorn.error")
@@ -140,6 +142,36 @@ def _summary_reason(*, category: str | None, relevance_label: str | None, releva
     )
 
 
+def _analysis_snapshot(data: dict | None) -> tuple[str, int, str, str, str]:
+    if not isinstance(data, dict):
+        return "imported", 0, "not_run", "not_run", "not_run"
+    steps = data.get("steps") if isinstance(data.get("steps"), dict) else {}
+    fetch = steps.get("fetch_documents") if isinstance(steps.get("fetch_documents"), dict) else {}
+    extract = steps.get("extract") if isinstance(steps.get("extract"), dict) else {}
+    risk = steps.get("risk") if isinstance(steps.get("risk"), dict) else {}
+    decision = steps.get("recompute_engine") if isinstance(steps.get("recompute_engine"), dict) else {}
+
+    docs = int(fetch.get("downloaded_count") or 0)
+    extract_status = str(extract.get("status") or "not_run")
+    risk_status = str(risk.get("status") or "not_run")
+    decision_status = str(decision.get("status") or "not_run")
+
+    if docs <= 0:
+        stage = "documents_missing"
+    elif extract_status == "error":
+        stage = "extract_failed"
+    elif risk_status == "error":
+        stage = "risk_failed"
+    elif decision_status == "ok":
+        stage = "decision_done"
+    elif docs > 0:
+        stage = "documents_downloaded"
+    else:
+        stage = "imported"
+
+    return stage, docs, extract_status, risk_status, decision_status
+
+
 async def run_monitoring_cycle(
     db: AsyncSession,
     *,
@@ -156,6 +188,9 @@ async def run_monitoring_cycle(
             new_tenders=0,
             relevance_checked=0,
             relevant_found=0,
+            deep_analysis_attempted=0,
+            deep_analysis_completed=0,
+            deep_analysis_partial=0,
             notifications_sent=0,
             details={"reason": "monitoring_disabled"},
         )
@@ -203,12 +238,49 @@ async def run_monitoring_cycle(
     sent = state.get("sent_tenders", {})
     notifications = state.get("notifications", [])
     notifications_sent = 0
+    deep_analysis_attempted = 0
+    deep_analysis_completed = 0
+    deep_analysis_partial = 0
     now_iso = datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
     for tender, rel_payload, risk_score in relevant_tenders:
         key = str(tender.id)
-        if monitoring.notify_only_new and key in sent:
+        already_sent = key in sent
+        if monitoring.notify_only_new and already_sent:
             continue
+
+        deep_result: dict | None = None
+        run_deep = (
+            monitoring.deep_analysis_enabled
+            and actor_id is not None
+            and deep_analysis_attempted < monitoring.deep_analysis_limit_per_run
+            and (not monitoring.deep_analysis_only_new or not already_sent)
+        )
+        if run_deep:
+            deep_analysis_attempted += 1
+            try:
+                deep_result = await asyncio.wait_for(
+                    analyze_from_source(
+                        db,
+                        company_id=company.id,
+                        user_id=actor_id,
+                        tender_id=tender.id,
+                    ),
+                    timeout=monitoring.deep_analysis_timeout_seconds,
+                )
+            except TimeoutError:
+                deep_result = {"status": "partial", "steps": {"fetch_documents": {"status": "error", "message": "timeout"}}}
+            except Exception:
+                logger.exception("monitoring deep analysis failed: company_id=%s tender_id=%s", company.id, tender.id)
+                deep_result = {"status": "partial", "steps": {"fetch_documents": {"status": "error", "message": "deep_analysis_failed"}}}
+
+        stage, docs_downloaded, extract_status, risk_status, decision_status = _analysis_snapshot(deep_result)
+        if deep_result is not None:
+            if stage == "decision_done":
+                deep_analysis_completed += 1
+            else:
+                deep_analysis_partial += 1
+
         decision = await db.scalar(
             select(TenderDecision).where(TenderDecision.company_id == company.id, TenderDecision.tender_id == tender.id)
         )
@@ -240,6 +312,11 @@ async def run_monitoring_cycle(
             recommendation=recommendation,
             decision_score=decision_score,
             recommendation_reason=recommendation_reason,
+            analysis_stage=stage,
+            documents_downloaded_count=docs_downloaded,
+            extract_status=extract_status,
+            risk_status=risk_status,
+            decision_status=decision_status,
             nmck=float(tender.nmck) if tender.nmck is not None else None,
             published_at=_format_dt(tender.published_at),
             deadline=_format_dt(tender.submission_deadline),
@@ -261,6 +338,9 @@ async def run_monitoring_cycle(
         "new_tenders": len(new_tenders),
         "relevance_checked": relevance_checked,
         "relevant_found": len(relevant_tenders),
+        "deep_analysis_attempted": deep_analysis_attempted,
+        "deep_analysis_completed": deep_analysis_completed,
+        "deep_analysis_partial": deep_analysis_partial,
         "notifications_sent": notifications_sent,
         "source_status": bulk.totals.source_status,
     }
@@ -279,6 +359,9 @@ async def run_monitoring_cycle(
         new_tenders=len(new_tenders),
         relevance_checked=relevance_checked,
         relevant_found=len(relevant_tenders),
+        deep_analysis_attempted=deep_analysis_attempted,
+        deep_analysis_completed=deep_analysis_completed,
+        deep_analysis_partial=deep_analysis_partial,
         notifications_sent=notifications_sent,
         details={
             "breakdown": [item.__dict__ for item in bulk.breakdown],

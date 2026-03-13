@@ -21,6 +21,10 @@ class MonitoringSettings(BaseModel):
     relevance_min: int = 45
     notify_only_new: bool = True
     interval_minutes: int = 360
+    deep_analysis_enabled: bool = True
+    deep_analysis_limit_per_run: int = 5
+    deep_analysis_only_new: bool = True
+    deep_analysis_timeout_seconds: int = 180
 
     @classmethod
     def from_profile(cls, profile: dict[str, Any] | None) -> "MonitoringSettings":
@@ -34,8 +38,12 @@ class MonitoringSettings(BaseModel):
         payload["page_size"] = max(10, min(50, int(payload.get("page_size", 20))))
         payload["relevance_min"] = max(0, min(100, int(payload.get("relevance_min", 45))))
         payload["interval_minutes"] = max(30, min(24 * 60, int(payload.get("interval_minutes", 360))))
+        payload["deep_analysis_limit_per_run"] = max(0, min(20, int(payload.get("deep_analysis_limit_per_run", 5))))
+        payload["deep_analysis_timeout_seconds"] = max(30, min(900, int(payload.get("deep_analysis_timeout_seconds", 180))))
         payload["enabled"] = bool(payload.get("enabled", True))
         payload["notify_only_new"] = bool(payload.get("notify_only_new", True))
+        payload["deep_analysis_enabled"] = bool(payload.get("deep_analysis_enabled", True))
+        payload["deep_analysis_only_new"] = bool(payload.get("deep_analysis_only_new", True))
         return cls.model_validate(payload)
 
 
@@ -47,6 +55,10 @@ class MonitoringSettingsPatch(BaseModel):
     relevance_min: int | None = None
     notify_only_new: bool | None = None
     interval_minutes: int | None = None
+    deep_analysis_enabled: bool | None = None
+    deep_analysis_limit_per_run: int | None = None
+    deep_analysis_only_new: bool | None = None
+    deep_analysis_timeout_seconds: int | None = None
 
 
 class MonitoringNotification(BaseModel):
@@ -62,6 +74,11 @@ class MonitoringNotification(BaseModel):
     recommendation: str | None = None
     decision_score: int | None = None
     recommendation_reason: str | None = None
+    analysis_stage: str | None = None
+    documents_downloaded_count: int = 0
+    extract_status: str | None = None
+    risk_status: str | None = None
+    decision_status: str | None = None
     nmck: float | None = None
     published_at: str | None = None
     deadline: str | None = None
@@ -78,5 +95,8 @@ class MonitoringRunResponse(BaseModel):
     new_tenders: int
     relevance_checked: int
     relevant_found: int
+    deep_analysis_attempted: int = 0
+    deep_analysis_completed: int = 0
+    deep_analysis_partial: int = 0
     notifications_sent: int
     details: dict[str, Any] = Field(default_factory=dict)
