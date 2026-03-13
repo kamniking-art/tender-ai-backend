@@ -76,6 +76,9 @@ class TenderRead(BaseModel):
     decision_score: int | None = None
     recommendation: str | None = None
     recommendation_reason: str | None = None
+    priority_score: int | None = None
+    priority_label: str | None = None
+    priority_reason: str | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

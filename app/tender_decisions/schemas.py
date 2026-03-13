@@ -77,6 +77,9 @@ class TenderDecisionRead(BaseModel):
     risk_flags: list
     decision_score: int | None
     recommendation_reason: str | None
+    priority_score: int | None
+    priority_label: str | None
+    priority_reason: str | None
     engine_meta: dict
 
     need_bid_security: bool

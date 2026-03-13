@@ -74,6 +74,9 @@ class MonitoringNotification(BaseModel):
     recommendation: str | None = None
     decision_score: int | None = None
     recommendation_reason: str | None = None
+    priority_score: int | None = None
+    priority_label: str | None = None
+    priority_reason: str | None = None
     analysis_stage: str | None = None
     documents_downloaded_count: int = 0
     extract_status: str | None = None

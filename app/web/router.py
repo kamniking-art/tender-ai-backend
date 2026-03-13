@@ -158,6 +158,13 @@ FINANCE_RECOMMENDATION_RU = {
     "requires_analysis": "требует анализа",
 }
 
+PRIORITY_LABEL_RU = {
+    "urgent": "срочно",
+    "high": "высокий",
+    "medium": "средний",
+    "low": "низкий",
+}
+
 RELEVANCE_CATEGORIES = [
     "камень / гранит / памятники",
     "благоустройство / строительство",
@@ -350,6 +357,7 @@ templates.env.filters["task_type_ru"] = lambda value: _translate(value, TASK_TYP
 templates.env.filters["ru_dt"] = _format_datetime_ru
 templates.env.filters["ru_money"] = _format_money_ru
 templates.env.filters["finance_recommendation_ru"] = lambda value: _translate(value, FINANCE_RECOMMENDATION_RU)
+templates.env.filters["priority_label_ru"] = lambda value: _translate(value, PRIORITY_LABEL_RU)
 
 
 def _get_migrations_head() -> str:
@@ -830,6 +838,8 @@ async def tenders_page(
     price_max: str | None = Query(default=None),
     risk_min: str | None = Query(default=None),
     risk_max: str | None = Query(default=None),
+    priority_min: str | None = Query(default=None),
+    priority_label: str | None = Query(default=None),
     relevance_min: str | None = Query(default=None),
     relevance_category: str | None = Query(default=None),
     relevant_only: str | None = Query(default=None),
@@ -845,11 +855,13 @@ async def tenders_page(
     ingest_details: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),
+    sort_by: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_from_cookie),
 ):
     parsed_risk_min = _parse_optional_int(risk_min, field="risk_min", ge=0, le=100)
     parsed_risk_max = _parse_optional_int(risk_max, field="risk_max", ge=0, le=100)
+    parsed_priority_min = _parse_optional_int(priority_min, field="priority_min", ge=0, le=100)
     parsed_relevance_min = _parse_optional_int(relevance_min, field="relevance_min", ge=0, le=100)
     parsed_price_min = _parse_optional_decimal(price_min, field="price_min", ge=Decimal("0"))
     parsed_price_max = _parse_optional_decimal(price_max, field="price_max", ge=Decimal("0"))
@@ -963,6 +975,14 @@ async def tenders_page(
         stmt = stmt.where(effective_risk_score <= parsed_risk_max)
         count_stmt = count_stmt.where(effective_risk_score <= parsed_risk_max)
 
+    if parsed_priority_min is not None:
+        stmt = stmt.where(TenderDecision.priority_score >= parsed_priority_min)
+        count_stmt = count_stmt.where(TenderDecision.priority_score >= parsed_priority_min)
+
+    if priority_label:
+        stmt = stmt.where(TenderDecision.priority_label == priority_label)
+        count_stmt = count_stmt.where(TenderDecision.priority_label == priority_label)
+
     if parsed_relevance_min is not None:
         stmt = stmt.where(relevance_score >= parsed_relevance_min)
         count_stmt = count_stmt.where(relevance_score >= parsed_relevance_min)
@@ -979,7 +999,15 @@ async def tenders_page(
         page = max(1, ((total - 1) // page_size) + 1)
         offset = (page - 1) * page_size
 
-    stmt = stmt.order_by(Tender.submission_deadline.asc().nulls_last(), Tender.created_at.desc()).offset(offset).limit(page_size)
+    if sort_by == "priority_desc":
+        stmt = stmt.order_by(
+            TenderDecision.priority_score.desc().nulls_last(),
+            Tender.submission_deadline.asc().nulls_last(),
+            Tender.created_at.desc(),
+        )
+    else:
+        stmt = stmt.order_by(Tender.submission_deadline.asc().nulls_last(), Tender.created_at.desc())
+    stmt = stmt.offset(offset).limit(page_size)
     tenders = list((await db.scalars(stmt)).all())
 
     total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
@@ -994,6 +1022,8 @@ async def tenders_page(
         "price_max": str(parsed_price_max) if parsed_price_max is not None else "",
         "risk_min": parsed_risk_min if parsed_risk_min is not None else "",
         "risk_max": parsed_risk_max if parsed_risk_max is not None else "",
+        "priority_min": parsed_priority_min if parsed_priority_min is not None else "",
+        "priority_label": priority_label or "",
         "relevance_min": parsed_relevance_min if parsed_relevance_min is not None else "",
         "relevance_category": relevance_category or "",
         "relevant_only": "true" if _parse_bool(relevant_only) else "",
@@ -1005,6 +1035,7 @@ async def tenders_page(
         "created_from": created_from or "",
         "created_to": created_to or "",
         "page_size": page_size,
+        "sort_by": sort_by or "",
     }
 
     prev_qs = _query_string({**base_filters, "page": page - 1}) if page > 1 else ""
@@ -1036,6 +1067,9 @@ async def tenders_page(
                 "recommendation": decision.recommendation,
                 "decision_score": decision.decision_score,
                 "recommendation_reason": decision.recommendation_reason,
+                "priority_score": decision.priority_score,
+                "priority_label": decision.priority_label,
+                "priority_reason": decision.priority_reason,
             }
 
     return templates.TemplateResponse(
@@ -1054,11 +1088,13 @@ async def tenders_page(
             statuses=[status.value for status in TenderStatus],
             analysis_statuses=["none", "draft", "ready", "approved"],
             decision_statuses=["none", "strong_go", "go", "review", "weak", "no_go", "unsure"],
+            priority_labels=["urgent", "high", "medium", "low"],
             source_values=source_values,
             analysis_status_labels=ANALYSIS_STATUS_RU,
             decision_status_labels=DECISION_STATUS_RU,
             tender_status_labels=TENDER_STATUS_RU,
             source_labels=SOURCE_RU,
+            priority_label_labels=PRIORITY_LABEL_RU,
             tender_relevance=tender_relevance,
             tender_decisions=tender_decisions,
             relevance_categories=RELEVANCE_CATEGORIES,
@@ -1126,6 +1162,9 @@ async def tender_detail_page(
                 "decision": decision.recommendation if decision else "none",
                 "decision_score": decision.decision_score if decision else None,
                 "recommendation_reason": decision.recommendation_reason if decision else None,
+                "priority_score": decision.priority_score if decision else None,
+                "priority_label": decision.priority_label if decision else None,
+                "priority_reason": decision.priority_reason if decision else None,
                 "margin_pct": decision.expected_margin_pct if decision else None,
                 "relevance_score": relevance_meta.get("score") if relevance_meta else None,
                 "relevance_label": relevance_meta.get("label") if relevance_meta else None,

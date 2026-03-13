@@ -128,6 +128,19 @@
       <input type="number" name="risk_max" min="0" max="100" value="{{ filters.risk_max }}" />
     </label>
 
+    <label>Приоритет от
+      <input type="number" name="priority_min" min="0" max="100" value="{{ filters.priority_min }}" />
+    </label>
+
+    <label>Уровень приоритета
+      <select name="priority_label">
+        <option value="">Все</option>
+        {% for item in priority_labels %}
+          <option value="{{ item }}" {% if filters.priority_label == item %}selected{% endif %}>{{ priority_label_labels.get(item, item) }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
     <label>Релевантность от
       <input type="number" name="relevance_min" min="0" max="100" value="{{ filters.relevance_min }}" />
     </label>
@@ -187,6 +200,13 @@
       </select>
     </label>
 
+    <label>Сортировка
+      <select name="sort_by">
+        <option value="">Дедлайн (по умолчанию)</option>
+        <option value="priority_desc" {% if filters.sort_by == "priority_desc" %}selected{% endif %}>Приоритет (сначала срочные)</option>
+      </select>
+    </label>
+
     <button type="submit">Применить</button>
   </form>
 </section>
@@ -206,7 +226,8 @@
         <th>Заказчик</th>
         <th>Релевантность</th>
         <th>Категория</th>
-        <th>Recommendation</th>
+        <th>Рекомендация</th>
+        <th>Приоритет</th>
         <th>Дедлайн</th>
         <th>Публикация</th>
         <th>НМЦК</th>
@@ -259,6 +280,25 @@
             —
           {% endif %}
         </td>
+        <td>
+          {% if d and d.get("priority_label") %}
+            {% set pl = d.get("priority_label") %}
+            {% if pl == "urgent" %}
+              <span class="badge badge-bad">{{ pl | priority_label_ru }}</span>
+            {% elif pl == "high" %}
+              <span class="badge badge-mid">{{ pl | priority_label_ru }}</span>
+            {% elif pl == "medium" %}
+              <span class="badge badge-low">{{ pl | priority_label_ru }}</span>
+            {% else %}
+              <span class="badge">{{ pl | priority_label_ru }}</span>
+            {% endif %}
+            {% if d.get("priority_score") is not none %}
+              <div class="hint">score: {{ d.get("priority_score") }}</div>
+            {% endif %}
+          {% else %}
+            —
+          {% endif %}
+        </td>
         <td>{{ tender.submission_deadline | ru_dt }}</td>
         <td>{{ tender.published_at | ru_dt }}</td>
         <td>{{ tender.nmck | ru_money("RUB") }}</td>
@@ -289,6 +329,7 @@
       const riskMin = form.querySelector('input[name=\"risk_min\"]');
       const riskMax = form.querySelector('input[name=\"risk_max\"]');
       const relevanceMin = form.querySelector('input[name=\"relevance_min\"]');
+      const priorityMin = form.querySelector('input[name=\"priority_min\"]');
       if (riskMin && riskMin.value.trim() === '') {
         riskMin.disabled = true;
       }
@@ -297,6 +338,9 @@
       }
       if (relevanceMin && relevanceMin.value.trim() === '') {
         relevanceMin.disabled = true;
+      }
+      if (priorityMin && priorityMin.value.trim() === '') {
+        priorityMin.disabled = true;
       }
     });
   })();

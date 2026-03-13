@@ -37,6 +37,7 @@
     <span class="badge">Риск: {{ badges.risk_score if badges.risk_score is not none else '-' }}</span>
     <span class="badge">Решение: {{ badges.decision | decision_status_ru }}</span>
     <span class="badge">Decision score: {{ badges.decision_score if badges.decision_score is not none else '-' }}</span>
+    <span class="badge">Приоритет: {% if badges.priority_label %}{{ badges.priority_label | priority_label_ru }} ({{ badges.priority_score if badges.priority_score is not none else '-' }}){% else %}-{% endif %}</span>
     <span class="badge">Маржа %: {{ badges.margin_pct | ru_money if badges.margin_pct is not none else '-' }}</span>
     <span class="badge">Документы: {{ badges.documents_count }}</span>
     <span class="badge">Пакет: {{ 'есть' if badges.package_generated else 'нет' }}</span>
@@ -148,6 +149,19 @@
     <div><strong>Место поставки:</strong> {{ tender.place_text or '-' }}</div>
     <div><strong>Тип закупки:</strong> {{ tender.procurement_type or '-' }}</div>
   </div>
+</section>
+
+<section class="card">
+  <h2>Приоритет</h2>
+  {% if decision and decision.priority_label %}
+  <div class="kv-grid">
+    <div><strong>Приоритет:</strong> {{ decision.priority_label | priority_label_ru }}</div>
+    <div><strong>Priority score:</strong> {{ decision.priority_score if decision.priority_score is not none else '-' }}</div>
+    <div><strong>Причина приоритета:</strong> {{ decision.priority_reason or '-' }}</div>
+  </div>
+  {% else %}
+  <p>Приоритет пока не рассчитан.</p>
+  {% endif %}
 </section>
 
 <section class="card">

@@ -140,6 +140,7 @@
         <th>Релевантность</th>
         <th>Риск</th>
         <th>Рекомендация</th>
+        <th>Приоритет</th>
         <th>НМЦК</th>
         <th>Сроки</th>
         <th>Почему важно</th>
@@ -193,6 +194,27 @@
           {% endif %}
           {% if item.decision_score is not none %}
             <div class="hint">Decision score: {{ item.decision_score }}</div>
+          {% endif %}
+        </td>
+        <td>
+          {% if item.priority_label %}
+            {% if item.priority_label == "urgent" %}
+              <span class="badge badge-bad">{{ item.priority_label | priority_label_ru }}</span>
+            {% elif item.priority_label == "high" %}
+              <span class="badge badge-mid">{{ item.priority_label | priority_label_ru }}</span>
+            {% elif item.priority_label == "medium" %}
+              <span class="badge badge-low">{{ item.priority_label | priority_label_ru }}</span>
+            {% else %}
+              <span class="badge">{{ item.priority_label | priority_label_ru }}</span>
+            {% endif %}
+            {% if item.priority_score is not none %}
+              <div class="hint">Score: {{ item.priority_score }}</div>
+            {% endif %}
+            {% if item.priority_reason %}
+              <div class="hint">{{ item.priority_reason }}</div>
+            {% endif %}
+          {% else %}
+            -
           {% endif %}
         </td>
         <td>{{ item.nmck | ru_money("RUB") }}</td>

@@ -4,6 +4,7 @@ from decimal import Decimal
 from unittest import TestCase
 
 from app.decision_engine.service import (
+    compute_priority_v1,
     compute_decision_engine_v1,
     compute_finance_v2,
 )
@@ -107,3 +108,33 @@ class DecisionEngineUnitTests(TestCase):
             win_probability_pct=Decimal("50"),
         )
         self.assertEqual(finance["finance_recommendation"], "requires_analysis")
+
+    def test_priority_urgent_when_high_signal_and_close_deadline(self) -> None:
+        result = compute_priority_v1(
+            recommendation="strong_go",
+            decision_score=90,
+            relevance_score=88,
+            risk_score=20,
+            nmck=Decimal("7000000"),
+            deadline=None,
+            documents_downloaded_count=2,
+            extract_ok=True,
+            decision_done=True,
+        )
+        self.assertGreaterEqual(result["score"], 80)
+        self.assertEqual(result["label"], "urgent")
+
+    def test_priority_low_when_weak_inputs(self) -> None:
+        result = compute_priority_v1(
+            recommendation="no_go",
+            decision_score=15,
+            relevance_score=18,
+            risk_score=75,
+            nmck=Decimal("100000"),
+            deadline=None,
+            documents_downloaded_count=0,
+            extract_ok=False,
+            decision_done=False,
+        )
+        self.assertLess(result["score"], 35)
+        self.assertEqual(result["label"], "low")

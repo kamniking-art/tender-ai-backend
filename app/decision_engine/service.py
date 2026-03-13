@@ -257,6 +257,150 @@ def compute_finance_v2(
     }
 
 
+def _recommendation_weight(recommendation: str | None) -> int:
+    mapping = {
+        "strong_go": 35,
+        "go": 28,
+        "review": 18,
+        "weak": 8,
+        "no_go": 0,
+    }
+    return mapping.get(str(recommendation or "").lower(), 0)
+
+
+def _relevance_weight(score: int | None) -> int:
+    if score is None:
+        return 0
+    if score >= 80:
+        return 20
+    if score >= 60:
+        return 15
+    if score >= 45:
+        return 10
+    if score >= 20:
+        return 5
+    return 0
+
+
+def _decision_weight(score: int | None) -> int:
+    if score is None:
+        return 0
+    if score >= 80:
+        return 20
+    if score >= 60:
+        return 15
+    if score >= 40:
+        return 10
+    if score >= 20:
+        return 5
+    return 0
+
+
+def _deadline_weight(deadline: datetime | None) -> int:
+    if deadline is None:
+        return 0
+    now = datetime.now(UTC)
+    if deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=UTC)
+    delta = deadline - now
+    if delta.total_seconds() < 0:
+        return 0
+    if delta <= timedelta(days=1):
+        return 25
+    if delta <= timedelta(days=3):
+        return 18
+    if delta <= timedelta(days=7):
+        return 10
+    return 0
+
+
+def _priority_label(score: int) -> str:
+    if score >= 80:
+        return "urgent"
+    if score >= 60:
+        return "high"
+    if score >= 35:
+        return "medium"
+    return "low"
+
+
+def _priority_reason(
+    *,
+    label: str,
+    recommendation: str,
+    relevance_score: int | None,
+    decision_score: int | None,
+    deadline_weight: int,
+    nmck_weight: int,
+    risk_penalty: int,
+) -> str:
+    rel = relevance_score if relevance_score is not None else 0
+    dscore = decision_score if decision_score is not None else 0
+    urgency = "дедлайн близко" if deadline_weight >= 18 else "дедлайн не срочный"
+    scale = "крупная НМЦК" if nmck_weight >= 10 else "умеренная НМЦК"
+    risk_text = "высокий риск" if risk_penalty >= 20 else ("средний риск" if risk_penalty >= 10 else "низкий риск")
+    if label == "urgent":
+        return f"Срочный просмотр: recommendation={recommendation}, релевантность {rel}, decision score {dscore}, {urgency}, {scale}."
+    if label == "high":
+        return f"Высокий приоритет: recommendation={recommendation}, релевантность {rel}, decision score {dscore}, {urgency}."
+    if label == "medium":
+        return f"Средний приоритет: recommendation={recommendation}, релевантность {rel}, {risk_text}, {urgency}."
+    return f"Низкий приоритет: recommendation={recommendation}, релевантность {rel}, {risk_text}."
+
+
+def compute_priority_v1(
+    *,
+    recommendation: str,
+    decision_score: int | None,
+    relevance_score: int | None,
+    risk_score: int | None,
+    nmck: Decimal | None,
+    deadline: datetime | None,
+    documents_downloaded_count: int,
+    extract_ok: bool,
+    decision_done: bool,
+) -> dict:
+    rec_w = _recommendation_weight(recommendation)
+    rel_w = _relevance_weight(relevance_score)
+    dec_w = _decision_weight(decision_score)
+    dl_w = _deadline_weight(deadline)
+    nmck_w = _nmck_factor(nmck)
+    docs_w = 0
+    if documents_downloaded_count > 0:
+        docs_w += 5
+    if extract_ok:
+        docs_w += 5
+    if decision_done:
+        docs_w += 5
+    risk_p = _risk_penalty(risk_score)
+    raw = rec_w + rel_w + dec_w + dl_w + nmck_w + docs_w - risk_p
+    score = _clamp(raw, 0, 100)
+    label = _priority_label(score)
+    reason = _priority_reason(
+        label=label,
+        recommendation=recommendation,
+        relevance_score=relevance_score,
+        decision_score=decision_score,
+        deadline_weight=dl_w,
+        nmck_weight=nmck_w,
+        risk_penalty=risk_p,
+    )
+    return {
+        "score": score,
+        "label": label,
+        "reason": reason,
+        "components": {
+            "recommendation_weight": rec_w,
+            "relevance_weight": rel_w,
+            "decision_weight": dec_w,
+            "deadline_weight": dl_w,
+            "nmck_weight": nmck_w,
+            "docs_weight": docs_w,
+            "risk_penalty": risk_p,
+        },
+    }
+
+
 def compute_decision_engine_v1(
     *,
     relevance_score: int | None = None,
@@ -278,7 +422,6 @@ def compute_decision_engine_v1(
     nmck_points = _nmck_factor(nmck)
     doc_points = 10 if has_documents else 0
     penalty = _risk_penalty(risk_score)
-
     weighted = (Decimal(rel) * Decimal("0.6")) + (Decimal(kw) * Decimal("0.2")) + (Decimal(nmck_points) * Decimal("0.1")) + (Decimal(doc_points) * Decimal("0.1"))
     total_score = _clamp(int(round(float(weighted - Decimal(penalty)))), 0, 100)
     recommendation = _recommendation_for_score(total_score)
@@ -336,16 +479,14 @@ def _final_recommendation_from_finance(
 ) -> Literal["strong_go", "go", "review", "weak", "no_go"]:
     if finance_recommendation == "no_go":
         return "no_go"
-    if relevance_score is not None and relevance_score < 20:
-        if base_recommendation in {"strong_go", "go", "review"}:
-            return "weak"
+    if relevance_score is not None and relevance_score < 20 and base_recommendation in {"strong_go", "go", "review"}:
+        return "weak"
     if finance_recommendation == "requires_analysis":
         if base_recommendation in {"strong_go", "go"}:
             return "review"
         return base_recommendation
-    if finance_recommendation == "go" and risk_score is not None and risk_score > RISK_GO_MAX:
-        if base_recommendation in {"strong_go", "go"}:
-            return "review"
+    if finance_recommendation == "go" and risk_score is not None and risk_score > RISK_GO_MAX and base_recommendation in {"strong_go", "go"}:
+        return "review"
     return base_recommendation
 
 
@@ -376,20 +517,19 @@ async def _get_finance_scoped(db: AsyncSession, company_id: UUID, tender_id: UUI
     )
 
 
-async def _has_documents(db: AsyncSession, company_id: UUID, tender_id: UUID) -> bool:
+async def _documents_count(db: AsyncSession, company_id: UUID, tender_id: UUID) -> int:
     count_stmt = select(func.count()).select_from(TenderDocument).where(
         TenderDocument.company_id == company_id,
         TenderDocument.tender_id == tender_id,
     )
     count = (await db.execute(count_stmt)).scalar_one()
-    return bool(count and count > 0)
+    return int(count or 0)
 
 
 async def _get_or_create_decision(db: AsyncSession, company_id: UUID, tender_id: UUID, user_id: UUID) -> TenderDecision:
     decision = await _get_decision_scoped(db, company_id, tender_id)
     if decision is not None:
         return decision
-
     decision = TenderDecision(
         company_id=company_id,
         tender_id=tender_id,
@@ -422,7 +562,6 @@ async def recompute_decision_engine_v1(
         raise DecisionEngineBadRequestError("Tender not found")
 
     decision = await _get_or_create_decision(db, company_id, tender_id, user_id)
-
     if _is_manual_recommendation(decision) and not force:
         raise ManualRecommendationConflictError("manual recommendation set")
 
@@ -435,7 +574,8 @@ async def recompute_decision_engine_v1(
     harsh_penalties = _resolve_harsh_penalties(analysis)
     high_security = _resolve_high_security(extracted, decision, tender)
     finance = await _get_finance_scoped(db, company_id, tender_id)
-    has_documents = await _has_documents(db, company_id, tender_id)
+    docs_count = await _documents_count(db, company_id, tender_id)
+    has_documents = docs_count > 0
     matched_keywords = [str(item) for item in relevance.get("matched_keywords", []) if isinstance(item, str)]
 
     engine = compute_decision_engine_v1(
@@ -473,15 +613,30 @@ async def recompute_decision_engine_v1(
     if relevance.get("score") is not None and relevance["score"] < 20 and engine["recommendation_base"] in {"strong_go", "go", "review"}:
         engine["explain"].append("relevance_guard=weak (relevance_score<20)")
 
+    priority = compute_priority_v1(
+        recommendation=engine["recommendation"],
+        decision_score=engine.get("decision_score"),
+        relevance_score=relevance.get("score") if isinstance(relevance.get("score"), int) else None,
+        risk_score=risk_score,
+        nmck=tender.nmck,
+        deadline=tender.submission_deadline,
+        documents_downloaded_count=docs_count,
+        extract_ok=extracted is not None,
+        decision_done=True,
+    )
+    engine["priority"] = priority
+
     decision.recommendation = engine["recommendation"]
     decision.decision_score = engine.get("decision_score")
     decision.recommendation_reason = engine.get("recommendation_reason")
+    decision.priority_score = priority["score"]
+    decision.priority_label = priority["label"]
+    decision.priority_reason = priority["reason"]
     decision.engine_meta = engine
     decision.updated_by = user_id
 
     await db.commit()
     await db.refresh(decision)
-
     return decision, engine
 
 
@@ -494,9 +649,7 @@ async def get_decision_engine_scoped(
     tender = await get_tender_by_id_scoped(db, company_id, tender_id)
     if tender is None:
         raise DecisionEngineBadRequestError("Tender not found")
-
     decision = await _get_decision_scoped(db, company_id, tender_id)
     if decision is None:
         raise DecisionEngineBadRequestError("Decision not found")
-
     return decision, decision.engine_meta if isinstance(decision.engine_meta, dict) and decision.engine_meta else None

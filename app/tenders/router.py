@@ -41,6 +41,9 @@ async def _to_tender_read(db: AsyncSession, company_id: UUID, tender) -> TenderR
             "decision_score": decision.decision_score,
             "recommendation": decision.recommendation,
             "recommendation_reason": decision.recommendation_reason,
+            "priority_score": decision.priority_score,
+            "priority_label": decision.priority_label,
+            "priority_reason": decision.priority_reason,
         }
     )
 

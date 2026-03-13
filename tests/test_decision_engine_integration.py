@@ -40,6 +40,11 @@ class DecisionEngineIntegrationTests(IsolatedAsyncioTestCase):
             bid_security_amount=None,
             contract_security_amount=None,
             nmck=None,
+            decision_score=None,
+            recommendation_reason=None,
+            priority_score=None,
+            priority_label=None,
+            priority_reason=None,
             engine_meta={},
             updated_by=None,
         )
@@ -79,6 +84,7 @@ class DecisionEngineIntegrationTests(IsolatedAsyncioTestCase):
         old_get_or_create = engine_service._get_or_create_decision
         old_get_analysis = engine_service._get_analysis_scoped
         old_get_finance = engine_service._get_finance_scoped
+        old_docs_count = engine_service._documents_count
         try:
             async def _mock_get_tender(db, company, tid):
                 self.assertIs(db, fake_db)
@@ -105,10 +111,17 @@ class DecisionEngineIntegrationTests(IsolatedAsyncioTestCase):
                 self.assertEqual(tid, tender_id)
                 return finance
 
+            async def _mock_docs_count(db, company, tid):
+                self.assertIs(db, fake_db)
+                self.assertEqual(company, company_id)
+                self.assertEqual(tid, tender_id)
+                return 2
+
             engine_service.get_tender_by_id_scoped = _mock_get_tender
             engine_service._get_or_create_decision = _mock_get_or_create
             engine_service._get_analysis_scoped = _mock_get_analysis
             engine_service._get_finance_scoped = _mock_get_finance
+            engine_service._documents_count = _mock_docs_count
 
             updated_decision, engine_meta = await recompute_decision_engine_v1(
                 fake_db,
@@ -122,9 +135,12 @@ class DecisionEngineIntegrationTests(IsolatedAsyncioTestCase):
             engine_service._get_or_create_decision = old_get_or_create
             engine_service._get_analysis_scoped = old_get_analysis
             engine_service._get_finance_scoped = old_get_finance
+            engine_service._documents_count = old_docs_count
 
         self.assertIn(updated_decision.recommendation, {"go", "strong_go"})
         self.assertIn(engine_meta["recommendation"], {"go", "strong_go"})
         self.assertIn("finance", engine_meta)
         self.assertIn("decision_score", engine_meta)
+        self.assertIn("priority", engine_meta)
+        self.assertIsNotNone(updated_decision.priority_label)
         self.assertEqual(updated_decision.engine_meta["score"], engine_meta["score"])

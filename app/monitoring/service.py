@@ -292,6 +292,9 @@ async def run_monitoring_cycle(
         recommendation = decision.recommendation if decision else None
         decision_score = decision.decision_score if decision else None
         recommendation_reason = decision.recommendation_reason if decision else None
+        priority_score = decision.priority_score if decision else None
+        priority_label = decision.priority_label if decision else None
+        priority_reason = decision.priority_reason if decision else None
         notification = MonitoringNotification(
             tender_id=tender.id,
             title=tender.title,
@@ -312,6 +315,9 @@ async def run_monitoring_cycle(
             recommendation=recommendation,
             decision_score=decision_score,
             recommendation_reason=recommendation_reason,
+            priority_score=priority_score,
+            priority_label=priority_label,
+            priority_reason=priority_reason,
             analysis_stage=stage,
             documents_downloaded_count=docs_downloaded,
             extract_status=extract_status,
@@ -378,4 +384,12 @@ def get_monitoring_notifications(company: Company, limit: int = 20) -> list[dict
     notifications = state.get("notifications", [])
     if not isinstance(notifications, list):
         return []
-    return notifications[: max(1, min(100, limit))]
+    ordered = sorted(
+        notifications,
+        key=lambda item: (
+            int(item.get("priority_score", -1)) if isinstance(item, dict) and item.get("priority_score") is not None else -1,
+            str(item.get("sent_at", "")) if isinstance(item, dict) else "",
+        ),
+        reverse=True,
+    )
+    return ordered[: max(1, min(100, limit))]
