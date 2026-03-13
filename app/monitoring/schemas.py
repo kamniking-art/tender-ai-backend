@@ -56,9 +56,14 @@ class MonitoringNotification(BaseModel):
     relevance_score: int | None = None
     relevance_label: str | None = None
     category: str | None = None
+    summary_reason: str | None = None
+    matched_keywords: list[str] = Field(default_factory=list)
     risk_score: int | None = None
     recommendation: str | None = None
     nmck: float | None = None
+    published_at: str | None = None
+    deadline: str | None = None
+    tender_ai_url: str | None = None
     tender_url: str | None = None
     source_url: str | None = None
     sent_at: str = Field(default_factory=_now_iso)
@@ -73,4 +78,3 @@ class MonitoringRunResponse(BaseModel):
     relevant_found: int
     notifications_sent: int
     details: dict[str, Any] = Field(default_factory=dict)
-

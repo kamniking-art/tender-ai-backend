@@ -201,6 +201,30 @@ a {
   color: var(--text);
 }
 
+.badge-good {
+  background: #ecfdf3;
+  border-color: #75e0a7;
+  color: #067647;
+}
+
+.badge-mid {
+  background: #fffaeb;
+  border-color: #fec84b;
+  color: #b54708;
+}
+
+.badge-low {
+  background: #f2f4f7;
+  border-color: #d0d5dd;
+  color: #475467;
+}
+
+.badge-bad {
+  background: #fef3f2;
+  border-color: #fda29b;
+  color: #b42318;
+}
+
 .pager {
   margin-top: 10px;
   display: flex;

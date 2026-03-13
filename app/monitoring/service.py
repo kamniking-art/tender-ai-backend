@@ -115,6 +115,31 @@ def _trim_state(state: dict) -> None:
         state["notifications"] = notifications[:200]
 
 
+def _format_dt(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def _summary_reason(*, category: str | None, relevance_label: str | None, relevance_reason: str | None, matched_keywords: list[str], risk_score: int | None, recommendation: str | None) -> str:
+    category_text = category or "без категории"
+    rel_text = relevance_label or "не определена"
+    risk_text = str(risk_score) if risk_score is not None else "не рассчитан"
+    rec_text = recommendation or "не определена"
+    keywords_text = ", ".join(matched_keywords[:4]) if matched_keywords else "ключевые признаки не выделены"
+    reason = relevance_reason.strip() if relevance_reason else ""
+    if reason:
+        return (
+            f"Категория: {category_text}. Релевантность: {rel_text}. "
+            f"Совпадения: {keywords_text}. Риск: {risk_text}. Рекомендация: {rec_text}. "
+            f"Почему показан: {reason}"
+        )
+    return (
+        f"Категория: {category_text}. Релевантность: {rel_text}. "
+        f"Совпадения: {keywords_text}. Риск: {risk_text}. Рекомендация: {rec_text}."
+    )
+
+
 async def run_monitoring_cycle(
     db: AsyncSession,
     *,
@@ -187,17 +212,35 @@ async def run_monitoring_cycle(
         decision = await db.scalar(
             select(TenderDecision).where(TenderDecision.company_id == company.id, TenderDecision.tender_id == tender.id)
         )
+        relevance_label = str(rel_payload.get("label")) if rel_payload.get("label") else None
+        category = str(rel_payload.get("category")) if rel_payload.get("category") else None
+        relevance_reason = str(rel_payload.get("reason")) if rel_payload.get("reason") else None
+        matched_keywords = [str(item) for item in rel_payload.get("matched_keywords", []) if isinstance(item, str)]
+        tender_ai_url = f"{settings.public_base_url.rstrip('/')}/web/tenders/{tender.id}"
+        recommendation = decision.recommendation if decision else None
         notification = MonitoringNotification(
             tender_id=tender.id,
             title=tender.title,
             external_id=tender.external_id,
             relevance_score=int(rel_payload.get("score")) if isinstance(rel_payload.get("score"), int) else None,
-            relevance_label=str(rel_payload.get("label")) if rel_payload.get("label") else None,
-            category=str(rel_payload.get("category")) if rel_payload.get("category") else None,
+            relevance_label=relevance_label,
+            category=category,
+            summary_reason=_summary_reason(
+                category=category,
+                relevance_label=relevance_label,
+                relevance_reason=relevance_reason,
+                matched_keywords=matched_keywords,
+                risk_score=risk_score,
+                recommendation=recommendation,
+            ),
+            matched_keywords=matched_keywords[:10],
             risk_score=risk_score,
-            recommendation=decision.recommendation if decision else None,
+            recommendation=recommendation,
             nmck=float(tender.nmck) if tender.nmck is not None else None,
-            tender_url=f"{settings.public_base_url.rstrip('/')}/web/tenders/{tender.id}",
+            published_at=_format_dt(tender.published_at),
+            deadline=_format_dt(tender.submission_deadline),
+            tender_ai_url=tender_ai_url,
+            tender_url=tender_ai_url,
             source_url=tender.source_url,
             sent_at=now_iso,
         )
@@ -249,4 +292,3 @@ def get_monitoring_notifications(company: Company, limit: int = 20) -> list[dict
     if not isinstance(notifications, list):
         return []
     return notifications[: max(1, min(100, limit))]
-

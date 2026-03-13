@@ -126,20 +126,65 @@
         <th>Риск</th>
         <th>Рекомендация</th>
         <th>НМЦК</th>
+        <th>Сроки</th>
+        <th>Почему важно</th>
         <th>Ссылки</th>
       </tr>
     </thead>
     <tbody>
       {% for item in monitoring_notifications %}
       <tr>
-        <td><a href="/web/tenders/{{ item.tender_id }}">{{ item.title or item.external_id or item.tender_id }}</a></td>
+        <td>
+          <a href="/web/tenders/{{ item.tender_id }}">{{ item.title or item.external_id or item.tender_id }}</a>
+          <div class="hint">ID: {{ item.external_id or "-" }}</div>
+        </td>
         <td>{{ item.category or "-" }}</td>
-        <td>{{ item.relevance_score or "-" }}{% if item.relevance_label %} ({{ item.relevance_label }}){% endif %}</td>
-        <td>{{ item.risk_score or "-" }}</td>
-        <td>{% if item.recommendation %}{{ item.recommendation | decision_status_ru }}{% else %}-{% endif %}</td>
+        <td>
+          {% set rel_score = item.relevance_score %}
+          {% set rel_label = item.relevance_label or "-" %}
+          {% if rel_score is not none and rel_score >= 70 %}
+            <span class="badge badge-good">{{ rel_score }}/100 ({{ rel_label }})</span>
+          {% elif rel_score is not none and rel_score >= 45 %}
+            <span class="badge badge-mid">{{ rel_score }}/100 ({{ rel_label }})</span>
+          {% elif rel_score is not none %}
+            <span class="badge badge-low">{{ rel_score }}/100 ({{ rel_label }})</span>
+          {% else %}
+            -
+          {% endif %}
+        </td>
+        <td>
+          {% if item.risk_score is not none and item.risk_score >= 70 %}
+            <span class="badge badge-bad">{{ item.risk_score }}</span>
+          {% elif item.risk_score is not none %}
+            <span class="badge badge-mid">{{ item.risk_score }}</span>
+          {% else %}
+            -
+          {% endif %}
+        </td>
+        <td>
+          {% if item.recommendation == "go" %}
+            <span class="badge badge-good">{{ item.recommendation | decision_status_ru }}</span>
+          {% elif item.recommendation == "no_go" %}
+            <span class="badge badge-bad">{{ item.recommendation | decision_status_ru }}</span>
+          {% elif item.recommendation %}
+            <span class="badge badge-mid">{{ item.recommendation | decision_status_ru }}</span>
+          {% else %}
+            -
+          {% endif %}
+        </td>
         <td>{{ item.nmck | ru_money("RUB") }}</td>
         <td>
-          {% if item.tender_url %}<a href="{{ item.tender_url }}">Tender AI</a>{% endif %}
+          <div class="hint">Публ.: {{ item.published_at | ru_dt if item.published_at else "-" }}</div>
+          <div class="hint">Дедлайн: {{ item.deadline | ru_dt if item.deadline else "-" }}</div>
+        </td>
+        <td>
+          <div>{{ item.summary_reason or "-" }}</div>
+          {% if item.matched_keywords %}
+            <div class="hint">Совпадения: {{ item.matched_keywords | join(", ") }}</div>
+          {% endif %}
+        </td>
+        <td>
+          {% if item.tender_ai_url %}<a href="{{ item.tender_ai_url }}">Открыть в Tender AI</a>{% elif item.tender_url %}<a href="{{ item.tender_url }}">Открыть в Tender AI</a>{% endif %}
           {% if item.source_url %}<a href="{{ item.source_url }}" target="_blank" rel="noopener noreferrer">ЕИС</a>{% endif %}
         </td>
       </tr>
