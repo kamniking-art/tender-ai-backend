@@ -17,11 +17,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("tender_decisions", sa.Column("decision_score", sa.Integer(), nullable=True))
-    op.add_column("tender_decisions", sa.Column("recommendation_reason", sa.Text(), nullable=True))
+    op.execute("ALTER TABLE tender_decisions ADD COLUMN IF NOT EXISTS decision_score INTEGER")
+    op.execute("ALTER TABLE tender_decisions ADD COLUMN IF NOT EXISTS recommendation_reason TEXT")
 
 
 def downgrade() -> None:
-    op.drop_column("tender_decisions", "recommendation_reason")
-    op.drop_column("tender_decisions", "decision_score")
-
+    op.execute("ALTER TABLE tender_decisions DROP COLUMN IF EXISTS recommendation_reason")
+    op.execute("ALTER TABLE tender_decisions DROP COLUMN IF EXISTS decision_score")
