@@ -12,7 +12,7 @@ services:
       - tender_ai_pgdata:/var/lib/postgresql/data
 
   tender_ai_app:
-    image: ghcr.io/kamniking-art/tender-ai-backend:latest
+    image: ghcr.io/kamniking-art/tender-ai-backend:${APP_IMAGE_TAG:-latest}
     pull_policy: always
     restart: unless-stopped
     env_file:
