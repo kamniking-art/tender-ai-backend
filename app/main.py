@@ -12,6 +12,7 @@ from app.companies import router as companies_router
 from app.decision_engine.router import router as decision_engine_router
 from app.document_module.router import router as document_module_router
 from app.ingestion import health_router as ingestion_health_router, opendata_router as ingestion_opendata_router, settings_router as ingestion_settings_router
+from app.ingestion.eis_browser import router as ingestion_eis_browser_router
 from app.ingestion.eis_site import router as ingestion_eis_site_router
 from app.ingestion.scheduler import scheduler as ingestion_scheduler
 from app.risk.router import router as risk_router
@@ -38,6 +39,7 @@ app.include_router(companies_router)
 app.include_router(ingestion_settings_router)
 app.include_router(ingestion_opendata_router)
 app.include_router(ingestion_eis_site_router)
+app.include_router(ingestion_eis_browser_router)
 app.include_router(ingestion_health_router)
 app.include_router(monitoring_settings_router)
 app.include_router(monitoring_router)

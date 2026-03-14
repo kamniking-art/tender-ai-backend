@@ -16,6 +16,7 @@ ENV APP_BUILT_AT_IMAGE=${APP_BUILT_AT_IMAGE}
 
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
+RUN playwright install --with-deps chromium
 
 COPY . .
 

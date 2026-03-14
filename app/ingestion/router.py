@@ -164,6 +164,8 @@ async def get_ingestion_health(
     eis_opendata = settings.get("eis_opendata") if isinstance(settings.get("eis_opendata"), dict) else {}
     od_state = eis_opendata.get("state") if isinstance(eis_opendata.get("state"), dict) else {}
     od_discovery = od_state.get("discovery") if isinstance(od_state.get("discovery"), dict) else {}
+    eis_browser = settings.get("eis_browser") if isinstance(settings.get("eis_browser"), dict) else {}
+    browser_state = eis_browser.get("state") if isinstance(eis_browser.get("state"), dict) else {}
 
     snapshot = ingestion_scheduler.get_health_snapshot()
     return {
@@ -181,6 +183,18 @@ async def get_ingestion_health(
                 "search_api_url": od_discovery.get("search_api_url"),
                 "dataset_api_url": od_discovery.get("dataset_api_url"),
                 "last_error": od_discovery.get("last_error"),
+            },
+        },
+        "eis_browser": {
+            "enabled": bool(eis_browser.get("enabled", True)),
+            "state": {
+                "source_status": browser_state.get("source_status", "unknown"),
+                "stage": browser_state.get("stage"),
+                "last_run_at": browser_state.get("last_run_at"),
+                "found": browser_state.get("found", 0),
+                "imported": browser_state.get("imported", 0),
+                "updated": browser_state.get("updated", 0),
+                "reason": browser_state.get("reason"),
             },
         },
         "scheduler": snapshot,

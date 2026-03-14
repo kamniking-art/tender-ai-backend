@@ -26,6 +26,37 @@
 </section>
 
 <section class="card">
+  <h2>Browser import (fallback)</h2>
+  <form method="post" action="/web/ingestion/eis-browser/run-once" class="filters">
+    <label>Поиск ЕИС
+      <input type="text" name="q" placeholder="гранит OR памятник OR плита" />
+    </label>
+    <label>Страниц
+      <input type="number" name="pages" min="1" max="5" value="3" />
+    </label>
+    <label>На странице
+      <input type="number" name="page_size" min="10" max="50" value="20" />
+    </label>
+    <label>Лимит
+      <input type="number" name="limit" min="1" max="50" value="50" />
+    </label>
+    <label>Регион
+      <input type="text" name="region" placeholder="например: Санкт-Петербург" />
+    </label>
+    <button type="submit">Запустить browser import</button>
+  </form>
+  <p>
+    <strong>Статус eis_browser:</strong>
+    {{ eis_browser_status.source_status or '-' }},
+    stage={{ eis_browser_status.stage or '-' }},
+    imported={{ eis_browser_status.imported or 0 }},
+    updated={{ eis_browser_status.updated or 0 }},
+    found={{ eis_browser_status.found or 0 }},
+    last_run={{ eis_browser_status.last_run_at or '-' }}
+  </p>
+</section>
+
+<section class="card">
   <h2>Массовый импорт</h2>
   <form method="post" action="/web/ingestion/eis-site/run-bulk" class="filters">
     <label>Запросы (по одному в строке)

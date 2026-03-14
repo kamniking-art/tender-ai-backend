@@ -26,6 +26,7 @@ from app.document_module.service import (
     get_package_for_tender,
     generate_package_for_tender,
 )
+from app.ingestion.eis_browser.service import run_eis_browser_once_for_company
 from app.ingestion.eis_site.service import run_eis_site_bulk_for_company, run_eis_site_once_for_company
 from app.models import Company, User
 from app.monitoring.schemas import MonitoringSettings, MonitoringSettingsPatch
@@ -145,6 +146,7 @@ TASK_TYPE_RU = {
 SOURCE_RU = {
     "eis": "ЕИС",
     "eis_site": "ЕИС (сайт)",
+    "eis_browser": "ЕИС (браузер)",
     "eis_public": "ЕИС (публичный поиск)",
     "eis_opendata": "ЕИС (открытые данные)",
     "fallback": "fallback (тестовые CSV)",
@@ -788,10 +790,65 @@ async def web_run_eis_site_once(
             f"http_status={stats.http_status or '-'}",
             f"reason={reason}",
         ]
+    browser_fallback_note = None
+    if stats.source_status in {"blocked", "cooldown"}:
+        browser_stats = await run_eis_browser_once_for_company(
+            db,
+            company,
+            query=q or None,
+            pages=3,
+            page_size=20,
+            limit=50,
+            region=region or None,
+        )
+        browser_fallback_note = (
+            f"fallback:eis_browser inserted={browser_stats.inserted}, "
+            f"updated={browser_stats.updated}, found={browser_stats.candidates}, status={browser_stats.source_status}"
+        )
+
     if stats.errors_sample:
         details_parts.append("; ".join(stats.errors_sample[:3]))
+    if browser_fallback_note:
+        details_parts.append(browser_fallback_note)
     details = ", ".join(details_parts)
     qs = urlencode({"ingest_status": "error", "ingest_message": message, "ingest_details": details})
+    return RedirectResponse(url=f"/web/tenders?{qs}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/ingestion/eis-browser/run-once")
+async def web_run_eis_browser_once(
+    q: str | None = Form(default=None),
+    pages: int = Form(default=3),
+    page_size: int = Form(default=20),
+    limit: int = Form(default=50),
+    region: str | None = Form(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_cookie),
+):
+    company = await db.scalar(select(Company).where(Company.id == current_user.company_id))
+    if company is None:
+        return RedirectResponse(
+            url="/web/tenders?ingest_status=error&ingest_message=Компания не найдена",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    stats = await run_eis_browser_once_for_company(
+        db,
+        company,
+        query=q or None,
+        pages=max(1, min(5, int(pages or 3))),
+        page_size=max(10, min(50, int(page_size or 20))),
+        limit=max(1, min(50, int(limit or 50))),
+        region=region or None,
+    )
+    if stats.source_status != "error":
+        message = f"Browser import: найдено {stats.candidates}, добавлено {stats.inserted}, обновлено {stats.updated}"
+        details = f"stage={stats.stage}, source_status={stats.source_status}"
+        qs = urlencode({"ingest_status": "ok", "ingest_message": message, "ingest_details": details})
+        return RedirectResponse(url=f"/web/tenders?{qs}", status_code=status.HTTP_303_SEE_OTHER)
+
+    details = ", ".join(stats.errors_sample[:3]) if stats.errors_sample else f"stage={stats.stage}"
+    qs = urlencode({"ingest_status": "error", "ingest_message": "Browser import завершился с ошибкой", "ingest_details": details})
     return RedirectResponse(url=f"/web/tenders?{qs}", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -1087,7 +1144,7 @@ async def tenders_page(
     prev_qs = _query_string({**base_filters, "page": page - 1}) if page > 1 else ""
     next_qs = _query_string({**base_filters, "page": page + 1}) if page < total_pages else ""
 
-    source_values = ["eis_site", "manual", "eis_opendata", "fallback", "eis_public", "eis", "other"]
+    source_values = ["eis_site", "eis_browser", "manual", "eis_opendata", "fallback", "eis_public", "eis", "other"]
     distinct_sources = list(
         (
             await db.scalars(
@@ -1117,6 +1174,11 @@ async def tenders_page(
                 "priority_label": decision.priority_label,
                 "priority_reason": decision.priority_reason,
             }
+
+    company = await db.scalar(select(Company).where(Company.id == current_user.company_id))
+    settings_payload = company.ingestion_settings if company and isinstance(company.ingestion_settings, dict) else {}
+    eis_browser = settings_payload.get("eis_browser") if isinstance(settings_payload.get("eis_browser"), dict) else {}
+    eis_browser_state = eis_browser.get("state") if isinstance(eis_browser.get("state"), dict) else {}
 
     return templates.TemplateResponse(
         "tenders.html",
@@ -1149,6 +1211,7 @@ async def tenders_page(
                 "message": ingest_message,
                 "details": ingest_details,
             },
+            eis_browser_status=eis_browser_state,
         ),
     )
 

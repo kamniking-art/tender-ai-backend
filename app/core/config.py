@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     eis_source_long_pause_every_min_pages: int = 10
     eis_source_long_pause_every_max_pages: int = 15
     eis_site_max_age_days: int = 60
+    eis_browser_state_dir: str = "/opt/tender_ai_backend/runtime/eis_browser_state"
 
     # EIS OpenData discovery/config
     eis_opendata_base_url: str = "https://zakupki.gov.ru"
