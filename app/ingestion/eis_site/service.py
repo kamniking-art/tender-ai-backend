@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import logging
+import random
+import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -35,6 +38,7 @@ class EISSiteRunStats:
     inserted: int = 0
     updated: int = 0
     skipped: int = 0
+    cooldown_until: datetime | None = None
 
 
 @dataclass
@@ -65,8 +69,21 @@ class EISSiteSettings:
     max_pages: int = 50
     region: str | None = None
     timeout_sec: int = 20
-    rate_limit_rps: float = 0.4
+    min_request_delay_sec: float = 2.0
+    max_request_delay_sec: float = 3.5
+    page_delay_min_sec: float = 1.8
+    page_delay_max_sec: float = 4.2
+    long_pause_min_sec: float = 8.0
+    long_pause_max_sec: float = 15.0
+    long_pause_every_min_pages: int = 10
+    long_pause_every_max_pages: int = 15
     records_per_page: int = 20
+
+
+class SourceStatus(StrEnum):
+    OK = "ok"
+    COOLDOWN = "cooldown"
+    BLOCKED = "blocked"
 
 
 async def run_eis_site_once_for_company(
@@ -80,7 +97,8 @@ async def run_eis_site_once_for_company(
     region: str | None = None,
     dedupe_mode: str = "update",
 ) -> EISSiteRunStats:
-    cfg = _extract_settings(company.ingestion_settings or {})
+    payload = company.ingestion_settings if isinstance(company.ingestion_settings, dict) else {}
+    cfg = _extract_settings(payload)
     if query is not None:
         cfg.query = query
     cfg.limit = max(1, min(5000, int(limit or cfg.limit)))
@@ -91,23 +109,67 @@ async def run_eis_site_once_for_company(
     if region is not None:
         cfg.region = region or None
 
-    client = EISSiteClient(timeout_sec=cfg.timeout_sec, rate_limit_rps=cfg.rate_limit_rps)
+    client = EISSiteClient(
+        timeout_sec=cfg.timeout_sec,
+        min_request_delay_sec=cfg.min_request_delay_sec,
+        max_request_delay_sec=cfg.max_request_delay_sec,
+    )
     stats = EISSiteRunStats(stage="fetch")
     max_age_days = max(1, int(settings.eis_site_max_age_days or 60))
     cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
+    now_utc = datetime.now(UTC)
+    state = _get_source_state(payload)
+    cooldown_until = _parse_dt(state.get("cooldown_until"))
+    state_changed = False
+
+    if cooldown_until is not None and cooldown_until > now_utc:
+        stats.stage = "error"
+        stats.reason = "cooldown_active"
+        stats.source_status = SourceStatus.COOLDOWN.value
+        stats.cooldown_until = cooldown_until
+        logger.warning(
+            "EIS_SITE source cooldown active: company_id=%s until=%s",
+            company.id,
+            cooldown_until.isoformat(),
+        )
+        return stats
+
+    if cooldown_until is not None and cooldown_until <= now_utc:
+        _set_source_state(
+            payload,
+            status=SourceStatus.OK,
+            last_block_time=state.get("last_block_time"),
+            cooldown_until=None,
+        )
+        company.ingestion_settings = payload
+        state_changed = True
 
     try:
         collected: list[EISSiteCandidate] = []
+        next_long_pause_after = random.randint(cfg.long_pause_every_min_pages, cfg.long_pause_every_max_pages)
+        pages_since_long_pause = 0
         for page in range(1, cfg.max_pages + 1):
             if len(collected) >= cfg.limit:
                 break
             params = _build_search_params(cfg, page)
-            html_text = await client.fetch_search_page(EIS_SITE_SEARCH_URL, params=params)
+            html_text = await client.fetch_search_page(EIS_SITE_SEARCH_URL, params=params, page_number=page)
             stats.pages += 1
             if html_text is None:
                 stats.stage = "error"
                 stats.reason = client.diagnostics.reason or "fetch_failed"
                 stats.source_status = client.diagnostics.source_status
+                if stats.source_status == SourceStatus.BLOCKED.value:
+                    blocked_at = datetime.now(UTC)
+                    cooldown_until = blocked_at + timedelta(minutes=max(30, settings.eis_source_blocked_cooldown_minutes))
+                    stats.cooldown_until = cooldown_until
+                    _set_source_state(
+                        payload,
+                        status=SourceStatus.BLOCKED,
+                        last_block_time=blocked_at,
+                        cooldown_until=cooldown_until,
+                    )
+                    company.ingestion_settings = payload
+                    state_changed = True
                 break
 
             stats.stage = "parse"
@@ -121,6 +183,12 @@ async def run_eis_site_once_for_company(
                 break
 
             collected.extend(parsed.candidates)
+            pages_since_long_pause += 1
+            await asyncio.sleep(random.uniform(cfg.page_delay_min_sec, cfg.page_delay_max_sec))
+            if pages_since_long_pause >= next_long_pause_after:
+                await asyncio.sleep(random.uniform(cfg.long_pause_min_sec, cfg.long_pause_max_sec))
+                pages_since_long_pause = 0
+                next_long_pause_after = random.randint(cfg.long_pause_every_min_pages, cfg.long_pause_every_max_pages)
 
         deduped: list[EISSiteCandidate] = []
         seen: set[str] = set()
@@ -151,9 +219,14 @@ async def run_eis_site_once_for_company(
                     stats.skipped += 1
 
             await db.commit()
+            if state_changed:
+                state_changed = False
             stats.stage = "done"
             if not stats.reason:
                 stats.reason = "ok"
+            _set_source_state(payload, status=SourceStatus.OK, last_block_time=state.get("last_block_time"), cooldown_until=None)
+            company.ingestion_settings = payload
+            state_changed = True
 
         stats.http_status = client.diagnostics.http_status
         stats.fetched_bytes = client.diagnostics.fetched_bytes
@@ -164,7 +237,7 @@ async def run_eis_site_once_for_company(
                     stats.errors_sample.append(msg)
 
         logger.info(
-            "EIS_SITE run: stage=%s reason=%s source_status=%s company_id=%s pages=%s candidates=%s inserted=%s updated=%s skipped=%s http_status=%s fetched_bytes=%s",
+            "EIS_SITE run: stage=%s reason=%s source_status=%s company_id=%s pages=%s candidates=%s inserted=%s updated=%s skipped=%s http_status=%s fetched_bytes=%s cooldown_until=%s",
             stats.stage,
             stats.reason,
             stats.source_status,
@@ -176,8 +249,11 @@ async def run_eis_site_once_for_company(
             stats.skipped,
             stats.http_status,
             stats.fetched_bytes,
+            stats.cooldown_until.isoformat() if stats.cooldown_until else "-",
         )
 
+        if state_changed:
+            await db.commit()
         return stats
     finally:
         await client.close()
@@ -191,9 +267,76 @@ def _extract_settings(payload: dict[str, Any]) -> EISSiteSettings:
         max_pages=max(1, min(200, int(raw.get("max_pages", 50) or 50))),
         region=str(raw.get("region")) if raw.get("region") else None,
         timeout_sec=int(raw.get("timeout_sec", 20) or 20),
-        rate_limit_rps=float(raw.get("rate_limit_rps", 0.4) or 0.4),
+        min_request_delay_sec=float(
+            raw.get("min_request_delay_sec", settings.eis_source_request_delay_sec) or settings.eis_source_request_delay_sec
+        ),
+        max_request_delay_sec=float(
+            raw.get(
+                "max_request_delay_sec",
+                settings.eis_source_request_delay_sec + settings.eis_source_request_jitter_sec,
+            )
+            or (settings.eis_source_request_delay_sec + settings.eis_source_request_jitter_sec)
+        ),
+        page_delay_min_sec=float(raw.get("page_delay_min_sec", settings.eis_source_page_delay_min_sec) or settings.eis_source_page_delay_min_sec),
+        page_delay_max_sec=float(raw.get("page_delay_max_sec", settings.eis_source_page_delay_max_sec) or settings.eis_source_page_delay_max_sec),
+        long_pause_min_sec=float(raw.get("long_pause_min_sec", settings.eis_source_long_pause_min_sec) or settings.eis_source_long_pause_min_sec),
+        long_pause_max_sec=float(raw.get("long_pause_max_sec", settings.eis_source_long_pause_max_sec) or settings.eis_source_long_pause_max_sec),
+        long_pause_every_min_pages=max(
+            2,
+            int(raw.get("long_pause_every_min_pages", settings.eis_source_long_pause_every_min_pages) or settings.eis_source_long_pause_every_min_pages),
+        ),
+        long_pause_every_max_pages=max(
+            2,
+            int(raw.get("long_pause_every_max_pages", settings.eis_source_long_pause_every_max_pages) or settings.eis_source_long_pause_every_max_pages),
+        ),
         records_per_page=max(10, min(50, int(raw.get("records_per_page", 20) or 20))),
     )
+
+
+def _get_source_state(payload: dict[str, Any]) -> dict[str, Any]:
+    eis_site = payload.get("eis_site")
+    if not isinstance(eis_site, dict):
+        eis_site = {}
+        payload["eis_site"] = eis_site
+    state = eis_site.get("state")
+    if not isinstance(state, dict):
+        state = {}
+        eis_site["state"] = state
+    source = state.get("source")
+    if not isinstance(source, dict):
+        source = {}
+        state["source"] = source
+    return source
+
+
+def _set_source_state(
+    payload: dict[str, Any],
+    *,
+    status: SourceStatus,
+    last_block_time: datetime | str | None,
+    cooldown_until: datetime | None,
+) -> None:
+    source = _get_source_state(payload)
+    source["source_status"] = status.value
+    source["last_block_time"] = _to_iso(last_block_time)
+    source["cooldown_until"] = _to_iso(cooldown_until)
+
+
+def _to_iso(value: datetime | str | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    return value.astimezone(UTC).isoformat()
+
+
+def _parse_dt(value: Any) -> datetime | None:
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+    except ValueError:
+        return None
 
 
 def _build_search_params(cfg: EISSiteSettings, page: int) -> dict[str, str | int]:
@@ -335,7 +478,7 @@ async def run_eis_site_bulk_for_company(
                     break
                 if err not in bulk.totals.errors_sample:
                     bulk.totals.errors_sample.append(err)
-        if stop_if_blocked and stats.source_status in {"blocked", "maintenance"}:
+        if stop_if_blocked and stats.source_status in {"blocked", "maintenance", "cooldown"}:
             bulk.totals.stage = stats.stage
             bulk.totals.reason = stats.reason
             bulk.totals.source_status = stats.source_status

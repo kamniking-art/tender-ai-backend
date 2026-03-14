@@ -92,6 +92,7 @@ async def run_eis_site_once(
         "stage": stats.stage,
         "reason": stats.reason,
         "source_status": stats.source_status,
+        "cooldown_until": stats.cooldown_until.isoformat() if stats.cooldown_until else None,
         "http_status": stats.http_status,
         "fetched_bytes": stats.fetched_bytes,
         "error_count": stats.error_count,
@@ -167,6 +168,8 @@ async def get_eis_site_health(
     company = await _get_company_for_user(db, current_user)
     raw = company.ingestion_settings if isinstance(company.ingestion_settings, dict) else {}
     eis_site = raw.get("eis_site") if isinstance(raw.get("eis_site"), dict) else {}
+    state = eis_site.get("state") if isinstance(eis_site.get("state"), dict) else {}
+    source = state.get("source") if isinstance(state.get("source"), dict) else {}
     return {
         "company_id": str(company.id),
         "enabled": bool(eis_site.get("enabled", True)),
@@ -175,4 +178,7 @@ async def get_eis_site_health(
         "pages": int(eis_site.get("max_pages", 50) or 50),
         "page_size": int(eis_site.get("records_per_page", 20) or 20),
         "region": eis_site.get("region"),
+        "source_status": source.get("source_status", "ok"),
+        "last_block_time": source.get("last_block_time"),
+        "cooldown_until": source.get("cooldown_until"),
     }

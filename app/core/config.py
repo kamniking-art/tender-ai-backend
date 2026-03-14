@@ -42,8 +42,14 @@ class Settings(BaseSettings):
     telegram_notify_interval_minutes: int = 5
     monitoring_interval_minutes: int = 360
     eis_source_blocked_cooldown_minutes: int = 30
-    eis_source_request_delay_sec: float = 1.0
-    eis_source_request_jitter_sec: float = 0.7
+    eis_source_request_delay_sec: float = 2.0
+    eis_source_request_jitter_sec: float = 1.5
+    eis_source_page_delay_min_sec: float = 1.8
+    eis_source_page_delay_max_sec: float = 4.2
+    eis_source_long_pause_min_sec: float = 8.0
+    eis_source_long_pause_max_sec: float = 15.0
+    eis_source_long_pause_every_min_pages: int = 10
+    eis_source_long_pause_every_max_pages: int = 15
     eis_site_max_age_days: int = 60
 
     # EIS OpenData discovery/config

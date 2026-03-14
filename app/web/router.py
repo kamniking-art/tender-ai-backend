@@ -406,6 +406,15 @@ def _parse_bool(value: str | None, default: bool = False) -> bool:
     return value.lower() in {"1", "true", "yes", "on"}
 
 
+def _minutes_until(value: datetime | None) -> int | None:
+    if value is None:
+        return None
+    delta = value - datetime.now(UTC)
+    if delta.total_seconds() <= 0:
+        return 0
+    return int(delta.total_seconds() // 60) + 1
+
+
 def _parse_optional_int(value: str | None, *, field: str, ge: int | None = None, le: int | None = None) -> int | None:
     if value is None:
         return None
@@ -751,6 +760,7 @@ async def web_run_eis_site_once(
         return RedirectResponse(url=f"/web/tenders?{qs}", status_code=status.HTTP_303_SEE_OTHER)
 
     reason = stats.reason or "неизвестно"
+    retry_minutes = _minutes_until(stats.cooldown_until)
     if stats.source_status == "blocked" and stats.http_status == 434:
         message = "Источник временно блокирует доступ (ЕИС HTTP 434)"
         details_parts = [
@@ -758,6 +768,19 @@ async def web_run_eis_site_once(
             f"source_status={stats.source_status}",
             f"http_status={stats.http_status}",
         ]
+        if retry_minutes is not None:
+            details_parts.append(f"retry_in_minutes={retry_minutes}")
+            message = f"{message}. Повторная попытка через {retry_minutes} мин."
+    elif stats.source_status == "cooldown":
+        message = "Источник временно блокирует доступ"
+        details_parts = [
+            "blocked_by_source",
+            f"source_status={stats.source_status}",
+            "cooldown_active",
+        ]
+        if retry_minutes is not None:
+            details_parts.append(f"retry_in_minutes={retry_minutes}")
+            message = f"{message}. Повторная попытка через {retry_minutes} мин."
     else:
         message = f"Источник недоступен: {stats.source_status} ({reason})"
         details_parts = [
