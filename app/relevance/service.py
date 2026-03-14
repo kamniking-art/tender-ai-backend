@@ -63,6 +63,40 @@ HARD_OFFTOPIC_KEYWORDS = [
     "проектор",
 ]
 
+HOUSEHOLD_OFFTOPIC_KEYWORDS = [
+    "мясорубка",
+    "пищеблок",
+    "моющие средства",
+    "моющее",
+    "моющий",
+    "хозтовары",
+    "хозяйственные товары",
+    "посуда",
+    "кастрюля",
+    "тарелка",
+    "ложка",
+    "вилка",
+    "кухня",
+    "кухонный",
+    "пищевой",
+    "продукты",
+    "питание",
+    "инвентарь",
+    "бытовая техника",
+    "холодильник",
+    "печь",
+    "микроволновка",
+    "электроплита",
+    "шкаф холодильный",
+    "гастроёмкость",
+    "стол производственный",
+    "оборудование для пищеблока",
+    "санитарный инвентарь",
+    "уборочный инвентарь",
+    "дезинфицирующие средства",
+    "чистящие средства",
+]
+
 CATEGORY_RULES: dict[str, dict[str, Any]] = {
     "stone_granite_memorial": {
         "title": "камень / гранит / памятники",
@@ -416,6 +450,7 @@ def compute_relevance_v2(
     all_text = " ".join(part for part in (title_text, summary_text, docs_text, customer_text) if part)
     context_hits = set(_matches(all_text, CONTEXT_NOISE_KEYWORDS))
     hard_offtopic_hits = set(_matches(all_text, HARD_OFFTOPIC_KEYWORDS))
+    household_offtopic_hits = set(_matches(all_text, HOUSEHOLD_OFFTOPIC_KEYWORDS))
 
     stone_profile_hits = (
         category_hit_counts["stone_granite_memorial"]["strong"] + category_hit_counts["stone_granite_memorial"]["medium"]
@@ -426,12 +461,24 @@ def compute_relevance_v2(
     landscaping_profile_hits = (
         category_hit_counts["landscaping_construction"]["strong"] + category_hit_counts["landscaping_construction"]["medium"]
     )
+    stone_strong_hits = category_hit_counts["stone_granite_memorial"]["strong"]
+    materials_strong_hits = category_hit_counts["building_materials"]["strong"]
+    materials_medium_hits = category_hit_counts["building_materials"]["medium"]
+    landscaping_strong_hits = category_hit_counts["landscaping_construction"]["strong"]
     has_core_profile = (stone_profile_hits + materials_profile_hits) > 0
     non_context_matches = set(matched_keywords) - context_hits
     context_only_noise = bool(context_hits) and not has_core_profile and not landscaping_profile_hits and not non_context_matches
+    has_strong_profile = (stone_strong_hits + materials_strong_hits + landscaping_strong_hits) > 0
+
+    off_topic_dominant = bool(household_offtopic_hits) and not has_strong_profile and materials_medium_hits <= 1
+    mixed_household_material = bool(household_offtopic_hits) and materials_profile_hits > 0 and materials_strong_hits == 0
 
     if hard_offtopic_hits and not has_core_profile:
         negative_penalty += 35
+    if off_topic_dominant:
+        negative_penalty += 45
+    elif mixed_household_material:
+        negative_penalty += 22
     elif context_only_noise:
         negative_penalty += 18
 
@@ -449,9 +496,18 @@ def compute_relevance_v2(
     if hard_offtopic_hits and not has_core_profile:
         detected_category = "нерелевантно / прочее"
         score = min(score, 12)
+    elif off_topic_dominant:
+        detected_category = "нерелевантно / прочее"
+        score = min(score, 10)
+    elif mixed_household_material and materials_medium_hits <= 1:
+        detected_category = "нерелевантно / прочее"
+        score = min(score, 20)
     elif context_only_noise:
         detected_category = "нерелевантно / прочее"
         score = min(score, 18)
+
+    negative_keywords = set(negative_keywords)
+    negative_keywords.update(household_offtopic_hits)
 
     if negative_keywords and hits_count["strong"] == 0 and score < 45:
         detected_category = "нерелевантно / прочее"
@@ -470,7 +526,18 @@ def compute_relevance_v2(
     stone_kw = sorted(category_keywords["stone_granite_memorial"])[:4]
     materials_kw = sorted(category_keywords["building_materials"])[:5]
     landscaping_kw = sorted(category_keywords["landscaping_construction"])[:4]
-    if hard_offtopic_hits and not has_core_profile:
+    if off_topic_dominant:
+        reason = (
+            f"Найдены признаки бытовой/пищевой закупки ({', '.join(sorted(household_offtopic_hits)[:4])}); "
+            "строительные сигналы не подтверждены, тендер исключён из профильной тематики."
+        )
+    elif mixed_household_material:
+        reason = (
+            f"Есть пересечение бытового контекста ({', '.join(sorted(household_offtopic_hits)[:4])}) "
+            f"и слабых material-маркеров ({', '.join(sorted(category_keywords['building_materials'])[:3]) or 'без детализации'}), "
+            "поэтому relevance снижен и требуется ручная проверка."
+        )
+    elif hard_offtopic_hits and not has_core_profile:
         reason = (
             f"Найдены слова ({', '.join(sorted(hard_offtopic_hits)[:4])}) и общий контекст "
             f"({', '.join(sorted(context_hits)[:2]) or 'без профильного контекста'}) "
