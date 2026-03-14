@@ -164,6 +164,14 @@ class EISBrowserClient:
         )
         logger.info("eis_browser results text snippet: page=%s text=%s", page_number, body_txt)
 
+    def _classify_source_page(self, html_text: str) -> tuple[str | None, str | None]:
+        lower = html_text.lower()
+        if "регламентных работ" in lower and "официальном сайте еис" in lower:
+            return "maintenance", "maintenance_page"
+        if "captcha" in lower or "доступ ограничен" in lower or "forbidden" in lower:
+            return "blocked", "blocked_page"
+        return None, None
+
     async def fetch_candidates(
         self,
         *,
@@ -231,6 +239,20 @@ class EISBrowserClient:
 
                     html = await page.content()
                     self.diagnostics.pages_opened += 1
+
+                    source_status, reason = self._classify_source_page(html)
+                    if source_status:
+                        self.diagnostics.source_status = source_status
+                        self.diagnostics.reason = reason
+                        self._record_error(f"{reason}:page={page_number}")
+                        logger.warning(
+                            "eis_browser source issue: page=%s source_status=%s reason=%s url=%s",
+                            page_number,
+                            source_status,
+                            reason,
+                            page.url,
+                        )
+                        break
 
                     parsed_dom = await self._extract_dom_candidates(page)
                     parsed_html, errors = parse_browser_results(html, base_url=EIS_SEARCH_URL)
