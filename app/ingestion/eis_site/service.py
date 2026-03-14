@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import random
 import asyncio
+import copy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -97,7 +98,7 @@ async def run_eis_site_once_for_company(
     region: str | None = None,
     dedupe_mode: str = "update",
 ) -> EISSiteRunStats:
-    payload = company.ingestion_settings if isinstance(company.ingestion_settings, dict) else {}
+    payload = copy.deepcopy(company.ingestion_settings) if isinstance(company.ingestion_settings, dict) else {}
     cfg = _extract_settings(payload)
     if query is not None:
         cfg.query = query
