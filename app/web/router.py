@@ -751,8 +751,23 @@ async def web_run_eis_site_once(
         return RedirectResponse(url=f"/web/tenders?{qs}", status_code=status.HTTP_303_SEE_OTHER)
 
     reason = stats.reason or "неизвестно"
-    message = f"Источник недоступен: {stats.source_status} ({reason})"
-    details = ",".join(stats.errors_sample) if stats.errors_sample else ""
+    if stats.source_status == "blocked" and stats.http_status == 434:
+        message = "Источник временно блокирует доступ (ЕИС HTTP 434)"
+        details_parts = [
+            "blocked_by_source",
+            f"source_status={stats.source_status}",
+            f"http_status={stats.http_status}",
+        ]
+    else:
+        message = f"Источник недоступен: {stats.source_status} ({reason})"
+        details_parts = [
+            f"source_status={stats.source_status}",
+            f"http_status={stats.http_status or '-'}",
+            f"reason={reason}",
+        ]
+    if stats.errors_sample:
+        details_parts.append("; ".join(stats.errors_sample[:3]))
+    details = ", ".join(details_parts)
     qs = urlencode({"ingest_status": "error", "ingest_message": message, "ingest_details": details})
     return RedirectResponse(url=f"/web/tenders?{qs}", status_code=status.HTTP_303_SEE_OTHER)
 
