@@ -400,9 +400,9 @@ def _parse_optional_datetime(value: str | None) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
-def _parse_bool(value: str | None) -> bool:
+def _parse_bool(value: str | None, default: bool = False) -> bool:
     if not value:
-        return False
+        return default
     return value.lower() in {"1", "true", "yes", "on"}
 
 
