@@ -241,6 +241,11 @@ a {
   background: #fff2f0;
 }
 
+.notice-info {
+  border-color: #98b5f5;
+  background: #edf4ff;
+}
+
 .error {
   color: var(--danger);
   background: #fff2f0;

@@ -4,9 +4,10 @@
 <h1>{{ tender.title or 'Тендер' }}</h1>
 
 {% if action_result and action_result.status and action_result.status != '-' %}
-<section class="card {% if action_result.status == 'успешно' %}notice-ok{% else %}notice-error{% endif %}">
+{% set external_blocked = action_result.message and 'ЕИС временно блокирует' in action_result.message %}
+<section class="card {% if action_result.status == 'успешно' %}notice-ok{% elif external_blocked %}notice-info{% else %}notice-error{% endif %}">
   <h2>Действие: {{ action_result.action or '-' }}</h2>
-  <p><strong>Статус:</strong> {{ action_result.status }}</p>
+  <p><strong>Статус:</strong> {{ 'внешний источник недоступен' if external_blocked else action_result.status }}</p>
   <p><strong>Сообщение:</strong> {{ action_result.message or '-' }}</p>
   {% if action_result.details %}
   <details>

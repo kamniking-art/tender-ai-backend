@@ -44,11 +44,17 @@ async def fetch_and_store_source_documents(
     try:
         fetch_result = await fetch_source_documents(source_url, max_docs=20)
     except SourceFetchError as exc:
+        blocked_by_source = exc.source_status == "blocked"
+        message = str(exc)
+        if blocked_by_source and exc.http_status == 434:
+            message = "ЕИС временно блокирует запросы (HTTP 434), попробуйте позже"
         return {
             "source_status": exc.source_status,
-            "message": str(exc),
+            "blocked_by_source": blocked_by_source,
+            "message": message,
             "attempted_pages": exc.attempted_pages,
             "found_links_count": exc.found_links_count,
+            "http_status": exc.http_status,
             "downloaded_count": 0,
             "saved_files": [],
             "skipped_duplicates": 0,
@@ -85,6 +91,7 @@ async def fetch_and_store_source_documents(
 
     return {
         "source_status": fetch_result.source_status,
+        "blocked_by_source": False,
         "message": (
             "Документы загружены"
             if downloaded_count > 0
@@ -96,6 +103,7 @@ async def fetch_and_store_source_documents(
         ),
         "attempted_pages": fetch_result.attempted_pages,
         "found_links_count": fetch_result.found_links_count,
+        "http_status": fetch_result.http_status,
         "downloaded_count": downloaded_count,
         "saved_files": saved_files,
         "skipped_duplicates": skipped_duplicates,
@@ -136,22 +144,31 @@ async def analyze_from_source(
     )
     fetch_ok = (fetch_payload.get("downloaded_count") or 0) > 0
     result["steps"]["fetch_documents"] = _step(
-        "ok" if fetch_ok else "error",
+        "ok" if fetch_ok else ("blocked_by_source" if fetch_payload.get("blocked_by_source") else "error"),
         downloaded_count=fetch_payload.get("downloaded_count", 0),
         found_links_count=fetch_payload.get("found_links_count", 0),
         attempted_pages=fetch_payload.get("attempted_pages", 0),
         source_status=fetch_payload.get("source_status"),
+        http_status=fetch_payload.get("http_status"),
+        blocked_by_source=bool(fetch_payload.get("blocked_by_source")),
         message=fetch_payload.get("message"),
     )
     if fetch_payload.get("errors_sample"):
         result["steps"]["fetch_documents"]["errors_sample"] = fetch_payload["errors_sample"]
 
     if not fetch_ok:
-        result["next_step"] = "Документы на ЕИС не найдены"
+        if fetch_payload.get("blocked_by_source"):
+            result["next_step"] = "ЕИС временно блокирует доступ к документам, попробуйте позже"
+            result["analysis_stage"] = "blocked_by_source"
+        else:
+            result["next_step"] = "Документы на ЕИС не найдены"
+            result["analysis_stage"] = "documents_missing"
         logger.info(
-            "analyze_from_source done tender_id=%s external_id=%s stage=fetch status=partial downloaded=0 duration_ms=%s",
+            "analyze_from_source done tender_id=%s external_id=%s stage=fetch status=partial downloaded=0 source_status=%s http_status=%s duration_ms=%s",
             tender_id,
             tender.external_id,
+            fetch_payload.get("source_status"),
+            fetch_payload.get("http_status"),
             int((time.monotonic() - started_at) * 1000),
         )
         return result
@@ -237,6 +254,7 @@ async def analyze_from_source(
         return result
 
     result["status"] = "ok"
+    result["analysis_stage"] = "decision_done"
     result["next_step"] = "Заполните финансовые параметры"
     logger.info(
         "analyze_from_source done tender_id=%s external_id=%s stage=done status=ok duration_ms=%s",

@@ -1274,12 +1274,18 @@ async def web_analyze_from_source(
         f"Риск: {risk.get('risk_score', '-')}",
         f"Рекомендация: {engine.get('recommendation', '-')}",
     ]
+    if fetch.get("source_status"):
+        details_lines.append(f"source_status={fetch.get('source_status')}")
+    if fetch.get("http_status"):
+        details_lines.append(f"http_status={fetch.get('http_status')}")
     if fetch.get("message"):
         details_lines.append(f"Сообщение источника: {fetch.get('message')}")
     if data.get("next_step"):
         details_lines.append(f"Следующий шаг: {data.get('next_step')}")
 
     message = "Автоанализ завершён" if status_ok else "Автоанализ выполнен частично"
+    if fetch.get("source_status") == "blocked":
+        message = "ЕИС временно блокирует доступ к документам"
     return _redirect_with_action(
         tender_id,
         "analyze_source",
@@ -1545,10 +1551,17 @@ async def web_import_source_documents(
     try:
         result: SourceFetchResult = await fetch_source_documents(tender.source_url, max_docs=20)
     except SourceFetchError as exc:
-        details = f"Страниц проверено: {exc.attempted_pages}, ссылок найдено: {exc.found_links_count}"
+        if exc.source_status == "blocked" and exc.http_status == 434:
+            message = "ЕИС временно блокирует доступ к документам (HTTP 434)"
+        else:
+            message = str(exc)
+        details = (
+            f"Страниц проверено: {exc.attempted_pages}, ссылок найдено: {exc.found_links_count}, "
+            f"source_status={exc.source_status}, http_status={exc.http_status or '-'}"
+        )
         if exc.errors_sample:
             details = f"{details}. Ошибки: {'; '.join(exc.errors_sample[:3])}"
-        return _redirect_with_action(tender_id, "source_docs", False, str(exc), details)
+        return _redirect_with_action(tender_id, "source_docs", False, message, details)
 
     created = 0
     skipped_duplicates = 0

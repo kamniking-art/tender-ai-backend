@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     task_sla_check_interval_minutes: int = 5
     telegram_notify_interval_minutes: int = 5
     monitoring_interval_minutes: int = 360
+    eis_source_blocked_cooldown_minutes: int = 30
+    eis_source_request_delay_sec: float = 1.0
+    eis_source_request_jitter_sec: float = 0.7
 
     # EIS OpenData discovery/config
     eis_opendata_base_url: str = "https://zakupki.gov.ru"

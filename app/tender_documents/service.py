@@ -1,5 +1,6 @@
 import asyncio
 import mimetypes
+import random
 import re
 import time
 import uuid
@@ -34,12 +35,14 @@ class SourceFetchError(Exception):
         *,
         found_links_count: int = 0,
         attempted_pages: int = 0,
+        http_status: int | None = None,
         errors_sample: list[str] | None = None,
     ) -> None:
         super().__init__(message)
         self.source_status = source_status
         self.found_links_count = found_links_count
         self.attempted_pages = attempted_pages
+        self.http_status = http_status
         self.errors_sample = errors_sample or []
 
 
@@ -57,12 +60,14 @@ class SourceFetchResult:
     message: str
     attempted_pages: int
     found_links_count: int
+    http_status: int | None
     files: list[SourceFetchedFile]
     errors_sample: list[str]
 
 
 _SOURCE_FETCH_GUARD_LOCK = asyncio.Lock()
 _SOURCE_FETCH_LAST_CALLED_AT: dict[str, float] = {}
+_SOURCE_FETCH_BLOCKED_UNTIL: dict[str, float] = {}
 
 
 def sanitize_filename(filename: str | None) -> str:
@@ -248,6 +253,29 @@ _SOURCE_DOC_UA = (
 _ALLOWED_DOC_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".rar"}
 
 
+async def _paced_delay() -> None:
+    base = max(0.2, float(settings.eis_source_request_delay_sec))
+    jitter = max(0.0, float(settings.eis_source_request_jitter_sec))
+    await asyncio.sleep(base + random.uniform(0.0, jitter))
+
+
+def _blocked_retry_after_seconds(source_url: str) -> int | None:
+    until = _SOURCE_FETCH_BLOCKED_UNTIL.get(source_url)
+    if until is None:
+        return None
+    delta = int(until - time.monotonic())
+    if delta <= 0:
+        _SOURCE_FETCH_BLOCKED_UNTIL.pop(source_url, None)
+        return None
+    return delta
+
+
+def _set_blocked_cooldown(source_url: str) -> int:
+    cooldown = max(5 * 60, int(settings.eis_source_blocked_cooldown_minutes * 60))
+    _SOURCE_FETCH_BLOCKED_UNTIL[source_url] = time.monotonic() + cooldown
+    return cooldown
+
+
 def _guess_filename_from_url(url: str, index: int) -> str:
     path_name = Path(urlparse(url).path).name
     file_name = unquote(path_name) if path_name else ""
@@ -342,12 +370,33 @@ def _guess_related_document_pages(source_url: str) -> list[str]:
 
 
 async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> SourceFetchResult:
+    blocked_retry = _blocked_retry_after_seconds(source_url)
+    if blocked_retry is not None:
+        raise SourceFetchError(
+            "ЕИС временно блокирует запросы (HTTP 434), попробуйте позже",
+            source_status="blocked",
+            attempted_pages=0,
+            http_status=434,
+            errors_sample=[f"cooldown_active_retry_after={blocked_retry}s"],
+        )
+
     timeout = httpx.Timeout(25)
     errors: list[str] = []
 
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+    async with httpx.AsyncClient(
+        timeout=timeout,
+        follow_redirects=True,
+        headers={
+            "User-Agent": _SOURCE_DOC_UA[0],
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+            "Referer": "https://zakupki.gov.ru/epz/main/public/home.html",
+            "Connection": "keep-alive",
+        },
+    ) as client:
         html_text: str | None = None
         attempted_pages = 0
+        last_http_status: int | None = None
         related_pages_to_try: list[str] = []
         all_doc_links: list[str] = []
         visited_page_links: set[str] = set()
@@ -357,23 +406,31 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
             attempted_pages += 1
             for attempt in range(retries + 1):
                 try:
+                    await _paced_delay()
                     page = await client.get(
                         page_url,
                         headers={
                             "User-Agent": _SOURCE_DOC_UA[attempt % len(_SOURCE_DOC_UA)],
                             "Accept": "text/html,application/xhtml+xml",
                             "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+                            "Referer": "https://zakupki.gov.ru/epz/main/public/home.html",
                         },
                     )
+                    last_http_status = page.status_code
                     lower = (page.text or "").lower()
                     if page.status_code in {403, 429, 434} or "captcha" in lower:
                         if attempt < retries:
-                            await asyncio.sleep(1 + attempt)
+                            await _paced_delay()
                             continue
+                        if page.status_code == 434:
+                            _set_blocked_cooldown(source_url)
                         raise SourceFetchError(
-                            "Источник временно недоступен",
+                            "ЕИС временно блокирует запросы (HTTP 434), попробуйте позже"
+                            if page.status_code == 434
+                            else "Источник временно недоступен",
                             source_status="blocked",
                             attempted_pages=attempted_pages,
+                            http_status=page.status_code,
                             errors_sample=errors[:3],
                         )
                     if any(marker in lower for marker in ("регламентных работ", "технических работ")):
@@ -381,28 +438,31 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
                             "Источник на техработах",
                             source_status="maintenance",
                             attempted_pages=attempted_pages,
+                            http_status=page.status_code,
                             errors_sample=errors[:3],
                         )
                     if page.status_code >= 400:
                         if attempt < retries:
-                            await asyncio.sleep(1 + attempt)
+                            await _paced_delay()
                             continue
                         raise SourceFetchError(
                             f"Ошибка источника: HTTP {page.status_code}",
                             source_status="error",
                             attempted_pages=attempted_pages,
+                            http_status=page.status_code,
                             errors_sample=errors[:3],
                         )
                     return page.text or ""
                 except httpx.HTTPError as exc:
                     errors.append(f"{page_url}: {exc.__class__.__name__}")
                     if attempt < retries:
-                        await asyncio.sleep(1 + attempt)
+                        await _paced_delay()
                         continue
                     raise SourceFetchError(
                         "Не удалось открыть страницу источника",
                         source_status="error",
                         attempted_pages=attempted_pages,
+                        http_status=last_http_status,
                         errors_sample=errors[:3],
                     ) from exc
             return ""
@@ -413,7 +473,7 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
                 break
             except SourceFetchError:
                 if attempt < 2:
-                    await asyncio.sleep(1 + attempt)
+                    await _paced_delay()
                     continue
                 raise
 
@@ -422,6 +482,7 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
                 "Страница источника пустая",
                 source_status="error",
                 attempted_pages=attempted_pages,
+                http_status=last_http_status,
                 errors_sample=errors[:3],
             )
 
@@ -458,6 +519,7 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
                 source_status="ok",
                 found_links_count=0,
                 attempted_pages=attempted_pages,
+                http_status=last_http_status,
                 errors_sample=errors[:3],
             )
 
@@ -467,6 +529,7 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
         max_total_bytes = 100 * 1024 * 1024
         for idx, link in enumerate(unique_links[:max_docs], start=1):
             try:
+                await _paced_delay()
                 resp = await client.get(
                     link,
                     headers={"User-Agent": _SOURCE_DOC_UA[idx % len(_SOURCE_DOC_UA)]},
@@ -494,6 +557,7 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
                 source_status="error",
                 found_links_count=found_links_count,
                 attempted_pages=attempted_pages,
+                http_status=last_http_status,
                 errors_sample=errors[:3],
             )
 
@@ -502,6 +566,7 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
             message="Документы загружены",
             attempted_pages=attempted_pages,
             found_links_count=found_links_count,
+            http_status=last_http_status,
             files=files,
             errors_sample=errors[:3],
         )
