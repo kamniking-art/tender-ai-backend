@@ -42,3 +42,12 @@ class RelevanceV23UnitTests(TestCase):
         )
         self.assertEqual(result["category"], "строительные материалы")
         self.assertGreaterEqual(result["score"], 45)
+
+    def test_household_equipment_context_overrides_generic_supply(self) -> None:
+        result = compute_relevance_v2(
+            tender=self._tender("Поставка оборудования для пищеблока (плиты электрические)"),
+            analysis=None,
+            extracted=None,
+        )
+        self.assertEqual(result["category"], "нерелевантно / прочее")
+        self.assertLess(result["score"], 20)

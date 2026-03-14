@@ -353,6 +353,7 @@ def compute_priority_v1(
     recommendation: str,
     decision_score: int | None,
     relevance_score: int | None,
+    relevance_category: str | None,
     risk_score: int | None,
     nmck: Decimal | None,
     deadline: datetime | None,
@@ -375,6 +376,9 @@ def compute_priority_v1(
     risk_p = _risk_penalty(risk_score)
     raw = rec_w + rel_w + dec_w + dl_w + nmck_w + docs_w - risk_p
     score = _clamp(raw, 0, 100)
+    # Off-topic tenders should never bubble up in review queue.
+    if relevance_category == "нерелевантно / прочее" or (relevance_score is not None and relevance_score < 20):
+        score = min(score, 34)
     label = _priority_label(score)
     reason = _priority_reason(
         label=label,
@@ -617,6 +621,7 @@ async def recompute_decision_engine_v1(
         recommendation=engine["recommendation"],
         decision_score=engine.get("decision_score"),
         relevance_score=relevance.get("score") if isinstance(relevance.get("score"), int) else None,
+        relevance_category=relevance.get("category") if isinstance(relevance.get("category"), str) else None,
         risk_score=risk_score,
         nmck=tender.nmck,
         deadline=tender.submission_deadline,

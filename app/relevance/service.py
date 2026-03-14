@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+import re
 from typing import Any
 
 from app.ai_extraction.schemas import ExtractedTenderV1
@@ -97,6 +98,25 @@ HOUSEHOLD_OFFTOPIC_KEYWORDS = [
     "чистящие средства",
 ]
 
+BUILDING_CONFIRMING_KEYWORDS = [
+    "керамогранит",
+    "плитка гранитная",
+    "гранитная плитка",
+    "щебень",
+    "щебень гранитный",
+    "бордюр",
+    "бордюрный камень",
+    "брусчат",
+    "тротуарная плитка",
+    "облицовочные материалы",
+    "облицов",
+    "стройматериалы",
+    "строительные материалы",
+    "плиты облицовочные",
+    "каменные изделия",
+    "изделия из камня",
+]
+
 CATEGORY_RULES: dict[str, dict[str, Any]] = {
     "stone_granite_memorial": {
         "title": "камень / гранит / памятники",
@@ -160,7 +180,7 @@ CATEGORY_RULES: dict[str, dict[str, Any]] = {
             "плитк",
             "плитка гранитная",
             "гранитная плитка",
-            "щеб",
+            "щебень",
             "щебень гранитный",
             "бордюр",
             "бордюрный камень",
@@ -278,9 +298,21 @@ def _matches(text: str, keywords: list[str]) -> list[str]:
         return []
     found: list[str] = []
     for kw in keywords:
-        if kw in text:
+        pattern = _keyword_pattern(kw)
+        if pattern and pattern.search(text):
             found.append(kw)
     return found
+
+
+def _keyword_pattern(keyword: str) -> re.Pattern[str] | None:
+    kw = _norm(keyword)
+    if not kw:
+        return None
+    if " " in kw:
+        phrase = re.escape(kw).replace(r"\ ", r"\s+")
+        return re.compile(rf"\b{phrase}\b")
+    word = re.escape(kw)
+    return re.compile(rf"\b{word}\w*")
 
 
 def _label(score: int) -> str:
@@ -470,15 +502,25 @@ def compute_relevance_v2(
     context_only_noise = bool(context_hits) and not has_core_profile and not landscaping_profile_hits and not non_context_matches
     has_strong_profile = (stone_strong_hits + materials_strong_hits + landscaping_strong_hits) > 0
 
-    off_topic_dominant = bool(household_offtopic_hits) and not has_strong_profile and materials_medium_hits <= 1
-    mixed_household_material = bool(household_offtopic_hits) and materials_profile_hits > 0 and materials_strong_hits == 0
+    material_keywords_matched = category_keywords["building_materials"]
+    confirmed_material_hits = material_keywords_matched.intersection(BUILDING_CONFIRMING_KEYWORDS)
+    has_confirmed_material_signal = bool(confirmed_material_hits) or materials_strong_hits >= 2
 
-    if hard_offtopic_hits and not has_core_profile:
-        negative_penalty += 35
+    off_topic_dominant = (
+        bool(household_offtopic_hits)
+        and stone_strong_hits == 0
+        and not has_confirmed_material_signal
+        and landscaping_strong_hits == 0
+    )
+    hard_offtopic_dominant = bool(hard_offtopic_hits) and not has_core_profile
+    mixed_household_material = bool(household_offtopic_hits) and has_confirmed_material_signal and stone_strong_hits == 0
+
+    if hard_offtopic_dominant:
+        negative_penalty += 40
     if off_topic_dominant:
-        negative_penalty += 45
+        negative_penalty += 55
     elif mixed_household_material:
-        negative_penalty += 22
+        negative_penalty += 28
     elif context_only_noise:
         negative_penalty += 18
 
@@ -493,21 +535,24 @@ def compute_relevance_v2(
         has_positive=has_positive,
         negative_penalty=negative_penalty,
     )
-    if hard_offtopic_hits and not has_core_profile:
+    if hard_offtopic_dominant:
         detected_category = "нерелевантно / прочее"
         score = min(score, 12)
     elif off_topic_dominant:
         detected_category = "нерелевантно / прочее"
-        score = min(score, 10)
-    elif mixed_household_material and materials_medium_hits <= 1:
+        score = min(score, 8)
+    elif mixed_household_material and not has_confirmed_material_signal:
         detected_category = "нерелевантно / прочее"
-        score = min(score, 20)
+        score = min(score, 15)
     elif context_only_noise:
         detected_category = "нерелевантно / прочее"
         score = min(score, 18)
 
     negative_keywords = set(negative_keywords)
     negative_keywords.update(household_offtopic_hits)
+    if household_offtopic_hits and detected_category == CATEGORY_RULES["building_materials"]["title"] and not has_confirmed_material_signal:
+        detected_category = "нерелевантно / прочее"
+        score = min(score, 12)
 
     if negative_keywords and hits_count["strong"] == 0 and score < 45:
         detected_category = "нерелевантно / прочее"
@@ -534,10 +579,10 @@ def compute_relevance_v2(
     elif mixed_household_material:
         reason = (
             f"Есть пересечение бытового контекста ({', '.join(sorted(household_offtopic_hits)[:4])}) "
-            f"и слабых material-маркеров ({', '.join(sorted(category_keywords['building_materials'])[:3]) or 'без детализации'}), "
-            "поэтому relevance снижен и требуется ручная проверка."
+            f"и material-маркеров ({', '.join(sorted(category_keywords['building_materials'])[:3]) or 'без детализации'}), "
+            "поэтому relevance снижен; подтвержден только частичный строительный сигнал."
         )
-    elif hard_offtopic_hits and not has_core_profile:
+    elif hard_offtopic_dominant:
         reason = (
             f"Найдены слова ({', '.join(sorted(hard_offtopic_hits)[:4])}) и общий контекст "
             f"({', '.join(sorted(context_hits)[:2]) or 'без профильного контекста'}) "
