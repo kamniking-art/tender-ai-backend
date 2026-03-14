@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM mcr.microsoft.com/playwright/python:v1.53.0-jammy
 
 WORKDIR /app
 
@@ -16,7 +16,6 @@ ENV APP_BUILT_AT_IMAGE=${APP_BUILT_AT_IMAGE}
 
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --retries 10 --timeout 120 -r requirements.txt
-RUN playwright install --with-deps chromium
 
 COPY . .
 
