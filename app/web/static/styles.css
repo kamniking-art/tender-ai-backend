@@ -265,3 +265,54 @@ pre {
   padding: 10px;
   overflow-x: auto;
 }
+
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.tenders-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  min-width: 1320px;
+}
+
+.tenders-table th,
+.tenders-table td {
+  padding: 8px;
+  vertical-align: top;
+}
+
+.col-title {
+  width: 260px;
+}
+
+.col-customer {
+  width: 240px;
+}
+
+.col-relevance {
+  width: 120px;
+}
+
+.col-recommendation {
+  width: 140px;
+}
+
+.col-date {
+  width: 110px;
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}

@@ -843,6 +843,7 @@ async def tenders_page(
     relevance_min: str | None = Query(default=None),
     relevance_category: str | None = Query(default=None),
     relevant_only: str | None = Query(default=None),
+    fresh_only: str | None = Query(default="true"),
     risky_only: str | None = Query(default=None),
     deadline_from: str | None = Query(default=None),
     deadline_to: str | None = Query(default=None),
@@ -901,6 +902,12 @@ async def tenders_page(
         )
         stmt = stmt.where(cond)
         count_stmt = count_stmt.where(cond)
+
+    fresh_enabled = _parse_bool(fresh_only, default=True)
+    if fresh_enabled:
+        cutoff = datetime.now(UTC) - timedelta(days=60)
+        stmt = stmt.where(Tender.published_at.is_not(None), Tender.published_at >= cutoff)
+        count_stmt = count_stmt.where(Tender.published_at.is_not(None), Tender.published_at >= cutoff)
 
     if status_filter:
         stmt = stmt.where(Tender.status == status_filter)
@@ -1027,6 +1034,7 @@ async def tenders_page(
         "relevance_min": parsed_relevance_min if parsed_relevance_min is not None else "",
         "relevance_category": relevance_category or "",
         "relevant_only": "true" if _parse_bool(relevant_only) else "",
+        "fresh_only": "true" if fresh_enabled else "",
         "risky_only": "true" if _parse_bool(risky_only) else "",
         "deadline_from": deadline_from or "",
         "deadline_to": deadline_to or "",

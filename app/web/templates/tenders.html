@@ -67,6 +67,12 @@
 
 <section class="card">
   <h2>Фильтры</h2>
+  <div class="quick-filters">
+    <a href="/web/tenders?fresh_only=true">Все свежие</a>
+    <a href="/web/tenders?fresh_only=true&relevance_category=камень / гранит / памятники">Камень</a>
+    <a href="/web/tenders?fresh_only=true&relevance_category=благоустройство / строительство">Строительство</a>
+    <a href="/web/tenders?fresh_only=true&priority_label=high">Высокий приоритет</a>
+  </div>
   <form method="get" action="/web/tenders" class="filters" id="tenders-filters-form">
     <label>Поиск
       <input type="text" name="q" value="{{ filters.q }}" placeholder="номер/название/заказчик/регион/место" />
@@ -161,6 +167,13 @@
       </select>
     </label>
 
+    <label>Только свежие (60 дней)
+      <select name="fresh_only">
+        <option value="true" {% if filters.fresh_only == "true" %}selected{% endif %}>Да</option>
+        <option value="" {% if filters.fresh_only != "true" %}selected{% endif %}>Нет</option>
+      </select>
+    </label>
+
     <label>Только рискованные
       <select name="risky_only">
         <option value="">Нет</option>
@@ -215,21 +228,22 @@
   <h2>Результаты: {{ total }}</h2>
   <p>Страница {{ page }} / {{ total_pages }}</p>
   {% if tenders %}
-  <table>
+  <div class="table-wrapper">
+  <table class="tenders-table">
     <thead>
       <tr>
-        <th>Название</th>
+        <th class="col-title">Название</th>
         <th>Статус</th>
         <th>Источник / Внешний ID</th>
         <th>Регион</th>
         <th>Место</th>
-        <th>Заказчик</th>
-        <th>Релевантность</th>
+        <th class="col-customer">Заказчик</th>
+        <th class="col-relevance">Релевантность</th>
         <th>Категория</th>
-        <th>Рекомендация</th>
+        <th class="col-recommendation">Рекомендация</th>
         <th>Приоритет</th>
-        <th>Дедлайн</th>
-        <th>Публикация</th>
+        <th class="col-date">Дедлайн</th>
+        <th class="col-date">Публикация</th>
         <th>НМЦК</th>
         <th>Ссылка</th>
       </tr>
@@ -237,12 +251,12 @@
     <tbody>
       {% for tender in tenders %}
       <tr>
-        <td><a href="/web/tenders/{{ tender.id }}">{{ tender.title or '-' }}</a></td>
+        <td class="truncate col-title" title="{{ tender.title or '-' }}"><a href="/web/tenders/{{ tender.id }}">{{ tender.title or '-' }}</a></td>
         <td>{{ tender.status | tender_status_ru }}</td>
         <td>{{ tender.source | source_ru }} / {{ tender.external_id }}</td>
         <td>{{ tender.region or '-' }}</td>
         <td>{{ tender.place_text or '-' }}</td>
-        <td>{{ tender.customer_name or '-' }}</td>
+        <td class="truncate col-customer" title="{{ tender.customer_name or '-' }}">{{ tender.customer_name or '-' }}</td>
         <td>
           {% set rel = tender_relevance.get(tender.id|string) %}
           {% if rel %}
@@ -313,6 +327,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
   <div class="pager">
     {% if prev_qs %}<a href="/web/tenders?{{ prev_qs }}">Назад</a>{% endif %}
     {% if next_qs %}<a href="/web/tenders?{{ next_qs }}">Вперёд</a>{% endif %}

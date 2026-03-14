@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     eis_source_blocked_cooldown_minutes: int = 30
     eis_source_request_delay_sec: float = 1.0
     eis_source_request_jitter_sec: float = 0.7
+    eis_site_max_age_days: int = 60
 
     # EIS OpenData discovery/config
     eis_opendata_base_url: str = "https://zakupki.gov.ru"

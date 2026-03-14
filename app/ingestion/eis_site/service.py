@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ingestion.eis_site.client import EISSiteClient
 from app.ingestion.eis_site.parser import EISSiteCandidate, parse_search_page
+from app.core.config import settings
 from app.models import Company
 from app.tenders.model import Tender
 
@@ -92,6 +93,8 @@ async def run_eis_site_once_for_company(
 
     client = EISSiteClient(timeout_sec=cfg.timeout_sec, rate_limit_rps=cfg.rate_limit_rps)
     stats = EISSiteRunStats(stage="fetch")
+    max_age_days = max(1, int(settings.eis_site_max_age_days or 60))
+    cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
 
     try:
         collected: list[EISSiteCandidate] = []
@@ -123,6 +126,10 @@ async def run_eis_site_once_for_company(
         seen: set[str] = set()
         for item in collected:
             if not item.external_id or item.external_id in seen:
+                continue
+            # Skip archive tenders to keep operational list fresh.
+            if item.published_at is not None and item.published_at < cutoff:
+                stats.skipped += 1
                 continue
             seen.add(item.external_id)
             deduped.append(item)
