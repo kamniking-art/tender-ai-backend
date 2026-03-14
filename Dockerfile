@@ -15,7 +15,7 @@ ENV APP_VERSION_IMAGE=${APP_VERSION_IMAGE}
 ENV APP_BUILT_AT_IMAGE=${APP_BUILT_AT_IMAGE}
 
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --retries 10 --timeout 120 -r requirements.txt
 RUN playwright install --with-deps chromium
 
 COPY . .
