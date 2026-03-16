@@ -18,6 +18,8 @@ def main() -> int:
     dsn = os.getenv("DATABASE_URL_SYNC", "").strip()
     if not dsn:
         return fail("DATABASE_URL_SYNC is empty")
+    dsn = dsn.replace("postgresql+psycopg2://", "postgresql://")
+    dsn = dsn.replace("postgresql+asyncpg://", "postgresql://")
 
     attempts = int(os.getenv("DB_PREFLIGHT_ATTEMPTS", "5") or "5")
     sleep_sec = float(os.getenv("DB_PREFLIGHT_SLEEP_SEC", "2") or "2")
