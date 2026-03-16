@@ -36,10 +36,7 @@ for attempt in $(seq 1 "${PULL_MAX_ATTEMPTS}"); do
   sleep "${PULL_DELAY_SEC}"
 done
 
-APP_IMAGE="$(docker compose images tender_ai_app --format json 2>/dev/null | python3 -c 'import json,sys; raw=sys.stdin.read().strip(); data=[]; \
-if raw.startswith(\"[\"): data=json.loads(raw); \
-elif raw: data=[json.loads(line) for line in raw.splitlines() if line.strip()]; \
-print((data[0].get(\"Repository\",\"\")+\":\"+data[0].get(\"Tag\",\"\")) if data else \"unknown\")')"
+APP_IMAGE="$(docker compose images tender_ai_app --format json 2>/dev/null | python3 -c "import json,sys; raw=sys.stdin.read().strip(); data=(json.loads(raw) if raw.startswith('[') else ([json.loads(line) for line in raw.splitlines() if line.strip()] if raw else [])); first=(data[0] if data else {}); print((first.get('Repository','') + ':' + first.get('Tag','')) if data else 'unknown')")"
 echo "App image: ${APP_IMAGE}"
 
 # Bring up database first; do not touch app until DB credentials are verified.
