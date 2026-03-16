@@ -36,7 +36,29 @@ for attempt in $(seq 1 "${PULL_MAX_ATTEMPTS}"); do
   sleep "${PULL_DELAY_SEC}"
 done
 
-docker compose up -d
+APP_IMAGE="$(docker compose images tender_ai_app --format json 2>/dev/null | python3 -c 'import json,sys; data=[json.loads(l) for l in sys.stdin.read().splitlines() if l.strip()]; print(data[0].get("Repository","")+":"+data[0].get("Tag","")) if data else print("unknown")')"
+echo "App image: ${APP_IMAGE}"
+
+# Bring up database first; do not touch app until DB credentials are verified.
+docker compose up -d tender_ai_db
+
+DB_PREFLIGHT_MAX_ATTEMPTS=5
+DB_PREFLIGHT_DELAY_SEC=3
+for attempt in $(seq 1 "${DB_PREFLIGHT_MAX_ATTEMPTS}"); do
+  if docker compose run --rm -T --no-deps tender_ai_app python scripts/db_preflight.py; then
+    echo "DB connection OK before app startup"
+    break
+  fi
+  if [ "${attempt}" -eq "${DB_PREFLIGHT_MAX_ATTEMPTS}" ]; then
+    echo "ERROR: DB preflight failed. Check DB_* / POSTGRES_* / DATABASE_URL_* consistency in .env"
+    exit 1
+  fi
+  echo "DB preflight retry in ${DB_PREFLIGHT_DELAY_SEC}s (${attempt}/${DB_PREFLIGHT_MAX_ATTEMPTS})..."
+  sleep "${DB_PREFLIGHT_DELAY_SEC}"
+done
+
+# Start/update app only after DB credentials are confirmed.
+docker compose up -d tender_ai_app
 
 ALEMBIC_MAX_ATTEMPTS=15
 ALEMBIC_DELAY_SEC=2
