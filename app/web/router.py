@@ -49,6 +49,7 @@ from app.tender_documents.service import (
     enforce_source_fetch_rate_limit,
     fetch_source_documents,
     get_document_scoped,
+    is_blacklisted_source_document,
     list_documents_for_tender,
 )
 from app.tender_documents.analyze import analyze_from_source
@@ -262,9 +263,20 @@ def _has_finance_values(finance) -> bool:
     )
 
 
+def _is_valid_tender_document_for_auto_analysis(doc) -> bool:
+    doc_type = str(getattr(doc, "doc_type", "") or "").lower()
+    file_name = str(getattr(doc, "file_name", "") or "")
+    if doc_type == "source_import":
+        return False
+    if is_blacklisted_source_document(file_name=file_name):
+        return False
+    return True
+
+
 def _build_detail_flow(
     *,
     documents_count: int,
+    valid_documents_count: int,
     has_source_link: bool,
     analysis,
     risk_score: int | None,
@@ -272,7 +284,7 @@ def _build_detail_flow(
     decision,
     package,
 ) -> tuple[list[dict[str, str]], dict[str, bool], dict[str, str], str | None]:
-    has_documents = documents_count > 0
+    has_documents = valid_documents_count > 0
     analysis_status = analysis.status if analysis else "none"
     requirements = analysis.requirements if analysis and isinstance(analysis.requirements, dict) else {}
     has_requirements = bool(analysis and (requirements or analysis_status in {"ready", "approved"}))
@@ -1262,6 +1274,7 @@ async def tender_detail_page(
     analysis = await get_analysis_scoped(db, current_user.company_id, tender_id)
     tasks = await list_tasks(db, current_user.company_id, tender_id, order_by="due_at asc")
     documents = await list_documents_for_tender(db, company_id=current_user.company_id, tender_id=tender_id)
+    valid_documents = [doc for doc in documents if _is_valid_tender_document_for_auto_analysis(doc)]
     package = await get_package_for_tender(db, company_id=current_user.company_id, tender_id=tender_id)
     finance = await get_finance_scoped(db, company_id=current_user.company_id, tender_id=tender_id)
 
@@ -1270,6 +1283,7 @@ async def tender_detail_page(
     risk_flags_top = _top_risk_flags(analysis)
     tender_flow_steps, action_availability, disabled_reasons, next_step = _build_detail_flow(
         documents_count=len(documents),
+        valid_documents_count=len(valid_documents),
         has_source_link=bool(tender.source_url),
         analysis=analysis,
         risk_score=risk_score,
@@ -1303,7 +1317,8 @@ async def tender_detail_page(
                 "margin_pct": decision.expected_margin_pct if decision else None,
                 "relevance_score": relevance_meta.get("score") if relevance_meta else None,
                 "relevance_label": relevance_meta.get("label") if relevance_meta else None,
-                "documents_count": len(documents),
+                "documents_count": len(valid_documents),
+                "documents_total_count": len(documents),
                 "package_generated": bool(package.files),
                 "ingestion": _ingestion_status(company) if company else {},
             },
@@ -1694,7 +1709,11 @@ async def web_import_source_documents(
     except DocumentScopedNotFoundError:
         return _redirect_with_action(tender_id, "source_docs", False, "Тендер не найден")
 
-    existing_signatures = {(doc.file_name.lower(), doc.file_size or -1) for doc in existing_documents}
+    existing_signatures = {
+        (doc.file_name.lower(), doc.file_size or -1)
+        for doc in existing_documents
+        if str(doc.doc_type or "").lower() != "source_import"
+    }
     try:
         result: SourceFetchResult = await fetch_source_documents(tender.source_url, max_docs=20)
     except SourceFetchError as exc:
@@ -1726,7 +1745,7 @@ async def web_import_source_documents(
                 file_name=file_item.file_name,
                 content=file_item.content,
                 content_type=file_item.content_type,
-                doc_type="source_import",
+                doc_type="tender_source",
             )
             existing_signatures.add(signature)
             created += 1

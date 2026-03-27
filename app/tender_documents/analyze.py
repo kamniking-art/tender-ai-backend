@@ -23,6 +23,7 @@ from app.tender_documents.service import (
     SourceFetchError,
     create_document_from_bytes,
     fetch_source_documents,
+    is_blacklisted_source_document,
     list_documents_for_tender,
 )
 from app.tenders.service import get_tender_by_id_scoped
@@ -36,6 +37,16 @@ def _step(status: str, **kwargs: Any) -> dict[str, Any]:
     return data
 
 
+def _is_valid_tender_document_for_auto_analysis(doc: Any) -> bool:
+    doc_type = str(getattr(doc, "doc_type", "") or "").lower()
+    file_name = str(getattr(doc, "file_name", "") or "")
+    if doc_type == "source_import":
+        return False
+    if is_blacklisted_source_document(file_name=file_name):
+        return False
+    return True
+
+
 async def fetch_and_store_source_documents(
     db: AsyncSession,
     *,
@@ -45,7 +56,11 @@ async def fetch_and_store_source_documents(
     source_url: str,
 ) -> dict[str, Any]:
     existing_docs = await list_documents_for_tender(db, company_id=company_id, tender_id=tender_id)
-    existing_signatures = {(item.file_name.lower(), item.file_size or -1) for item in existing_docs}
+    existing_signatures = {
+        (item.file_name.lower(), item.file_size or -1)
+        for item in existing_docs
+        if str(item.doc_type or "").lower() != "source_import"
+    }
 
     try:
         fetch_result = await fetch_source_documents(source_url, max_docs=20)
@@ -86,7 +101,7 @@ async def fetch_and_store_source_documents(
                 file_name=file_item.file_name,
                 content=file_item.content,
                 content_type=file_item.content_type,
-                doc_type="source_import",
+                doc_type="tender_source",
             )
         except (ScopedNotFoundError, DocumentStorageError):
             errors_sample.append(f"{file_item.file_name}: save_failed")
@@ -164,7 +179,7 @@ async def analyze_from_source(
 
     # If source is blocked but documents were uploaded earlier, continue with analysis.
     docs_after_fetch = await list_documents_for_tender(db, company_id=company_id, tender_id=tender_id)
-    docs_available = len(docs_after_fetch) > 0
+    docs_available = any(_is_valid_tender_document_for_auto_analysis(doc) for doc in docs_after_fetch)
     fetch_ok = fetch_ok or docs_available
     if fetch_payload.get("blocked_by_source") and docs_available:
         result["steps"]["fetch_documents"]["status"] = "ok"
@@ -174,6 +189,9 @@ async def analyze_from_source(
         if fetch_payload.get("blocked_by_source"):
             result["next_step"] = "ЕИС временно блокирует доступ к документам, попробуйте позже"
             result["analysis_stage"] = "blocked_by_source"
+        elif (fetch_payload.get("found_links_count") or 0) > 0 and "служебн" in str(fetch_payload.get("message", "")).lower():
+            result["next_step"] = "Найдены только служебные файлы ЕИС, документы тендера не найдены"
+            result["analysis_stage"] = "documents_missing"
         else:
             result["next_step"] = "Документы на ЕИС не найдены"
             result["analysis_stage"] = "documents_missing"

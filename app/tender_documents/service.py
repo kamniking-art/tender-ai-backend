@@ -251,6 +251,14 @@ _SOURCE_DOC_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
 )
 _ALLOWED_DOC_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".rar"}
+_SOURCE_DOC_URL_BLACKLIST_TOKENS = (
+    "/rpt/",
+    "zakupki-traffic.xlsx",
+    "traffic.xlsx",
+)
+_SOURCE_DOC_FILENAME_BLACKLIST = {
+    "zakupki-traffic.xlsx",
+}
 
 
 async def _paced_delay() -> None:
@@ -295,6 +303,16 @@ def _is_doc_link(link: str) -> bool:
     path = urlparse(link).path.lower()
     ext = Path(path).suffix.lower()
     return ext in _ALLOWED_DOC_EXTENSIONS
+
+
+def is_blacklisted_source_document(*, source_link: str | None = None, file_name: str | None = None) -> bool:
+    link = (source_link or "").lower()
+    name = sanitize_filename(file_name or "").lower()
+    if any(token in link for token in _SOURCE_DOC_URL_BLACKLIST_TOKENS):
+        return True
+    if name in _SOURCE_DOC_FILENAME_BLACKLIST:
+        return True
+    return False
 
 
 def _clean_html_text(value: str) -> str:
@@ -528,6 +546,9 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
         total_bytes = 0
         max_total_bytes = 100 * 1024 * 1024
         for idx, link in enumerate(unique_links[:max_docs], start=1):
+            if is_blacklisted_source_document(source_link=link):
+                errors.append(f"{link}: skipped_blacklist")
+                continue
             try:
                 await _paced_delay()
                 resp = await client.get(
@@ -543,6 +564,9 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
             if total_bytes + len(resp.content) > max_total_bytes:
                 break
             file_name = _guess_filename_from_url(link, idx)
+            if is_blacklisted_source_document(source_link=link, file_name=file_name):
+                errors.append(f"{link}: skipped_blacklist_filename")
+                continue
             signature = (file_name.lower(), len(resp.content))
             if signature in seen_download_signatures:
                 continue
@@ -552,6 +576,15 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
             total_bytes += len(resp.content)
 
         if not files:
+            if found_links_count > 0:
+                raise SourceFetchError(
+                    "Найдены только служебные файлы ЕИС",
+                    source_status="ok",
+                    found_links_count=found_links_count,
+                    attempted_pages=attempted_pages,
+                    http_status=last_http_status,
+                    errors_sample=errors[:3],
+                )
             raise SourceFetchError(
                 "Не удалось скачать документы из найденных ссылок",
                 source_status="error",

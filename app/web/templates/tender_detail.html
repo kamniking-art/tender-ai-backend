@@ -40,7 +40,7 @@
     <span class="badge">Decision score: {{ badges.decision_score if badges.decision_score is not none else '-' }}</span>
     <span class="badge">Приоритет: {% if badges.priority_label %}{{ badges.priority_label | priority_label_ru }} ({{ badges.priority_score if badges.priority_score is not none else '-' }}){% else %}-{% endif %}</span>
     <span class="badge">Маржа %: {{ badges.margin_pct | ru_money if badges.margin_pct is not none else '-' }}</span>
-    <span class="badge">Документы: {{ badges.documents_count }}</span>
+    <span class="badge">Документы: {{ badges.documents_count }}{% if badges.documents_total_count is not none and badges.documents_total_count != badges.documents_count %} (всего: {{ badges.documents_total_count }}){% endif %}</span>
     <span class="badge">Пакет: {{ 'есть' if badges.package_generated else 'нет' }}</span>
   </div>
   {% if badges.risk_flags %}
