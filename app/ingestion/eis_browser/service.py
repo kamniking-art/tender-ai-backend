@@ -157,7 +157,6 @@ async def _upsert_tender(db: AsyncSession, company_id: UUID, candidate: EISSiteC
                 nmck=_normalize_decimal(candidate.nmck),
                 published_at=candidate.published_at,
                 submission_deadline=candidate.submission_deadline,
-                raw_payload={"source": "eis_browser", "external_id": candidate.external_id},
                 status="new",
             )
         )
