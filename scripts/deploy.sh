@@ -11,6 +11,14 @@ if [ ! -d .git ]; then
   exit 1
 fi
 
+# Load .env for deploy-time settings (APP_EXTERNAL_PORT, DEPLOY_BASE_URL, etc).
+if [ -f .env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
 git pull --ff-only
 
 APP_VERSION="$(git rev-parse --short HEAD)"
