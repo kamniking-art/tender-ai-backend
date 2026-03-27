@@ -733,6 +733,7 @@ async def web_monitoring_run_once(
 
 @router.post("/ingestion/eis-site/run-once")
 async def web_run_eis_site_once(
+    ingest_query: str | None = Form(default=None),
     q: str | None = Form(default=None),
     limit: int = Form(default=1000),
     pages: int = Form(default=50),
@@ -748,10 +749,11 @@ async def web_run_eis_site_once(
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
+    query_value = (ingest_query or q or None)
     stats = await run_eis_site_once_for_company(
         db,
         company,
-        query=q or None,
+        query=query_value,
         limit=max(1, min(5000, int(limit or 1000))),
         pages=max(1, min(200, int(pages or 50))),
         page_size=max(10, min(50, int(page_size or 20))),
@@ -806,7 +808,7 @@ async def web_run_eis_site_once(
         browser_stats = await run_eis_browser_once_for_company(
             db,
             company,
-            query=q or None,
+            query=query_value,
             pages=3,
             page_size=20,
             limit=50,
@@ -831,6 +833,7 @@ async def web_run_eis_site_once(
 
 @router.post("/ingestion/eis-browser/run-once")
 async def web_run_eis_browser_once(
+    ingest_query: str | None = Form(default=None),
     q: str | None = Form(default=None),
     pages: int = Form(default=3),
     page_size: int = Form(default=20),
@@ -846,10 +849,11 @@ async def web_run_eis_browser_once(
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
+    query_value = (ingest_query or q or None)
     stats = await run_eis_browser_once_for_company(
         db,
         company,
-        query=q or None,
+        query=query_value,
         pages=max(1, min(5, int(pages or 3))),
         page_size=max(10, min(50, int(page_size or 20))),
         limit=max(1, min(50, int(limit or 50))),
