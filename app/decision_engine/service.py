@@ -51,6 +51,19 @@ def _extract_auto_risk_score(analysis: TenderAnalysis | None) -> int | None:
     return None
 
 
+def _resolve_effective_risk_score(analysis: TenderAnalysis | None, decision: TenderDecision) -> tuple[int | None, str]:
+    """
+    Canonical risk source is analysis.requirements.risk_v1.score_auto.
+    tender_decisions.risk_score is a projection for quick reads/UI.
+    """
+    auto_score = _extract_auto_risk_score(analysis)
+    if auto_score is not None:
+        return auto_score, "analysis.risk_v1.score_auto"
+    if decision.risk_score is not None:
+        return int(decision.risk_score), "decision.risk_score"
+    return None, "none"
+
+
 def _extract_extracted(analysis: TenderAnalysis | None) -> ExtractedTenderV1 | None:
     if analysis is None:
         return None
@@ -573,7 +586,7 @@ async def recompute_decision_engine_v1(
     extracted = _extract_extracted(analysis)
     relevance = compute_relevance_v1(tender=tender, analysis=analysis, extracted=extracted)
 
-    risk_score = decision.risk_score if decision.risk_score is not None else _extract_auto_risk_score(analysis)
+    risk_score, risk_source = _resolve_effective_risk_score(analysis, decision)
     short_deadline = _resolve_short_deadline(analysis, extracted)
     harsh_penalties = _resolve_harsh_penalties(analysis)
     high_security = _resolve_high_security(extracted, decision, tender)
@@ -614,6 +627,7 @@ async def recompute_decision_engine_v1(
     engine["recommendation"] = final_recommendation
     engine["risk_go_max"] = RISK_GO_MAX
     engine["min_margin_pct"] = float(MIN_MARGIN_PCT)
+    engine["risk_source"] = risk_source
     if relevance.get("score") is not None and relevance["score"] < 20 and engine["recommendation_base"] in {"strong_go", "go", "review"}:
         engine["explain"].append("relevance_guard=weak (relevance_score<20)")
 
@@ -632,6 +646,8 @@ async def recompute_decision_engine_v1(
     engine["priority"] = priority
 
     decision.recommendation = engine["recommendation"]
+    decision.risk_score = int(risk_score) if risk_score is not None else 0
+    decision.risk_flags = list(analysis.risk_flags or []) if analysis and isinstance(analysis.risk_flags, list) else []
     decision.decision_score = engine.get("decision_score")
     decision.recommendation_reason = engine.get("recommendation_reason")
     decision.priority_score = priority["score"]

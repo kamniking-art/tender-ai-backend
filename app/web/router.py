@@ -485,9 +485,6 @@ def _redirect_with_action(tender_id: UUID, action: str, ok: bool, message: str, 
 
 
 def _extract_risk_score(analysis: TenderAnalysis | None, decision: TenderDecision | None) -> int | None:
-    if decision is not None and decision.risk_score is not None:
-        return int(decision.risk_score)
-
     if analysis and isinstance(analysis.requirements, dict):
         risk = analysis.requirements.get("risk_v1")
         if isinstance(risk, dict):
@@ -496,6 +493,8 @@ def _extract_risk_score(analysis: TenderAnalysis | None, decision: TenderDecisio
                 return score
             if isinstance(score, float):
                 return int(score)
+    if decision is not None and decision.risk_score is not None:
+        return int(decision.risk_score)
     return None
 
 
@@ -1080,7 +1079,7 @@ async def tenders_page(
         count_stmt = count_stmt.where(Tender.created_at <= parsed_created_to)
 
     auto_risk_score = cast(TenderAnalysis.requirements["risk_v1"]["score_auto"].astext, Integer)
-    effective_risk_score = func.coalesce(TenderDecision.risk_score, auto_risk_score)
+    effective_risk_score = func.coalesce(auto_risk_score, TenderDecision.risk_score)
     relevance_score = cast(TenderDecision.engine_meta["relevance"]["score"].astext, Integer)
     relevance_category_expr = TenderDecision.engine_meta["relevance"]["category"].astext
 

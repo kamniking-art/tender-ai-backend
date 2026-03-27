@@ -90,20 +90,19 @@ async def _extract_relevance_payload(db: AsyncSession, company_id: UUID, tender_
 
 
 async def _extract_risk_score(db: AsyncSession, company_id: UUID, tender_id: UUID) -> int | None:
+    analysis = await db.scalar(
+        select(TenderAnalysis).where(TenderAnalysis.company_id == company_id, TenderAnalysis.tender_id == tender_id)
+    )
+    if analysis and isinstance(analysis.requirements, dict):
+        risk = analysis.requirements.get("risk_v1")
+        if isinstance(risk, dict) and isinstance(risk.get("score_auto"), int):
+            return int(risk["score_auto"])
+
     decision = await db.scalar(
         select(TenderDecision).where(TenderDecision.company_id == company_id, TenderDecision.tender_id == tender_id)
     )
     if decision and decision.risk_score is not None:
         return int(decision.risk_score)
-
-    analysis = await db.scalar(
-        select(TenderAnalysis).where(TenderAnalysis.company_id == company_id, TenderAnalysis.tender_id == tender_id)
-    )
-    if not analysis or not isinstance(analysis.requirements, dict):
-        return None
-    risk = analysis.requirements.get("risk_v1")
-    if isinstance(risk, dict) and isinstance(risk.get("score_auto"), int):
-        return int(risk["score_auto"])
     return None
 
 
