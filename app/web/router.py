@@ -1391,17 +1391,29 @@ async def web_analyze_from_source(
     steps = data.get("steps", {})
     fetch = steps.get("fetch_documents", {})
     extract = steps.get("extract", {})
+    analysis_step = steps.get("analysis", {})
     relevance = steps.get("relevance", {})
     risk = steps.get("risk", {})
     engine = steps.get("recompute_engine", {})
+    package = steps.get("package", {})
 
     details_lines = [
+        f"downloading docs: {fetch.get('status', '-')}",
         f"Документы: {fetch.get('downloaded_count', 0)} загружено, найдено ссылок: {fetch.get('found_links_count', 0)}",
-        f"Извлечение: {extract.get('status', '-')}",
+        f"parsing requirements: {extract.get('status', '-')}",
+        f"building analysis: {analysis_step.get('status', '-')}",
         f"Релевантность: {relevance.get('relevance_score', '-')}/100 ({relevance.get('relevance_label', '-')})",
         f"Риск: {risk.get('risk_score', '-')}",
         f"Рекомендация: {engine.get('recommendation', '-')}",
+        f"building package: {package.get('status', '-')}",
+        f"Пакет: {package.get('message', '-')}",
     ]
+    if package.get("generated_files_count") is not None:
+        details_lines.append(f"Файлов в пакете: {package.get('generated_files_count')}")
+    if data.get("status") == "ok":
+        details_lines.append("done: yes")
+    else:
+        details_lines.append("done: partial")
     if fetch.get("source_status"):
         details_lines.append(f"source_status={fetch.get('source_status')}")
     if fetch.get("http_status"):
@@ -1411,7 +1423,7 @@ async def web_analyze_from_source(
     if data.get("next_step"):
         details_lines.append(f"Следующий шаг: {data.get('next_step')}")
 
-    message = "Автоанализ завершён" if status_ok else "Автоанализ выполнен частично"
+    message = "Автопайплайн завершён" if status_ok else "Автопайплайн выполнен частично"
     if fetch.get("source_status") == "blocked":
         message = "ЕИС временно блокирует доступ к документам"
     return _redirect_with_action(

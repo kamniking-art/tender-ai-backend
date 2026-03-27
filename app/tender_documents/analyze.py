@@ -10,6 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.risk.service import compute_risk_flags, compute_risk_score_v1
 from app.relevance.service import compute_relevance_v1
+from app.document_module.service import (
+    DocumentModuleConflictError,
+    DocumentModuleNotFoundError,
+    DocumentModuleValidationError,
+    generate_package_for_tender,
+)
 from app.tender_analysis.model import TenderAnalysis
 from app.tender_analysis.service import AnalysisConflictError, ScopedNotFoundError
 from app.tender_documents.service import (
@@ -156,6 +162,14 @@ async def analyze_from_source(
     if fetch_payload.get("errors_sample"):
         result["steps"]["fetch_documents"]["errors_sample"] = fetch_payload["errors_sample"]
 
+    # If source is blocked but documents were uploaded earlier, continue with analysis.
+    docs_after_fetch = await list_documents_for_tender(db, company_id=company_id, tender_id=tender_id)
+    docs_available = len(docs_after_fetch) > 0
+    fetch_ok = fetch_ok or docs_available
+    if fetch_payload.get("blocked_by_source") and docs_available:
+        result["steps"]["fetch_documents"]["status"] = "ok"
+        result["steps"]["fetch_documents"]["message"] = "Источник временно блокирует доступ, использованы ранее загруженные документы"
+
     if not fetch_ok:
         if fetch_payload.get("blocked_by_source"):
             result["next_step"] = "ЕИС временно блокирует доступ к документам, попробуйте позже"
@@ -163,6 +177,9 @@ async def analyze_from_source(
         else:
             result["next_step"] = "Документы на ЕИС не найдены"
             result["analysis_stage"] = "documents_missing"
+        result["steps"]["extract"] = _step("skipped", message="Нет документов для извлечения")
+        result["steps"]["analysis"] = _step("skipped", message="Анализ не запущен")
+        result["steps"]["package"] = _step("skipped", message="Пакет не сформирован")
         logger.info(
             "analyze_from_source done tender_id=%s external_id=%s stage=fetch status=partial downloaded=0 source_status=%s http_status=%s duration_ms=%s",
             tender_id,
@@ -229,6 +246,8 @@ async def analyze_from_source(
         result["steps"]["risk"] = _step("ok", risk_score=risk_score)
     except Exception as exc:  # noqa: BLE001
         result["steps"]["risk"] = _step("error", message="Не удалось рассчитать риск")
+        result["steps"]["analysis"] = _step("error", message="Не удалось собрать анализ")
+        result["steps"]["package"] = _step("skipped", message="Пакет не сформирован")
         result["next_step"] = "Проверьте извлечённые требования"
         logger.warning("analyze_from_source risk error tender_id=%s err=%s", tender_id, exc)
         return result
@@ -248,18 +267,70 @@ async def analyze_from_source(
             force=True,
         )
         result["steps"]["recompute_engine"] = _step("ok", recommendation=decision.recommendation)
+        result["steps"]["analysis"] = _step(
+            "ok",
+            risk_score=risk_score,
+            recommendation=decision.recommendation,
+        )
     except (ManualRecommendationConflictError, DecisionEngineBadRequestError) as exc:
         result["steps"]["recompute_engine"] = _step("error", message=str(exc))
+        result["steps"]["analysis"] = _step("error", message="Не удалось завершить анализ")
+        result["steps"]["package"] = _step("skipped", message="Пакет не сформирован")
         result["next_step"] = "Проверьте извлечённые требования"
         return result
 
-    result["status"] = "ok"
-    result["analysis_stage"] = "decision_done"
-    result["next_step"] = "Заполните финансовые параметры"
+    # Auto-generate package when recommendation allows it.
+    if decision.recommendation in {"go", "strong_go"}:
+        try:
+            generated_files, _ = await generate_package_for_tender(
+                db,
+                company_id=company_id,
+                tender_id=tender_id,
+                user_id=user_id,
+                force=True,
+            )
+            result["steps"]["package"] = _step(
+                "ok",
+                generated_files_count=len(generated_files),
+                message="Пакет документов сформирован",
+            )
+            result["status"] = "ok"
+            result["analysis_stage"] = "decision_done"
+            result["next_step"] = "Пайплайн завершён"
+        except DocumentModuleValidationError as exc:
+            result["steps"]["package"] = _step(
+                "error",
+                message="Не удалось сформировать пакет: профиль компании заполнен не полностью",
+                missing_fields=exc.missing_fields,
+            )
+            result["status"] = "partial"
+            result["analysis_stage"] = "decision_done"
+            result["next_step"] = "Заполните профиль компании и повторите формирование пакета"
+        except DocumentModuleConflictError:
+            result["steps"]["package"] = _step("error", message="Пакет не удалось сформировать из-за конфликта")
+            result["status"] = "partial"
+            result["analysis_stage"] = "decision_done"
+            result["next_step"] = "Проверьте условия формирования пакета"
+        except DocumentModuleNotFoundError:
+            result["steps"]["package"] = _step("error", message="Пакет не удалось сформировать: тендер или компания не найдены")
+            result["status"] = "partial"
+            result["analysis_stage"] = "decision_done"
+            result["next_step"] = "Проверьте данные тендера и компании"
+    else:
+        result["steps"]["package"] = _step(
+            "skipped",
+            message="Пакет доступен только при решении «Участвовать»",
+            recommendation=decision.recommendation,
+        )
+        result["status"] = "ok"
+        result["analysis_stage"] = "decision_done"
+        result["next_step"] = "Заполните финансовые параметры для итогового решения"
+
     logger.info(
-        "analyze_from_source done tender_id=%s external_id=%s stage=done status=ok duration_ms=%s",
+        "analyze_from_source done tender_id=%s external_id=%s stage=done status=%s duration_ms=%s",
         tender_id,
         tender.external_id,
+        result.get("status"),
         int((time.monotonic() - started_at) * 1000),
     )
     return result
