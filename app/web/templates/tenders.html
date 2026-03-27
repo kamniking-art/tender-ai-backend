@@ -264,31 +264,31 @@
     <thead>
       <tr>
         <th class="col-title">Название</th>
-        <th>Статус</th>
-        <th>Источник / Внешний ID</th>
-        <th>Регион</th>
-        <th>Место</th>
+        <th class="col-status">Статус</th>
+        <th class="col-source">Источник / Внешний ID</th>
+        <th class="col-region">Регион</th>
+        <th class="col-place">Место</th>
         <th class="col-customer">Заказчик</th>
         <th class="col-relevance">Релевантность</th>
-        <th>Категория</th>
+        <th class="col-category">Категория</th>
         <th class="col-recommendation">Рекомендация</th>
-        <th>Приоритет</th>
+        <th class="col-priority">Приоритет</th>
         <th class="col-date">Дедлайн</th>
         <th class="col-date">Публикация</th>
-        <th>НМЦК</th>
-        <th>Ссылка</th>
+        <th class="col-nmck">НМЦК</th>
+        <th class="col-link">Ссылка</th>
       </tr>
     </thead>
     <tbody>
       {% for tender in tenders %}
       <tr>
         <td class="truncate col-title" title="{{ tender.title or '-' }}"><a href="/web/tenders/{{ tender.id }}">{{ tender.title or '-' }}</a></td>
-        <td>{{ tender.status | tender_status_ru }}</td>
-        <td>{{ tender.source | source_ru }} / {{ tender.external_id }}</td>
-        <td>{{ tender.region or '-' }}</td>
-        <td>{{ tender.place_text or '-' }}</td>
+        <td class="col-status">{{ tender.status | tender_status_ru }}</td>
+        <td class="truncate col-source" title="{{ (tender.source | source_ru) ~ ' / ' ~ (tender.external_id or '-') }}">{{ tender.source | source_ru }} / {{ tender.external_id or '-' }}</td>
+        <td class="truncate col-region" title="{{ tender.region or '-' }}">{{ tender.region or '-' }}</td>
+        <td class="truncate col-place" title="{{ tender.place_text or '-' }}">{{ tender.place_text or '-' }}</td>
         <td class="truncate col-customer" title="{{ tender.customer_name or '-' }}">{{ tender.customer_name or '-' }}</td>
-        <td>
+        <td class="col-relevance">
           {% set rel = tender_relevance.get(tender.id|string) %}
           {% if rel %}
             {{ rel.get("score", "-") }}/100 ({{ rel.get("label", "-") }})
@@ -296,14 +296,14 @@
             —
           {% endif %}
         </td>
-        <td>
+        <td class="truncate col-category" title="{{ rel.get('category', '-') if rel else '-' }}">
           {% if rel %}
             {{ rel.get("category", "-") }}
           {% else %}
             —
           {% endif %}
         </td>
-        <td>
+        <td class="col-recommendation">
           {% set d = tender_decisions.get(tender.id|string) %}
           {% if d and d.get("recommendation") %}
             {% set rec = d.get("recommendation") %}
@@ -325,7 +325,7 @@
             —
           {% endif %}
         </td>
-        <td>
+        <td class="col-priority">
           {% if d and d.get("priority_label") %}
             {% set pl = d.get("priority_label") %}
             {% if pl == "urgent" %}
@@ -344,12 +344,12 @@
             —
           {% endif %}
         </td>
-        <td>{{ tender.submission_deadline | ru_dt }}</td>
-        <td>{{ tender.published_at | ru_dt }}</td>
-        <td>{{ tender.nmck | ru_money("RUB") }}</td>
-        <td>
+        <td class="col-date">{{ tender.submission_deadline | ru_dt }}</td>
+        <td class="col-date">{{ tender.published_at | ru_dt }}</td>
+        <td class="money-cell col-nmck">{{ tender.nmck | ru_money("RUB") }}</td>
+        <td class="col-link">
           {% if tender.source_url %}
-            <a href="{{ tender.source_url }}" target="_blank" rel="noopener noreferrer">Открыть на ЕИС</a>
+            <a class="nowrap-link" href="{{ tender.source_url }}" target="_blank" rel="noopener noreferrer">Открыть на ЕИС</a>
           {% else %}
             —
           {% endif %}

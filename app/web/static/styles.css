@@ -275,17 +275,37 @@ pre {
   width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
-  min-width: 1320px;
+  min-width: 1680px;
 }
 
 .tenders-table th,
 .tenders-table td {
   padding: 8px;
-  vertical-align: top;
+  vertical-align: middle;
+}
+
+.tenders-table th {
+  white-space: nowrap;
 }
 
 .col-title {
   width: 260px;
+}
+
+.col-status {
+  width: 120px;
+}
+
+.col-source {
+  width: 180px;
+}
+
+.col-region {
+  width: 130px;
+}
+
+.col-place {
+  width: 160px;
 }
 
 .col-customer {
@@ -293,21 +313,51 @@ pre {
 }
 
 .col-relevance {
-  width: 120px;
+  width: 140px;
+}
+
+.col-category {
+  width: 160px;
 }
 
 .col-recommendation {
+  width: 180px;
+}
+
+.col-priority {
   width: 140px;
 }
 
 .col-date {
-  width: 110px;
+  width: 120px;
+}
+
+.col-nmck {
+  width: 140px;
+}
+
+.col-link {
+  width: 120px;
 }
 
 .truncate {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.money-cell {
+  white-space: nowrap;
+  text-align: right;
+  font-weight: 500;
+}
+
+.nowrap-link {
+  display: inline-block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .quick-filters {
