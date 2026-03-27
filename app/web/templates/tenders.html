@@ -4,11 +4,24 @@
 <h1>Тендеры</h1>
 
 <section class="card">
-  <h2>Импорт реальных тендеров</h2>
-  <p class="hint">Это импорт из ЕИС. Для фильтрации уже загруженного списка используйте блок «Фильтры» ниже.</p>
+  <h2>Поиск по уже загруженному списку</h2>
+  <p class="hint"><strong>Это основной поиск в списке.</strong> Введите, например, «гранит» и нажмите «Найти в списке».</p>
+  <form method="get" action="/web/tenders" class="filters">
+    <label>Поиск в списке
+      <input type="text" name="search" value="{{ filters.search }}" placeholder="название / заказчик / место" />
+    </label>
+    <input type="hidden" name="fresh_only" value="{{ filters.fresh_only or 'true' }}" />
+    <input type="hidden" name="page_size" value="{{ filters.page_size or 50 }}" />
+    <button type="submit">Найти в списке</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Импорт новых тендеров из ЕИС (НЕ поиск по списку)</h2>
+  <p class="hint">Этот блок добавляет новые данные из ЕИС. Он не фильтрует уже загруженный список.</p>
   <form method="post" action="/web/ingestion/eis-site/run-once" class="filters">
-    <label>Поиск ЕИС (импорт)
-      <input type="text" name="ingest_query" placeholder="запрос для импорта из ЕИС" />
+    <label>Запрос для импорта из ЕИС
+      <input type="text" name="ingest_query" placeholder="например: гранит (добавить новые тендеры)" />
     </label>
     <label>Страниц
       <input type="number" name="pages" min="1" max="200" value="50" />
@@ -22,13 +35,13 @@
     <label>Регион
       <input type="text" name="region" placeholder="например: Санкт-Петербург" />
     </label>
-    <button type="submit">Загрузить реальные тендеры (run once)</button>
+    <button type="submit">Запустить импорт новых тендеров</button>
   </form>
 </section>
 
 <section class="card">
-  <h2>Browser import (fallback)</h2>
-  <p class="hint">Это импорт из ЕИС через браузерный fallback. Не используется для фильтрации списка.</p>
+  <h2>Browser import (fallback, НЕ поиск по списку)</h2>
+  <p class="hint">Резервный импорт из ЕИС через браузер. Не фильтрует уже загруженный список.</p>
   <form method="post" action="/web/ingestion/eis-browser/run-once" class="filters">
     <label>Поиск ЕИС (browser import)
       <input type="text" name="ingest_query" placeholder="запрос для импорта из ЕИС" />
@@ -45,7 +58,7 @@
     <label>Регион
       <input type="text" name="region" placeholder="например: Санкт-Петербург" />
     </label>
-    <button type="submit">Запустить browser import</button>
+    <button type="submit">Запустить browser import (добавить новые)</button>
   </form>
   <p>
     <strong>Статус eis_browser:</strong>
@@ -59,7 +72,7 @@
 </section>
 
 <section class="card">
-  <h2>Массовый импорт</h2>
+  <h2>Массовый импорт (НЕ поиск по списку)</h2>
   <form method="post" action="/web/ingestion/eis-site/run-bulk" class="filters">
     <label>Запросы (по одному в строке)
       <textarea name="queries_text" rows="8" placeholder="гранит&#10;керамогранит&#10;памятник"></textarea>
