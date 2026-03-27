@@ -4,6 +4,7 @@ import logging
 import random
 import asyncio
 import copy
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -23,6 +24,13 @@ from app.tenders.model import Tender
 logger = logging.getLogger("uvicorn.error")
 
 EIS_SITE_SEARCH_URL = "https://zakupki.gov.ru/epz/order/extendedsearch/results.html"
+_SPACE_RE = re.compile(r"\s+")
+
+_REGION_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "санкт петербург": ("спб", "питер", "saint petersburg", "st petersburg", "sankt peterburg"),
+    "ленинградская область": ("лен область", "ленобласть", "leningrad oblast", "leningrad region"),
+    "кингисепп": ("kingisepp", "кингисеппский район", "kingisepp district"),
+}
 
 
 @dataclass
@@ -39,6 +47,10 @@ class EISSiteRunStats:
     inserted: int = 0
     updated: int = 0
     skipped: int = 0
+    region_filter: str | None = None
+    region_filter_applied: bool = False
+    candidates_before_region_filter: int = 0
+    candidates_after_region_filter: int = 0
     cooldown_until: datetime | None = None
 
 
@@ -203,14 +215,21 @@ async def run_eis_site_once_for_company(
             seen.add(item.external_id)
             deduped.append(item)
 
+        stats.region_filter = cfg.region
         if stats.source_status == "ok" and stats.stage != "error":
             stats.stage = "insert"
-            stats.candidates = min(len(deduped), cfg.limit)
+            region_filtered = deduped
+            stats.candidates_before_region_filter = len(deduped)
+            if cfg.region:
+                stats.region_filter_applied = True
+                region_filtered = [cand for cand in deduped if _candidate_matches_region(cand, cfg.region or "")]
+            stats.candidates_after_region_filter = len(region_filtered)
+            stats.candidates = min(len(region_filtered), cfg.limit)
             if stats.candidates == 0 and not stats.reason:
                 stats.reason = "no_results"
 
             update_existing = (dedupe_mode or "update").strip().lower() != "skip"
-            for cand in deduped[: cfg.limit]:
+            for cand in region_filtered[: cfg.limit]:
                 outcome = await _upsert_tender(db, company.id, cand, update_existing=update_existing)
                 if outcome == "inserted":
                     stats.inserted += 1
@@ -238,7 +257,7 @@ async def run_eis_site_once_for_company(
                     stats.errors_sample.append(msg)
 
         logger.info(
-            "EIS_SITE run: stage=%s reason=%s source_status=%s company_id=%s pages=%s candidates=%s inserted=%s updated=%s skipped=%s http_status=%s fetched_bytes=%s cooldown_until=%s",
+            "EIS_SITE run: stage=%s reason=%s source_status=%s company_id=%s pages=%s candidates=%s inserted=%s updated=%s skipped=%s region_filter=%s region_filter_applied=%s candidates_before_region_filter=%s candidates_after_region_filter=%s http_status=%s fetched_bytes=%s cooldown_until=%s",
             stats.stage,
             stats.reason,
             stats.source_status,
@@ -248,6 +267,10 @@ async def run_eis_site_once_for_company(
             stats.inserted,
             stats.updated,
             stats.skipped,
+            stats.region_filter,
+            stats.region_filter_applied,
+            stats.candidates_before_region_filter,
+            stats.candidates_after_region_filter,
             stats.http_status,
             stats.fetched_bytes,
             stats.cooldown_until.isoformat() if stats.cooldown_until else "-",
@@ -338,6 +361,44 @@ def _parse_dt(value: Any) -> datetime | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
     except ValueError:
         return None
+
+
+def _normalize_region_text(value: str) -> str:
+    text = (value or "").strip().lower()
+    text = text.replace("ё", "е")
+    text = "".join(ch if ch.isalnum() or ch.isspace() else " " for ch in text)
+    return _SPACE_RE.sub(" ", text).strip()
+
+
+def _region_terms(value: str) -> set[str]:
+    normalized = _normalize_region_text(value)
+    if not normalized:
+        return set()
+    terms = {normalized}
+    for base, aliases in _REGION_SYNONYMS.items():
+        alias_norm = {_normalize_region_text(x) for x in aliases}
+        if normalized == base or normalized in alias_norm or any(normalized in a for a in alias_norm) or base in normalized:
+            terms.add(base)
+            terms.update(alias_norm)
+    return {t for t in terms if len(t) >= 2}
+
+
+def _candidate_matches_region(candidate: EISSiteCandidate, region_filter: str) -> bool:
+    terms = _region_terms(region_filter)
+    if not terms:
+        return True
+    haystack_raw = " ".join(
+        [
+            candidate.region or "",
+            candidate.place_text or "",
+            candidate.customer_name or "",
+            candidate.title or "",
+        ]
+    )
+    haystack = _normalize_region_text(haystack_raw)
+    if not haystack:
+        return False
+    return any(term in haystack for term in terms)
 
 
 def _build_search_params(cfg: EISSiteSettings, page: int) -> dict[str, str | int]:

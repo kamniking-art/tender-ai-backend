@@ -758,7 +758,17 @@ async def web_run_eis_site_once(
     )
     if stats.source_status == "ok":
         message = f"Добавлено: {stats.inserted}, обновлено: {stats.updated}, пропущено: {stats.skipped}"
-        qs = urlencode({"ingest_status": "ok", "ingest_message": message})
+        details_parts = []
+        if stats.region_filter_applied:
+            details_parts.append(
+                f"region_filter={stats.region_filter}, candidates_before_region_filter={stats.candidates_before_region_filter}, candidates_after_region_filter={stats.candidates_after_region_filter}"
+            )
+        qs_payload = {"ingest_status": "ok", "ingest_message": message}
+        if details_parts:
+            qs_payload["ingest_details"] = ", ".join(details_parts)
+        if region:
+            qs_payload["region"] = region
+        qs = urlencode(qs_payload)
         return RedirectResponse(url=f"/web/tenders?{qs}", status_code=status.HTTP_303_SEE_OTHER)
 
     reason = stats.reason or "неизвестно"
@@ -811,7 +821,10 @@ async def web_run_eis_site_once(
     if browser_fallback_note:
         details_parts.append(browser_fallback_note)
     details = ", ".join(details_parts)
-    qs = urlencode({"ingest_status": "error", "ingest_message": message, "ingest_details": details})
+    qs_payload = {"ingest_status": "error", "ingest_message": message, "ingest_details": details}
+    if region:
+        qs_payload["region"] = region
+    qs = urlencode(qs_payload)
     return RedirectResponse(url=f"/web/tenders?{qs}", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -1014,8 +1027,14 @@ async def tenders_page(
 
     if region_filter:
         pattern = f"%{region_filter.strip()}%"
-        stmt = stmt.where(Tender.region.ilike(pattern))
-        count_stmt = count_stmt.where(Tender.region.ilike(pattern))
+        region_cond = or_(
+            Tender.region.ilike(pattern),
+            Tender.place_text.ilike(pattern),
+            Tender.customer_name.ilike(pattern),
+            Tender.title.ilike(pattern),
+        )
+        stmt = stmt.where(region_cond)
+        count_stmt = count_stmt.where(region_cond)
 
     if parsed_price_min is not None:
         stmt = stmt.where(Tender.nmck >= parsed_price_min)
