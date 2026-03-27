@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+import logging
 from pathlib import Path
 import re
 from uuid import UUID
@@ -69,6 +70,7 @@ from app.decision_engine.service import (
 from app.web.deps import ACCESS_COOKIE_NAME, get_current_user_from_cookie
 
 templates = Jinja2Templates(directory="app/web/templates")
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/web", tags=["web"])
 
@@ -936,6 +938,7 @@ async def web_ack_alert(
 async def tenders_page(
     request: Request,
     q: str | None = Query(default=None),
+    search: str | None = Query(default=None, alias="search"),
     status_filter: str | None = Query(default=None, alias="status"),
     analysis_status: str | None = Query(default=None),
     decision_filter: str | None = Query(default=None, alias="decision"),
@@ -983,6 +986,9 @@ async def tenders_page(
     if page_size not in {20, 50, 100}:
         page_size = 50
 
+    query_text = (q or search or "").strip()
+    logger.info("web.tenders search query_text=%r q=%r search=%r", query_text, q, search)
+
     stmt = (
         select(Tender)
         .outerjoin(TenderAnalysis, and_(TenderAnalysis.company_id == current_user.company_id, TenderAnalysis.tender_id == Tender.id))
@@ -998,13 +1004,11 @@ async def tenders_page(
         .where(Tender.company_id == current_user.company_id)
     )
 
-    if q:
-        pattern = f"%{q.strip()}%"
+    if query_text:
+        pattern = f"%{query_text}%"
         cond = or_(
             Tender.title.ilike(pattern),
             Tender.customer_name.ilike(pattern),
-            Tender.external_id.ilike(pattern),
-            Tender.region.ilike(pattern),
             Tender.place_text.ilike(pattern),
         )
         stmt = stmt.where(cond)
@@ -1132,7 +1136,7 @@ async def tenders_page(
 
     total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
     base_filters = {
-        "q": q or "",
+        "q": query_text,
         "status": status_filter or "",
         "analysis_status": analysis_status or "",
         "decision": decision_filter or "",
