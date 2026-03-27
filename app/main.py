@@ -3,9 +3,12 @@ from datetime import datetime, timezone
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from fastapi import FastAPI
+from fastapi import FastAPI, Response, status
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.database import AsyncSessionLocal
 from app.ai_extraction.router import router as ai_extraction_router
 from app.auth import router as auth_router
 from app.companies import router as companies_router
@@ -59,9 +62,31 @@ app.include_router(users_router)
 app.include_router(web_router)
 
 
+async def _db_ready() -> tuple[bool, str | None]:
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+        return True, None
+    except SQLAlchemyError as exc:
+        return False, f"{exc.__class__.__name__}: {exc}"
+    except Exception as exc:  # pragma: no cover
+        return False, f"{exc.__class__.__name__}: {exc}"
+
+
 @app.get("/health")
-async def health() -> dict[str, bool]:
-    return {"ok": True}
+async def health(response: Response) -> dict[str, object]:
+    db_ok, db_error = await _db_ready()
+    if not db_ok:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    return {"ok": db_ok, "db_ok": db_ok, "db_error": db_error}
+
+
+@app.get("/readiness")
+async def readiness(response: Response) -> dict[str, object]:
+    db_ok, db_error = await _db_ready()
+    if not db_ok:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    return {"ok": db_ok, "db_ok": db_ok, "db_error": db_error}
 
 
 def _get_migrations_head() -> str:

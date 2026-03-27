@@ -77,13 +77,17 @@ done
 READINESS_MAX_ATTEMPTS=20
 READINESS_SLEEP_SEC=2
 HEALTH_BODY=""
+READINESS_BODY=""
 VERSION_BODY=""
 for attempt in $(seq 1 "${READINESS_MAX_ATTEMPTS}"); do
   HEALTH_BODY="$(curl -fsS --max-time 5 http://127.0.0.1:8000/health 2>/dev/null || true)"
+  READINESS_BODY="$(curl -fsS --max-time 5 http://127.0.0.1:8000/readiness 2>/dev/null || true)"
   VERSION_BODY="$(curl -fsS --max-time 5 http://127.0.0.1:8000/version 2>/dev/null || true)"
   VERSION_VALUE="$(printf '%s' "${VERSION_BODY}" | python3 -c 'import json,sys; print(json.loads(sys.stdin.read() or "{}").get("version",""))' 2>/dev/null || true)"
+  HEALTH_OK="$(printf '%s' "${HEALTH_BODY}" | python3 -c 'import json,sys; print(bool(json.loads(sys.stdin.read() or "{}").get("ok")))' 2>/dev/null || true)"
+  READINESS_OK="$(printf '%s' "${READINESS_BODY}" | python3 -c 'import json,sys; print(bool(json.loads(sys.stdin.read() or "{}").get("ok")))' 2>/dev/null || true)"
 
-  if [ "${HEALTH_BODY}" = '{"ok":true}' ] && [ "${VERSION_VALUE}" = "${APP_VERSION}" ]; then
+  if [ "${HEALTH_OK}" = "True" ] && [ "${READINESS_OK}" = "True" ] && [ "${VERSION_VALUE}" = "${APP_VERSION}" ]; then
     echo "Readiness OK on attempt ${attempt}/${READINESS_MAX_ATTEMPTS}"
     break
   fi
@@ -91,12 +95,13 @@ for attempt in $(seq 1 "${READINESS_MAX_ATTEMPTS}"); do
   if [ "${attempt}" -eq "${READINESS_MAX_ATTEMPTS}" ]; then
     echo "ERROR: app readiness failed."
     echo "Last /health: ${HEALTH_BODY:-<empty>}"
+    echo "Last /readiness: ${READINESS_BODY:-<empty>}"
     echo "Last /version: ${VERSION_BODY:-<empty>}"
     docker compose ps
     exit 1
   fi
 
-  echo "Waiting readiness (${attempt}/${READINESS_MAX_ATTEMPTS}) sleep=${READINESS_SLEEP_SEC}s health='${HEALTH_BODY:-<empty>}' version='${VERSION_VALUE:-<empty>}'"
+  echo "Waiting readiness (${attempt}/${READINESS_MAX_ATTEMPTS}) sleep=${READINESS_SLEEP_SEC}s health_ok='${HEALTH_OK:-<empty>}' readiness_ok='${READINESS_OK:-<empty>}' version='${VERSION_VALUE:-<empty>}'"
   sleep "${READINESS_SLEEP_SEC}"
   if [ "${READINESS_SLEEP_SEC}" -lt 10 ]; then
     READINESS_SLEEP_SEC=$((READINESS_SLEEP_SEC + 1))
@@ -108,4 +113,5 @@ CONTAINER_STARTED_AT="$(docker inspect -f '{{.State.StartedAt}}' "${CONTAINER_ID
 
 echo "Container started at: ${CONTAINER_STARTED_AT}"
 echo "/health: ${HEALTH_BODY}"
+echo "/readiness: ${READINESS_BODY}"
 echo "/version: ${VERSION_BODY}"
