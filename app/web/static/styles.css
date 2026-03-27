@@ -282,10 +282,20 @@ pre {
 .tenders-table td {
   padding: 8px;
   vertical-align: middle;
+  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line);
 }
 
 .tenders-table th {
-  white-space: nowrap;
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  line-height: 1.2;
+}
+
+.tenders-table th:last-child,
+.tenders-table td:last-child {
+  border-right: none;
 }
 
 .col-title {
@@ -328,7 +338,8 @@ pre {
   width: 140px;
 }
 
-.col-date {
+.col-deadline,
+.col-published {
   width: 120px;
 }
 
@@ -350,14 +361,12 @@ pre {
   white-space: nowrap;
   text-align: right;
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .nowrap-link {
   display: inline-block;
-  max-width: 100%;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .quick-filters {

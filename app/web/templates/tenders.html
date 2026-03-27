@@ -261,22 +261,38 @@
   {% if tenders %}
   <div class="table-wrapper">
   <table class="tenders-table">
+    <colgroup>
+      <col class="col-title" />
+      <col class="col-status" />
+      <col class="col-source" />
+      <col class="col-region" />
+      <col class="col-place" />
+      <col class="col-customer" />
+      <col class="col-relevance" />
+      <col class="col-category" />
+      <col class="col-recommendation" />
+      <col class="col-priority" />
+      <col class="col-deadline" />
+      <col class="col-published" />
+      <col class="col-nmck" />
+      <col class="col-link" />
+    </colgroup>
     <thead>
       <tr>
-        <th class="col-title">Название</th>
-        <th class="col-status">Статус</th>
-        <th class="col-source">Источник / Внешний ID</th>
-        <th class="col-region">Регион</th>
-        <th class="col-place">Место</th>
-        <th class="col-customer">Заказчик</th>
-        <th class="col-relevance">Релевантность</th>
-        <th class="col-category">Категория</th>
-        <th class="col-recommendation">Рекомендация</th>
-        <th class="col-priority">Приоритет</th>
-        <th class="col-date">Дедлайн</th>
-        <th class="col-date">Публикация</th>
-        <th class="col-nmck">НМЦК</th>
-        <th class="col-link">Ссылка</th>
+        <th>Название</th>
+        <th>Статус</th>
+        <th>Источник / Внешний ID</th>
+        <th>Регион</th>
+        <th>Место</th>
+        <th>Заказчик</th>
+        <th>Релевантность</th>
+        <th>Категория</th>
+        <th>Рекомендация</th>
+        <th>Приоритет</th>
+        <th>Дедлайн</th>
+        <th>Публикация</th>
+        <th>НМЦК</th>
+        <th>Ссылка</th>
       </tr>
     </thead>
     <tbody>
@@ -344,8 +360,8 @@
             —
           {% endif %}
         </td>
-        <td class="col-date">{{ tender.submission_deadline | ru_dt }}</td>
-        <td class="col-date">{{ tender.published_at | ru_dt }}</td>
+        <td class="col-deadline">{{ tender.submission_deadline | ru_dt }}</td>
+        <td class="col-published">{{ tender.published_at | ru_dt }}</td>
         <td class="money-cell col-nmck">{{ tender.nmck | ru_money("RUB") }}</td>
         <td class="col-link">
           {% if tender.source_url %}
