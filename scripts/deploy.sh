@@ -16,9 +16,11 @@ git pull --ff-only
 APP_VERSION="$(git rev-parse --short HEAD)"
 APP_IMAGE_TAG="sha-${APP_VERSION}"
 export APP_IMAGE_TAG
+DEPLOY_BASE_URL="${DEPLOY_BASE_URL:-http://127.0.0.1:${APP_EXTERNAL_PORT:-8000}}"
 
 echo "Deploy commit: ${APP_VERSION}"
 echo "Expected image tag: ${APP_IMAGE_TAG}"
+echo "Readiness base URL: ${DEPLOY_BASE_URL}"
 
 # Wait for immutable image tag to appear in GHCR.
 PULL_MAX_ATTEMPTS=12
@@ -80,9 +82,9 @@ HEALTH_BODY=""
 READINESS_BODY=""
 VERSION_BODY=""
 for attempt in $(seq 1 "${READINESS_MAX_ATTEMPTS}"); do
-  HEALTH_BODY="$(curl -fsS --max-time 5 http://127.0.0.1:8000/health 2>/dev/null || true)"
-  READINESS_BODY="$(curl -fsS --max-time 5 http://127.0.0.1:8000/readiness 2>/dev/null || true)"
-  VERSION_BODY="$(curl -fsS --max-time 5 http://127.0.0.1:8000/version 2>/dev/null || true)"
+  HEALTH_BODY="$(curl -fsS --max-time 5 "${DEPLOY_BASE_URL}/health" 2>/dev/null || true)"
+  READINESS_BODY="$(curl -fsS --max-time 5 "${DEPLOY_BASE_URL}/readiness" 2>/dev/null || true)"
+  VERSION_BODY="$(curl -fsS --max-time 5 "${DEPLOY_BASE_URL}/version" 2>/dev/null || true)"
   VERSION_VALUE="$(printf '%s' "${VERSION_BODY}" | python3 -c 'import json,sys; print(json.loads(sys.stdin.read() or "{}").get("version",""))' 2>/dev/null || true)"
   HEALTH_OK="$(printf '%s' "${HEALTH_BODY}" | python3 -c 'import json,sys; print(bool(json.loads(sys.stdin.read() or "{}").get("ok")))' 2>/dev/null || true)"
   READINESS_OK="$(printf '%s' "${READINESS_BODY}" | python3 -c 'import json,sys; print(bool(json.loads(sys.stdin.read() or "{}").get("ok")))' 2>/dev/null || true)"
