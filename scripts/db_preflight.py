@@ -29,8 +29,8 @@ def main() -> int:
         return fail("DATABASE_URL is empty")
     dsn_sync = dsn_sync.replace("postgresql+psycopg2://", "postgresql://")
     dsn_sync = dsn_sync.replace("postgresql+asyncpg://", "postgresql://")
-    dsn_async = dsn_async.replace("postgresql+psycopg2://", "postgresql+asyncpg://")
-    dsn_async = dsn_async.replace("postgresql://", "postgresql+asyncpg://")
+    dsn_async = dsn_async.replace("postgresql+psycopg2://", "postgresql://")
+    dsn_async = dsn_async.replace("postgresql+asyncpg://", "postgresql://")
 
     attempts = int(os.getenv("DB_PREFLIGHT_ATTEMPTS", "5") or "5")
     sleep_sec = float(os.getenv("DB_PREFLIGHT_SLEEP_SEC", "2") or "2")
