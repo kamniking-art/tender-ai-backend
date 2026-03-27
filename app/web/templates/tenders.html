@@ -105,8 +105,8 @@
     <a href="/web/tenders?fresh_only=true&priority_label=high">Высокий приоритет</a>
   </div>
   <form method="get" action="/web/tenders" class="filters" id="tenders-filters-form">
-    <label>Поиск
-      <input type="text" name="q" value="{{ filters.q }}" placeholder="номер/название/заказчик/регион/место" />
+    <label>Поиск в списке
+      <input type="text" name="search" value="{{ filters.search }}" placeholder="название / заказчик / место" />
     </label>
 
     <label>Статус тендера
@@ -251,7 +251,7 @@
       </select>
     </label>
 
-    <button type="submit">Применить</button>
+    <button type="submit">Искать</button>
   </form>
 </section>
 

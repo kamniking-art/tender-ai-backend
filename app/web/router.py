@@ -1136,7 +1136,7 @@ async def tenders_page(
 
     total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
     base_filters = {
-        "q": query_text,
+        "search": query_text,
         "status": status_filter or "",
         "analysis_status": analysis_status or "",
         "decision": decision_filter or "",
