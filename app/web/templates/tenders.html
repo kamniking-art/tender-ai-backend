@@ -164,11 +164,11 @@
       <input type="text" name="region" value="{{ filters.region }}" placeholder="Санкт-Петербург" />
     </label>
 
-    <label>Цена от
+    <label>Сумма от
       <input type="number" name="price_min" min="0" step="0.01" value="{{ filters.price_min }}" />
     </label>
 
-    <label>Цена до
+    <label>Сумма до
       <input type="number" name="price_max" min="0" step="0.01" value="{{ filters.price_max }}" />
     </label>
 
@@ -261,7 +261,12 @@
 
     <label>Сортировка
       <select name="sort_by">
-        <option value="">Дедлайн (по умолчанию)</option>
+        <option value="published_desc" {% if filters.sort_by == "published_desc" %}selected{% endif %}>Дата публикации: новые сначала</option>
+        <option value="published_asc" {% if filters.sort_by == "published_asc" %}selected{% endif %}>Дата публикации: старые сначала</option>
+        <option value="deadline_asc" {% if filters.sort_by == "deadline_asc" %}selected{% endif %}>Дедлайн: ближайшие сначала</option>
+        <option value="deadline_desc" {% if filters.sort_by == "deadline_desc" %}selected{% endif %}>Дедлайн: поздние сначала</option>
+        <option value="nmck_desc" {% if filters.sort_by == "nmck_desc" %}selected{% endif %}>Сумма: по убыванию</option>
+        <option value="nmck_asc" {% if filters.sort_by == "nmck_asc" %}selected{% endif %}>Сумма: по возрастанию</option>
         <option value="priority_desc" {% if filters.sort_by == "priority_desc" %}selected{% endif %}>Приоритет (сначала срочные)</option>
       </select>
     </label>

@@ -11,7 +11,7 @@ from alembic.script import ScriptDirectory
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import Integer, and_, cast, func, or_, select
+from sqlalchemy import Integer, and_, case, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai_extraction.interfaces import ExtractionProviderError
@@ -1217,13 +1217,16 @@ async def tenders_page(
         stmt = stmt.where(region_cond)
         count_stmt = count_stmt.where(region_cond)
 
+    valid_nmck_expr = and_(Tender.nmck.is_not(None), Tender.nmck > 0, Tender.nmck <= MAX_UI_NMCK)
+    sane_nmck_sort_expr = case((valid_nmck_expr, Tender.nmck), else_=None)
+
     if parsed_price_min is not None:
-        stmt = stmt.where(Tender.nmck >= parsed_price_min)
-        count_stmt = count_stmt.where(Tender.nmck >= parsed_price_min)
+        stmt = stmt.where(valid_nmck_expr, Tender.nmck >= parsed_price_min)
+        count_stmt = count_stmt.where(valid_nmck_expr, Tender.nmck >= parsed_price_min)
 
     if parsed_price_max is not None:
-        stmt = stmt.where(Tender.nmck <= parsed_price_max)
-        count_stmt = count_stmt.where(Tender.nmck <= parsed_price_max)
+        stmt = stmt.where(valid_nmck_expr, Tender.nmck <= parsed_price_max)
+        count_stmt = count_stmt.where(valid_nmck_expr, Tender.nmck <= parsed_price_max)
 
     if analysis_status:
         if analysis_status == "none":
@@ -1301,14 +1304,26 @@ async def tenders_page(
         page = max(1, ((total - 1) // page_size) + 1)
         offset = (page - 1) * page_size
 
-    if sort_by == "priority_desc":
+    sort_mode = (sort_by or "published_desc").strip().lower()
+    if sort_mode == "published_asc":
+        stmt = stmt.order_by(Tender.published_at.asc().nulls_last(), Tender.created_at.asc())
+    elif sort_mode == "deadline_asc":
+        stmt = stmt.order_by(Tender.submission_deadline.asc().nulls_last(), Tender.published_at.desc().nulls_last())
+    elif sort_mode == "deadline_desc":
+        stmt = stmt.order_by(Tender.submission_deadline.desc().nulls_last(), Tender.published_at.desc().nulls_last())
+    elif sort_mode == "nmck_desc":
+        stmt = stmt.order_by(sane_nmck_sort_expr.desc().nulls_last(), Tender.published_at.desc().nulls_last())
+    elif sort_mode == "nmck_asc":
+        stmt = stmt.order_by(sane_nmck_sort_expr.asc().nulls_last(), Tender.published_at.desc().nulls_last())
+    elif sort_mode == "priority_desc":
         stmt = stmt.order_by(
             TenderDecision.priority_score.desc().nulls_last(),
             Tender.submission_deadline.asc().nulls_last(),
             Tender.created_at.desc(),
         )
-    else:
-        stmt = stmt.order_by(Tender.submission_deadline.asc().nulls_last(), Tender.created_at.desc())
+    else:  # published_desc
+        sort_mode = "published_desc"
+        stmt = stmt.order_by(Tender.published_at.desc().nulls_last(), Tender.created_at.desc())
     stmt = stmt.offset(offset).limit(page_size)
     tenders = list((await db.scalars(stmt)).all())
 
@@ -1338,7 +1353,7 @@ async def tenders_page(
         "created_from": created_from or "",
         "created_to": created_to or "",
         "page_size": page_size,
-        "sort_by": sort_by or "",
+        "sort_by": sort_mode,
     }
 
     prev_qs = _query_string({**base_filters, "page": page - 1}) if page > 1 else ""
