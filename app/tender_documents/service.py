@@ -255,6 +255,8 @@ _ATTACHMENT_BLOCK_KEYWORDS = (
 )
 _SECTION_END_RE = re.compile(r"<h[1-4]\b|<section\b|<script\b|<footer\b", re.IGNORECASE)
 _TITLE_RE = re.compile(r'title=["\']([^"\']+)["\']', re.IGNORECASE)
+_CONTENT_DISPOSITION_FILENAME_RE = re.compile(r'filename\s*=\s*"?([^";]+)"?', re.IGNORECASE)
+_CONTENT_DISPOSITION_FILENAME_STAR_RE = re.compile(r"filename\*\s*=\s*([^;]+)", re.IGNORECASE)
 _SOURCE_DOC_UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
@@ -299,6 +301,35 @@ def _guess_filename_from_url(url: str, index: int) -> str:
     if not file_name or "." not in file_name:
         file_name = f"source_doc_{index}.bin"
     return sanitize_filename(file_name[:200])
+
+
+def _filename_from_content_disposition(value: str | None) -> str | None:
+    if not value:
+        return None
+    raw = value.strip()
+    star_match = _CONTENT_DISPOSITION_FILENAME_STAR_RE.search(raw)
+    if star_match:
+        encoded = star_match.group(1).strip().strip('"')
+        if "''" in encoded:
+            encoded = encoded.split("''", 1)[1]
+        decoded = unquote(encoded)
+        safe = sanitize_filename(decoded)
+        if safe:
+            return safe
+    simple_match = _CONTENT_DISPOSITION_FILENAME_RE.search(raw)
+    if simple_match:
+        decoded = unquote(simple_match.group(1).strip())
+        safe = sanitize_filename(decoded)
+        if safe:
+            return safe
+    return None
+
+
+def _guess_filename_from_response(resp: httpx.Response, link: str, index: int) -> str:
+    from_cd = _filename_from_content_disposition(resp.headers.get("content-disposition"))
+    if from_cd:
+        return from_cd
+    return _guess_filename_from_url(link, index)
 
 
 def _normalize_link(base_url: str, link: str) -> str | None:
@@ -620,29 +651,66 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
             if is_blacklisted_source_document(source_link=link):
                 errors.append(f"{link}: skipped_blacklist")
                 continue
-            try:
-                await _paced_delay()
-                resp = await client.get(
-                    link,
-                    headers={"User-Agent": _SOURCE_DOC_UA[idx % len(_SOURCE_DOC_UA)]},
-                )
-            except httpx.HTTPError as exc:
-                errors.append(f"{link}: {exc.__class__.__name__}")
-                continue
-            if resp.status_code >= 400 or not resp.content:
-                errors.append(f"{link}: http_{resp.status_code}")
+            current_link = link
+            visited_links: set[str] = set()
+            resp: httpx.Response | None = None
+            # Some EIS links (file.html?uid=...) can return HTML shim pages first.
+            for _ in range(3):
+                visited_links.add(current_link)
+                try:
+                    await _paced_delay()
+                    resp = await client.get(
+                        current_link,
+                        headers={"User-Agent": _SOURCE_DOC_UA[idx % len(_SOURCE_DOC_UA)]},
+                    )
+                except httpx.HTTPError as exc:
+                    errors.append(f"{current_link}: {exc.__class__.__name__}")
+                    resp = None
+                    break
+                if resp.status_code >= 400 or not resp.content:
+                    errors.append(f"{current_link}: http_{resp.status_code}")
+                    resp = None
+                    break
+                content_type = (resp.headers.get("content-type") or "").lower()
+                disposition = (resp.headers.get("content-disposition") or "").lower()
+                if "text/html" in content_type and "attachment" not in disposition:
+                    html = resp.text or ""
+                    html_links, _ = _extract_candidate_links(str(resp.url), html)
+                    next_link = next(
+                        (
+                            candidate
+                            for candidate in html_links
+                            if candidate not in visited_links and not is_blacklisted_source_document(source_link=candidate)
+                        ),
+                        None,
+                    )
+                    if next_link:
+                        current_link = next_link
+                        continue
+                    errors.append(f"{current_link}: html_not_file")
+                    resp = None
+                    break
+                break
+            if resp is None:
                 continue
             if total_bytes + len(resp.content) > max_total_bytes:
                 break
-            file_name = _guess_filename_from_url(link, idx)
-            if is_blacklisted_source_document(source_link=link, file_name=file_name):
-                errors.append(f"{link}: skipped_blacklist_filename")
+            file_name = _guess_filename_from_response(resp, current_link, idx)
+            if is_blacklisted_source_document(source_link=current_link, file_name=file_name):
+                errors.append(f"{current_link}: skipped_blacklist_filename")
                 continue
             signature = (file_name.lower(), len(resp.content))
             if signature in seen_download_signatures:
                 continue
             content_type = resp.headers.get("content-type") or mimetypes.guess_type(file_name)[0]
-            files.append(SourceFetchedFile(file_name=file_name, content=resp.content, content_type=content_type, source_link=link))
+            files.append(
+                SourceFetchedFile(
+                    file_name=file_name,
+                    content=resp.content,
+                    content_type=content_type,
+                    source_link=current_link,
+                )
+            )
             seen_download_signatures.add(signature)
             total_bytes += len(resp.content)
 
