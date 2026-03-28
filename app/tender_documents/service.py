@@ -6,7 +6,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import unquote, urljoin, urlparse
+from urllib.parse import unquote, urljoin, urlparse, urlunparse
 from uuid import UUID
 
 import httpx
@@ -432,13 +432,20 @@ def extract_attachments_from_documents_page(html_text: str, base_url: str = "") 
 def _guess_related_document_pages(source_url: str) -> list[str]:
     parsed = urlparse(source_url)
     path = parsed.path or ""
+    query = parsed.query or ""
+    fragment = parsed.fragment or ""
+
+    def with_same_query(url: str) -> str:
+        p = urlparse(url)
+        return urlunparse((p.scheme, p.netloc, p.path, p.params, query, fragment))
+
     candidates = [source_url]
     if "common-info" in path:
-        candidates.append(source_url.replace("common-info", "documents-info"))
-        candidates.append(source_url.replace("common-info", "docs"))
-        candidates.append(source_url.replace("common-info", "attachments"))
-    candidates.append(urljoin(source_url, "./documents.html"))
-    candidates.append(urljoin(source_url, "./docs.html"))
+        candidates.append(with_same_query(source_url.replace("common-info", "documents-info")))
+        candidates.append(with_same_query(source_url.replace("common-info", "docs")))
+        candidates.append(with_same_query(source_url.replace("common-info", "attachments")))
+    candidates.append(with_same_query(urljoin(source_url, "./documents.html")))
+    candidates.append(with_same_query(urljoin(source_url, "./docs.html")))
     return list(dict.fromkeys(candidates))
 
 
