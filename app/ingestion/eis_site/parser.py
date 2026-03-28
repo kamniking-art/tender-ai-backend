@@ -3,7 +3,7 @@ from __future__ import annotations
 import html
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from html.parser import HTMLParser
 from urllib.parse import urljoin
@@ -189,12 +189,29 @@ def parse_search_page(html_text: str, base_url: str) -> ParseResult:
             )
 
             # fallback extraction if labels are missing in current layout
+            parsed_dates: list[datetime] = []
             if not published_at or not deadline:
                 dates = _DATE_RE.findall(block)
-                if dates and not published_at:
-                    published_at = _parse_datetime(" ".join(x for x in dates[0] if x))
-                if len(dates) > 1 and not deadline:
-                    deadline = _parse_datetime(" ".join(x for x in dates[1] if x))
+                parsed_dates = [
+                    dt
+                    for dt in (
+                        _parse_datetime(" ".join(x for x in item if x))
+                        for item in dates
+                    )
+                    if dt is not None
+                ]
+                if parsed_dates and not published_at:
+                    published_at = min(parsed_dates)
+                if len(parsed_dates) > 1 and not deadline:
+                    deadline = max(parsed_dates)
+
+            # sanity guards:
+            # - publication should not be later than deadline
+            # - clearly future publication dates are usually parsing noise on search cards
+            if published_at and deadline and published_at > deadline:
+                published_at, deadline = deadline, published_at
+            if published_at and published_at > datetime.now(UTC) + timedelta(days=1):
+                published_at = None
             candidates.append(
                 EISSiteCandidate(
                     external_id=external_id,

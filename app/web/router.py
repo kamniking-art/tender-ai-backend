@@ -1166,6 +1166,7 @@ async def tenders_page(
 
     query_text = (q or search or "").strip()
     logger.info("web.tenders search query_text=%r q=%r search=%r", query_text, q, search)
+    now_utc = datetime.now(UTC)
 
     stmt = (
         select(Tender)
@@ -1194,9 +1195,9 @@ async def tenders_page(
 
     fresh_enabled = _parse_bool(fresh_only, default=True)
     if fresh_enabled:
-        cutoff = datetime.now(UTC) - timedelta(days=60)
-        stmt = stmt.where(Tender.published_at.is_not(None), Tender.published_at >= cutoff)
-        count_stmt = count_stmt.where(Tender.published_at.is_not(None), Tender.published_at >= cutoff)
+        cutoff = now_utc - timedelta(days=60)
+        stmt = stmt.where(Tender.published_at.is_not(None), Tender.published_at >= cutoff, Tender.published_at <= now_utc)
+        count_stmt = count_stmt.where(Tender.published_at.is_not(None), Tender.published_at >= cutoff, Tender.published_at <= now_utc)
 
     if status_filter:
         stmt = stmt.where(Tender.status == status_filter)
@@ -1254,8 +1255,8 @@ async def tenders_page(
         stmt = stmt.where(Tender.submission_deadline <= parsed_deadline_to)
         count_stmt = count_stmt.where(Tender.submission_deadline <= parsed_deadline_to)
     if parsed_published_from:
-        stmt = stmt.where(Tender.published_at >= parsed_published_from)
-        count_stmt = count_stmt.where(Tender.published_at >= parsed_published_from)
+        stmt = stmt.where(Tender.published_at >= parsed_published_from, Tender.published_at <= now_utc)
+        count_stmt = count_stmt.where(Tender.published_at >= parsed_published_from, Tender.published_at <= now_utc)
     if parsed_published_to:
         stmt = stmt.where(Tender.published_at <= parsed_published_to)
         count_stmt = count_stmt.where(Tender.published_at <= parsed_published_to)
@@ -1359,7 +1360,6 @@ async def tenders_page(
         "sort_by": sort_mode,
     }
 
-    now_utc = datetime.now(UTC)
     urgent_deadline_from = now_utc.replace(microsecond=0).isoformat().replace("+00:00", "Z")
     urgent_deadline_to = (now_utc + timedelta(days=14)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     new_from = (now_utc - timedelta(days=3)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
