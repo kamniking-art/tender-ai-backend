@@ -19,14 +19,66 @@
 {% endif %}
 
 <section class="card">
-  <h2>Шаги по тендеру</h2>
+  <h2>Кратко по тендеру</h2>
+  <div class="mvp-summary-grid">
+    <div class="mvp-summary-item">
+      <div class="mvp-summary-label">Статус пайплайна</div>
+      <div class="mvp-summary-value">{{ mvp_summary.pipeline_status }}</div>
+    </div>
+    <div class="mvp-summary-item">
+      <div class="mvp-summary-label">Рекомендация</div>
+      <div class="mvp-summary-value">{{ mvp_summary.recommendation | decision_status_ru }}</div>
+    </div>
+    <div class="mvp-summary-item">
+      <div class="mvp-summary-label">Следующее действие</div>
+      <div class="mvp-summary-value">{{ mvp_summary.next_action }}</div>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Что произошло</h2>
+  <ul class="mvp-list">
+    {% for step in happened_steps %}
+    <li><strong>{{ step.name }}:</strong> {{ step.state }}</li>
+    {% endfor %}
+  </ul>
+  <details>
+    <summary>Детальные шаги пайплайна</summary>
   <ol>
     {% for step in tender_flow_steps %}
     <li><strong>{{ step.name }}:</strong> {{ step.state }}</li>
     {% endfor %}
   </ol>
+  </details>
   {% if next_step %}
   <p><strong>Следующий шаг:</strong> {{ next_step }}</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Почему такая рекомендация</h2>
+  {% if recommendation_factors %}
+  <ul class="mvp-list">
+    {% for item in recommendation_factors %}
+    <li>{{ item }}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>Недостаточно данных для объяснения рекомендации.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Что делать дальше</h2>
+  {% if next_action_items %}
+  <ul class="mvp-list">
+    {% for action in next_action_items %}
+    <li>{{ action }}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>Следующее действие не определено.</p>
   {% endif %}
 </section>
 

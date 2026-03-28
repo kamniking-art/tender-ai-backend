@@ -389,3 +389,36 @@ pre {
   gap: 10px;
   margin-bottom: 12px;
 }
+
+.mvp-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.mvp-summary-item {
+  border: 1px solid var(--line);
+  background: #f7fbff;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.mvp-summary-label {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.mvp-summary-value {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.mvp-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}

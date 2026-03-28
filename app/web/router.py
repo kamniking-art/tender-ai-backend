@@ -349,6 +349,141 @@ def _build_detail_flow(
     return steps, actions, reasons, next_step
 
 
+def _pipeline_status_label(
+    *,
+    documents_state: str,
+    has_requirements: bool,
+    has_risk: bool,
+    has_recommendation: bool,
+    has_package: bool,
+) -> str:
+    if has_package:
+        return "Анализ завершён"
+    if has_recommendation and has_risk and has_requirements:
+        return "Анализ частичный"
+    if documents_state in {"не найдены", "только служебные файлы ЕИС"}:
+        return "Нет входных документов"
+    return "В процессе"
+
+
+def _what_happened_steps(
+    *,
+    valid_documents_count: int,
+    documents_total_count: int,
+    has_requirements: bool,
+    has_recommendation: bool,
+    has_package: bool,
+) -> tuple[list[dict[str, str]], str]:
+    if valid_documents_count > 0:
+        documents_state = "найдены"
+    elif documents_total_count > 0:
+        documents_state = "только служебные файлы ЕИС"
+    else:
+        documents_state = "не найдены"
+
+    requirements_state = "извлечены" if has_requirements else ("частично" if documents_total_count > 0 else "нет")
+    analysis_state = "готов" if has_recommendation else ("частичный" if has_requirements else "частичный")
+    package_state = "доступен" if has_package else "недоступен"
+
+    steps = [
+        {"name": "Документы", "state": documents_state},
+        {"name": "Требования", "state": requirements_state},
+        {"name": "Анализ", "state": analysis_state},
+        {"name": "Пакет", "state": package_state},
+    ]
+    return steps, documents_state
+
+
+def _recommendation_factors(
+    *,
+    recommendation: str | None,
+    recommendation_reason: str | None,
+    risk_score: int | None,
+    relevance_meta: dict[str, object] | None,
+    documents_state: str,
+    has_requirements: bool,
+) -> list[str]:
+    factors: list[str] = []
+    recommendation_norm = (recommendation or "none").lower()
+
+    if documents_state == "только служебные файлы ЕИС":
+        factors.append("Найдены только служебные файлы ЕИС, документов тендера нет")
+    elif documents_state == "не найдены":
+        factors.append("Документы тендера отсутствуют")
+    else:
+        factors.append("Документы тендера доступны")
+
+    if has_requirements:
+        factors.append("Требования извлечены и учтены в оценке")
+    else:
+        factors.append("Требования не извлечены, анализ ограничен карточкой закупки")
+
+    score = relevance_meta.get("score") if relevance_meta else None
+    if isinstance(score, (int, float)):
+        if score >= 70:
+            factors.append("Профиль закупки хорошо совпадает с целевой нишей")
+        elif score >= 45:
+            factors.append("Совпадение с нишей частичное, нужен ручной просмотр")
+        else:
+            factors.append("Релевантность низкая")
+
+    if risk_score is None:
+        factors.append("Риск не рассчитан")
+    elif risk_score >= 60:
+        factors.append("Риск повышен")
+    elif risk_score >= 35:
+        factors.append("Риск умеренный")
+    else:
+        factors.append("Риск низкий")
+
+    if recommendation_norm in {"go", "strong_go"} and documents_state == "найдены":
+        factors.append("Есть достаточно данных для перехода к подготовке пакета")
+
+    if recommendation_reason:
+        factors.append(recommendation_reason.strip())
+
+    compact: list[str] = []
+    for item in factors:
+        if item and item not in compact:
+            compact.append(item)
+        if len(compact) >= 5:
+            break
+    return compact
+
+
+def _next_action_items(
+    *,
+    documents_state: str,
+    recommendation: str | None,
+    has_source_link: bool,
+    can_package: bool,
+    next_step: str | None,
+) -> list[str]:
+    recommendation_norm = (recommendation or "none").lower()
+    actions: list[str] = []
+
+    if documents_state in {"не найдены", "только служебные файлы ЕИС"}:
+        if has_source_link:
+            actions.append("Открыть ЕИС и проверить карточку закупки")
+        actions.append("Скачать документы вручную")
+        actions.append("Повторить анализ")
+    elif recommendation_norm in {"review", "weak", "unsure"}:
+        actions.append("Проверить требования вручную")
+        actions.append("Уточнить объём и материалы")
+        actions.append("Пересчитать рекомендацию после уточнений")
+    elif recommendation_norm in {"go", "strong_go"}:
+        if can_package:
+            actions.append("Сформировать пакет документов")
+        actions.append("Проверить сроки и подготовить подачу")
+    elif next_step:
+        actions.append(next_step)
+
+    if next_step and next_step not in actions:
+        actions.append(next_step)
+
+    return actions[:4]
+
+
 def _friendly_extract_error(exc: Exception) -> tuple[str, str]:
     text = str(exc)
     normalized = text.lower()
@@ -1281,6 +1416,21 @@ async def tender_detail_page(
     risk_score = _extract_risk_score(analysis, decision)
     relevance_meta = _extract_relevance(decision)
     risk_flags_top = _top_risk_flags(analysis)
+
+    recommendation_value = decision.recommendation if decision else None
+    analysis_status = analysis.status if analysis else "none"
+    requirements = analysis.requirements if analysis and isinstance(analysis.requirements, dict) else {}
+    has_requirements = bool(analysis and (requirements or analysis_status in {"ready", "approved"}))
+    has_risk = risk_score is not None
+    has_recommendation = recommendation_value in {"strong_go", "go", "review", "weak", "no_go", "unsure"}
+    has_package = bool(package and package.files)
+    happened_steps, documents_state = _what_happened_steps(
+        valid_documents_count=len(valid_documents),
+        documents_total_count=len(documents),
+        has_requirements=has_requirements,
+        has_recommendation=has_recommendation,
+        has_package=has_package,
+    )
     tender_flow_steps, action_availability, disabled_reasons, next_step = _build_detail_flow(
         documents_count=len(documents),
         valid_documents_count=len(valid_documents),
@@ -1290,6 +1440,28 @@ async def tender_detail_page(
         finance=finance,
         decision=decision,
         package=package,
+    )
+    recommendation_factors = _recommendation_factors(
+        recommendation=recommendation_value,
+        recommendation_reason=decision.recommendation_reason if decision else None,
+        risk_score=risk_score,
+        relevance_meta=relevance_meta,
+        documents_state=documents_state,
+        has_requirements=has_requirements,
+    )
+    next_action_items = _next_action_items(
+        documents_state=documents_state,
+        recommendation=recommendation_value,
+        has_source_link=bool(tender.source_url),
+        can_package=action_availability.get("can_package", False),
+        next_step=next_step,
+    )
+    pipeline_status = _pipeline_status_label(
+        documents_state=documents_state,
+        has_requirements=has_requirements,
+        has_risk=has_risk,
+        has_recommendation=has_recommendation,
+        has_package=has_package,
     )
 
     return templates.TemplateResponse(
@@ -1328,6 +1500,15 @@ async def tender_detail_page(
             action_availability=action_availability,
             disabled_reasons=disabled_reasons,
             next_step=next_step,
+            happened_steps=happened_steps,
+            documents_state=documents_state,
+            recommendation_factors=recommendation_factors,
+            next_action_items=next_action_items,
+            mvp_summary={
+                "pipeline_status": pipeline_status,
+                "recommendation": recommendation_value,
+                "next_action": next_action_items[0] if next_action_items else next_step or "-",
+            },
             action_result={
                 "action": _translate_action_name(action),
                 "status": "успешно" if action_status == "ok" else ("ошибка" if action_status == "error" else "-"),
