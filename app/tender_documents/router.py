@@ -168,10 +168,9 @@ async def analyze_tender_from_source(
 
 @router.post("/tenders/pipeline/process-latest")
 async def process_latest_tenders(
-    mode: str = Query(default="documents", pattern="^(metadata|documents|full)$"),
+    mode: str = Query(default="metadata", pattern="^(metadata|documents|full)$"),
     preview: bool = Query(default=False),
-    fresh_days: int = Query(default=7, ge=1, le=30),
-    limit: int | None = Query(default=None, ge=1, le=200),
+    limit: int | None = Query(default=150, ge=1, le=200),
     parallel: int | None = Query(default=None, ge=1, le=10),
     timeout_seconds: int = Query(default=25, ge=5, le=60),
     current_user: User = Depends(get_current_user),
@@ -181,7 +180,6 @@ async def process_latest_tenders(
         user_id=current_user.id,
         mode=mode,
         preview=preview,
-        fresh_days=fresh_days,
         limit=limit,
         parallel=parallel,
         timeout_seconds=timeout_seconds,
