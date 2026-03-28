@@ -1,4 +1,5 @@
 import asyncio
+import html
 import mimetypes
 import random
 import re
@@ -287,7 +288,15 @@ _SOURCE_DOC_FILENAME_BLACKLIST = {
     "zakupki-traffic.xlsx",
 }
 _NMCK_LABEL_RE = re.compile(
-    r"(?:начальная(?:\s*\(максимальная\))?\s*цена(?:\s*контракта)?|нмцк)[^0-9]{0,80}([0-9][0-9\\s.,]{2,})",
+    r"(?:начальная(?:\s*\(максимальная\))?\s*цена(?:\s*контракта)?|нмцк)",
+    re.IGNORECASE,
+)
+_MONEY_WITH_CURRENCY_RE = re.compile(
+    r"([0-9]{1,3}(?:[\\s\u00a0\u202f][0-9]{3})+(?:[.,][0-9]{2})?|[0-9]+(?:[.,][0-9]{2})?)\\s*(?:₽|руб(?:\\.|ля|лей)?|rub)",
+    re.IGNORECASE,
+)
+_MONEY_GENERIC_RE = re.compile(
+    r"([0-9]{1,3}(?:[\\s\u00a0\u202f][0-9]{3})+(?:[.,][0-9]{2})?|[0-9]+(?:[.,][0-9]{2})?)",
     re.IGNORECASE,
 )
 _MAX_VALID_NMCK = Decimal("1000000000000")
@@ -396,15 +405,28 @@ def _parse_nmck_value(raw_value: str | None) -> Decimal | None:
 
 
 def _extract_nmck_from_html(html_text: str) -> tuple[Decimal | None, str | None, str | None]:
-    plain_text = _clean_visible_text(html_text)
-    match = _NMCK_LABEL_RE.search(plain_text)
-    if not match:
+    plain_text = _clean_visible_text(html.unescape(html_text)).replace("\xa0", " ").replace("\u202f", " ")
+    label_matches = list(_NMCK_LABEL_RE.finditer(plain_text))
+    if not label_matches:
         return None, None, None
-    raw = (match.group(1) or "").strip()
-    nmck = _parse_nmck_value(raw)
-    if nmck is None and raw:
-        return None, raw, "invalid_nmck_candidate"
-    return nmck, raw, None
+
+    last_invalid_raw: str | None = None
+    for label_match in label_matches:
+        window = plain_text[label_match.end() : label_match.end() + 220]
+        if not window:
+            continue
+        money_match = _MONEY_WITH_CURRENCY_RE.search(window) or _MONEY_GENERIC_RE.search(window)
+        if not money_match:
+            continue
+        raw = (money_match.group(1) or "").strip()
+        nmck = _parse_nmck_value(raw)
+        if nmck is not None:
+            return nmck, raw, None
+        last_invalid_raw = raw
+
+    if last_invalid_raw:
+        return None, last_invalid_raw, "invalid_nmck_candidate"
+    return None, None, None
 
 
 async def fetch_nmck_from_source_page(source_url: str) -> NmckFetchResult:
