@@ -89,6 +89,7 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description="Backfill/cleanup invalid NMCK values in tenders table.")
     parser.add_argument("--dry-run", action="store_true", help="Preview changes without committing.")
     parser.add_argument("--sample-limit", type=int, default=10, help="How many sample rows to include in report.")
+    parser.add_argument("--parallel", type=int, default=3, help="Parallel HTTP fetch workers for source_url reparsing.")
     args = parser.parse_args()
 
     report: dict[str, Any] = {
@@ -119,19 +120,35 @@ async def main() -> None:
         invalid_rows.sort(key=_nmck_sort_key, reverse=True)
         report["found_invalid_total"] = len(invalid_rows)
 
+        rows_with_source = [row for row in invalid_rows if row.source_url]
+        rows_without_source = [row for row in invalid_rows if not row.source_url]
+        report["group_a_with_source_url"] = len(rows_with_source)
+        report["group_b_without_source_url"] = len(rows_without_source)
+
+        unique_urls = sorted({str(row.source_url) for row in rows_with_source if row.source_url})
         fetch_cache: dict[str, Decimal | None] = {}
+
+        sem = asyncio.Semaphore(max(1, int(args.parallel)))
+
+        async def _fetch_one(url: str) -> tuple[str, Decimal | None]:
+            async with sem:
+                result = await fetch_nmck_from_source_page(url)
+                fetched = result.nmck
+                if fetched is not None and is_invalid_nmck(fetched):
+                    fetched = None
+                return url, fetched
+
+        if unique_urls:
+            for start in range(0, len(unique_urls), 100):
+                chunk = unique_urls[start : start + 100]
+                chunk_results = await asyncio.gather(*(_fetch_one(url) for url in chunk))
+                for url, fetched in chunk_results:
+                    fetch_cache[url] = fetched
 
         for row in invalid_rows:
             old_value = str(row.nmck) if row.nmck is not None else None
             if row.source_url:
-                report["group_a_with_source_url"] += 1
-                if row.source_url not in fetch_cache:
-                    result = await fetch_nmck_from_source_page(row.source_url)
-                    fetched = result.nmck
-                    if fetched is not None and is_invalid_nmck(fetched):
-                        fetched = None
-                    fetch_cache[row.source_url] = fetched
-                fetched_nmck = fetch_cache[row.source_url]
+                fetched_nmck = fetch_cache.get(str(row.source_url))
                 if fetched_nmck is not None:
                     row.nmck = fetched_nmck
                     report["reparsed_success"] += 1
@@ -161,7 +178,6 @@ async def main() -> None:
                             )
                         )
             else:
-                report["group_b_without_source_url"] += 1
                 row.nmck = None
                 report["nulled_no_source_url"] += 1
                 if len(samples) < args.sample_limit:
