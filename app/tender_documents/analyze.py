@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
@@ -362,15 +364,32 @@ async def process_latest_tenders_pipeline(
     *,
     company_id: UUID,
     user_id: UUID,
-    limit: int = 100,
-    parallel: int = 5,
+    mode: str = "documents",
+    preview: bool = False,
+    fresh_days: int = 7,
+    limit: int | None = None,
+    parallel: int | None = None,
     timeout_seconds: int = 25,
 ) -> dict[str, Any]:
-    """Mass processing: fetch documents (if missing) + backfill NMCK (if missing)."""
+    """Mass processing with practical modes:
+    - metadata: NMCK-only backfill
+    - documents: document fetch for fresh tenders only
+    - full: both
+    """
     now_started = time.monotonic()
-    effective_limit = max(1, min(int(limit), 200))
-    effective_parallel = max(1, min(int(parallel), 10))
+    normalized_mode = (mode or "documents").strip().lower()
+    if normalized_mode not in {"metadata", "documents", "full"}:
+        normalized_mode = "documents"
+
+    default_limit = 30 if normalized_mode == "documents" else 100
+    default_parallel = 2 if normalized_mode == "documents" else 5
+    effective_limit = max(1, min(int(limit if limit is not None else default_limit), 200))
+    effective_parallel = max(1, min(int(parallel if parallel is not None else default_parallel), 10))
     effective_timeout = max(5, min(int(timeout_seconds), 60))
+    effective_fresh_days = max(1, min(int(fresh_days), 30))
+    fetch_cutoff = datetime.now(timezone.utc) - timedelta(days=effective_fresh_days)
+    docs_enabled = normalized_mode in {"documents", "full"}
+    nmck_enabled = normalized_mode in {"metadata", "full"}
 
     async with AsyncSessionLocal() as seed_db:
         tender_ids = list(
@@ -389,17 +408,27 @@ async def process_latest_tenders_pipeline(
     stats: dict[str, int] = {
         "selected": len(tender_ids),
         "processed": 0,
+        "preview_candidates": 0,
+        "preview_doc_candidates": 0,
+        "preview_nmck_candidates": 0,
         "docs_downloaded_tenders": 0,
+        "docs_fetch_attempted": 0,
         "docs_skipped_existing": 0,
         "docs_errors": 0,
+        "timeout_count": 0,
+        "skipped_no_source_url": 0,
+        "skipped_old_tender": 0,
+        "skipped_has_docs": 0,
         "nmck_updated": 0,
         "nmck_skipped_existing": 0,
         "nmck_missing_after_check": 0,
         "errors": 0,
     }
     samples: list[dict[str, Any]] = []
+    total_fetch_ms = 0
 
     async def _process_one(tender_id: UUID) -> None:
+        nonlocal total_fetch_ms
         async with semaphore:
             item: dict[str, Any] = {"tender_id": str(tender_id)}
             try:
@@ -414,76 +443,106 @@ async def process_latest_tenders_pipeline(
                     item["external_id"] = tender.external_id
                     item["source_url"] = tender.source_url
                     item["title"] = tender.title
+                    item["published_at"] = (
+                        tender.published_at.isoformat() if tender.published_at is not None else None
+                    )
 
                     docs = await list_documents_for_tender(db, company_id=company_id, tender_id=tender_id)
                     valid_docs = [doc for doc in docs if _is_valid_tender_document_for_auto_analysis(doc)]
-                    docs_fetch_payload: dict[str, Any] | None = None
-                    if valid_docs:
-                        stats["docs_skipped_existing"] += 1
-                        item["docs_status"] = "skip_has_documents"
-                    elif tender.source_url:
-                        try:
-                            docs_fetch_payload = await asyncio.wait_for(
-                                fetch_and_store_source_documents(
-                                    db,
-                                    company_id=company_id,
-                                    user_id=user_id,
-                                    tender_id=tender_id,
-                                    source_url=tender.source_url,
-                                ),
+                    is_fresh = bool(tender.published_at and tender.published_at >= fetch_cutoff)
+
+                    if docs_enabled:
+                        docs_fetch_payload: dict[str, Any] | None = None
+                        if valid_docs:
+                            stats["docs_skipped_existing"] += 1
+                            stats["skipped_has_docs"] += 1
+                            item["docs_status"] = "skip_has_documents"
+                        elif not tender.source_url:
+                            stats["skipped_no_source_url"] += 1
+                            item["docs_status"] = "skip_no_source_url"
+                        elif not is_fresh:
+                            stats["skipped_old_tender"] += 1
+                            item["docs_status"] = "skip_old_tender"
+                        elif preview:
+                            stats["preview_candidates"] += 1
+                            stats["preview_doc_candidates"] += 1
+                            item["docs_status"] = "preview_would_fetch"
+                        else:
+                            await asyncio.sleep(random.uniform(0.8, 1.8))
+                            started_fetch = time.monotonic()
+                            try:
+                                docs_fetch_payload = await asyncio.wait_for(
+                                    fetch_and_store_source_documents(
+                                        db,
+                                        company_id=company_id,
+                                        user_id=user_id,
+                                        tender_id=tender_id,
+                                        source_url=tender.source_url,
+                                    ),
+                                    timeout=effective_timeout,
+                                )
+                                fetch_ms = int((time.monotonic() - started_fetch) * 1000)
+                                total_fetch_ms += fetch_ms
+                                stats["docs_fetch_attempted"] += 1
+                                downloaded_count = int(docs_fetch_payload.get("downloaded_count") or 0)
+                                if downloaded_count > 0:
+                                    stats["docs_downloaded_tenders"] += 1
+                                else:
+                                    stats["docs_errors"] += 1
+                                item["docs_status"] = docs_fetch_payload.get("source_status", "ok")
+                                item["docs_downloaded_count"] = downloaded_count
+                                item["docs_fetch_ms"] = fetch_ms
+                            except asyncio.TimeoutError:
+                                stats["docs_errors"] += 1
+                                stats["timeout_count"] += 1
+                                stats["errors"] += 1
+                                item["docs_status"] = "timeout"
+                            except Exception as exc:  # noqa: BLE001
+                                stats["docs_errors"] += 1
+                                stats["errors"] += 1
+                                item["docs_status"] = f"error:{exc.__class__.__name__}"
+                    else:
+                        item["docs_status"] = "skipped_mode"
+
+                    if nmck_enabled:
+                        if tender.nmck is not None:
+                            stats["nmck_skipped_existing"] += 1
+                            item["nmck_status"] = "skip_has_nmck"
+                        elif not tender.source_url:
+                            stats["skipped_no_source_url"] += 1
+                            item["nmck_status"] = "skip_no_source_url"
+                        elif preview:
+                            stats["preview_candidates"] += 1
+                            stats["preview_nmck_candidates"] += 1
+                            item["nmck_status"] = "preview_would_check"
+                        else:
+                            nmck_result = await asyncio.wait_for(
+                                fetch_nmck_from_source_page(tender.source_url),
                                 timeout=effective_timeout,
                             )
-                            downloaded_count = int(docs_fetch_payload.get("downloaded_count") or 0)
-                            if downloaded_count > 0:
-                                stats["docs_downloaded_tenders"] += 1
+                            if nmck_result.nmck is not None:
+                                tender.nmck = nmck_result.nmck
+                                await db.commit()
+                                stats["nmck_updated"] += 1
+                                item["nmck_status"] = "updated"
+                                item["nmck_value"] = str(nmck_result.nmck)
                             else:
-                                stats["docs_errors"] += 1
-                            item["docs_status"] = docs_fetch_payload.get("source_status", "ok")
-                            item["docs_downloaded_count"] = downloaded_count
-                        except asyncio.TimeoutError:
-                            stats["docs_errors"] += 1
-                            stats["errors"] += 1
-                            item["docs_status"] = "timeout"
-                        except Exception as exc:  # noqa: BLE001
-                            stats["docs_errors"] += 1
-                            stats["errors"] += 1
-                            item["docs_status"] = f"error:{exc.__class__.__name__}"
+                                stats["nmck_missing_after_check"] += 1
+                                item["nmck_status"] = f"not_found:{nmck_result.source_status}"
+                                if nmck_result.raw_value:
+                                    logger.warning(
+                                        "nmck candidate found but not persisted tender_id=%s external_id=%s raw=%s warning=%s",
+                                        tender_id,
+                                        tender.external_id,
+                                        nmck_result.raw_value,
+                                        nmck_result.warning,
+                                    )
+                                if nmck_result.warning:
+                                    item["nmck_warning"] = nmck_result.warning
+                                if nmck_result.raw_value:
+                                    item["nmck_raw_value"] = nmck_result.raw_value
                     else:
-                        stats["docs_errors"] += 1
-                        item["docs_status"] = "skip_no_source_url"
-
-                    if tender.nmck is not None:
-                        stats["nmck_skipped_existing"] += 1
-                        item["nmck_status"] = "skip_has_nmck"
-                    elif tender.source_url:
-                        nmck_result = await asyncio.wait_for(
-                            fetch_nmck_from_source_page(tender.source_url),
-                            timeout=effective_timeout,
-                        )
-                        if nmck_result.nmck is not None:
-                            tender.nmck = nmck_result.nmck
-                            await db.commit()
-                            stats["nmck_updated"] += 1
-                            item["nmck_status"] = "updated"
-                            item["nmck_value"] = str(nmck_result.nmck)
-                        else:
-                            stats["nmck_missing_after_check"] += 1
-                            item["nmck_status"] = f"not_found:{nmck_result.source_status}"
-                            if nmck_result.raw_value:
-                                logger.warning(
-                                    "nmck candidate found but not persisted tender_id=%s external_id=%s raw=%s warning=%s",
-                                    tender_id,
-                                    tender.external_id,
-                                    nmck_result.raw_value,
-                                    nmck_result.warning,
-                                )
-                            if nmck_result.warning:
-                                item["nmck_warning"] = nmck_result.warning
-                            if nmck_result.raw_value:
-                                item["nmck_raw_value"] = nmck_result.raw_value
-                    else:
-                        stats["nmck_missing_after_check"] += 1
-                        item["nmck_status"] = "skip_no_source_url"
+                        item["nmck_status"] = "skipped_mode"
             except Exception as exc:  # noqa: BLE001
                 stats["errors"] += 1
                 item["status"] = f"fatal:{exc.__class__.__name__}"
@@ -495,21 +554,29 @@ async def process_latest_tenders_pipeline(
     await asyncio.gather(*[_process_one(tid) for tid in tender_ids])
     duration_ms = int((time.monotonic() - now_started) * 1000)
     logger.info(
-        "mass pipeline done company_id=%s selected=%s processed=%s docs_downloaded_tenders=%s nmck_updated=%s errors=%s duration_ms=%s",
+        "mass pipeline done company_id=%s mode=%s preview=%s selected=%s processed=%s docs_downloaded_tenders=%s nmck_updated=%s timeout_count=%s errors=%s duration_ms=%s",
         company_id,
+        normalized_mode,
+        preview,
         stats["selected"],
         stats["processed"],
         stats["docs_downloaded_tenders"],
         stats["nmck_updated"],
+        stats["timeout_count"],
         stats["errors"],
         duration_ms,
     )
+    avg_fetch_ms = int(total_fetch_ms / stats["docs_fetch_attempted"]) if stats["docs_fetch_attempted"] else 0
     return {
         "status": "ok",
+        "mode": normalized_mode,
+        "preview": preview,
         "limit": effective_limit,
         "parallel": effective_parallel,
         "timeout_seconds": effective_timeout,
+        "fresh_days": effective_fresh_days,
         "stats": stats,
+        "avg_fetch_ms": avg_fetch_ms,
         "duration_ms": duration_ms,
         "samples": samples,
     }
