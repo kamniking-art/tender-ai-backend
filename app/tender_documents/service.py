@@ -254,6 +254,7 @@ _ATTACHMENT_BLOCK_KEYWORDS = (
     "attached files",
 )
 _SECTION_END_RE = re.compile(r"<h[1-4]\b|<section\b|<script\b|<footer\b", re.IGNORECASE)
+_TITLE_RE = re.compile(r'title=["\']([^"\']+)["\']', re.IGNORECASE)
 _SOURCE_DOC_UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
@@ -410,11 +411,17 @@ def extract_attachments_from_documents_page(html_text: str, base_url: str = "") 
     links: list[str] = []
     sections = _extract_attachment_sections(html_text)
     for section in sections:
-        for href in _DOC_HREF_RE.findall(section):
+        for attrs, inner_html in _ANCHOR_RE.findall(section):
+            href_match = _ATTR_LINK_RE.search(attrs)
+            href = href_match.group(1) if href_match else ""
             normalized = _normalize_link(base_url, href) if base_url else href.strip()
             if not normalized:
                 continue
-            if not _is_doc_link(normalized):
+            title_match = _TITLE_RE.search(attrs or "")
+            title_text = (title_match.group(1) if title_match else "") or ""
+            visible_text = _clean_html_text(inner_html)
+            has_doc_name = bool(_DOC_EXT_RE.search(title_text) or _DOC_EXT_RE.search(visible_text))
+            if not (_is_doc_link(normalized) or has_doc_name):
                 continue
             if is_blacklisted_source_document(source_link=normalized):
                 continue
@@ -582,8 +589,10 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
             doc_links, _ = _extract_candidate_links(normalized, page_html)
             all_doc_links.extend(doc_links)
 
-        preferred_links = attachment_doc_links if attachment_doc_links else all_doc_links
-        unique_links = list(dict.fromkeys(link for link in preferred_links if _DOC_EXT_RE.search(link)))
+        if attachment_doc_links:
+            unique_links = list(dict.fromkeys(attachment_doc_links))
+        else:
+            unique_links = list(dict.fromkeys(link for link in all_doc_links if _DOC_EXT_RE.search(link)))
         found_links_count = len(unique_links)
         if not unique_links:
             raise SourceFetchError(
