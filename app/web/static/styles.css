@@ -403,6 +403,11 @@ pre {
   padding: 10px 12px;
 }
 
+.mvp-summary-item-amount {
+  background: #eff8ff;
+  border-color: #b2ddff;
+}
+
 .mvp-summary-label {
   color: var(--muted);
   font-size: 12px;
@@ -414,6 +419,11 @@ pre {
 .mvp-summary-value {
   font-size: 16px;
   font-weight: 700;
+}
+
+.mvp-summary-item-amount .mvp-summary-value {
+  font-size: 22px;
+  line-height: 1.2;
 }
 
 .mvp-list {

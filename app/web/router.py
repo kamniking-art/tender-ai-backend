@@ -218,8 +218,10 @@ def _format_money_ru(value: Decimal | float | int | str | None, currency: str | 
         return str(value)
 
     formatted = f"{decimal_value:,.2f}".replace(",", " ").replace(".", ",")
-    if currency == "RUB":
+    if currency and str(currency).upper() == "RUB":
         return f"{formatted} ₽"
+    if currency:
+        return f"{formatted} {str(currency).upper()}"
     return formatted
 
 
@@ -1507,6 +1509,7 @@ async def tender_detail_page(
             mvp_summary={
                 "pipeline_status": pipeline_status,
                 "recommendation": recommendation_value,
+                "amount": _format_money_ru(tender.nmck, "RUB") if tender.nmck is not None else "Сумма не указана",
                 "next_action": next_action_items[0] if next_action_items else next_step or "-",
             },
             action_result={
