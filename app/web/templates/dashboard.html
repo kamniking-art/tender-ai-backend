@@ -219,7 +219,8 @@
             -
           {% endif %}
         </td>
-        <td>{{ item.nmck | ru_money("RUB") }}</td>
+        {% set nmck_value = item.nmck | tender_money_ru("RUB", item.tender_id, item.external_id) %}
+        <td>{{ "—" if nmck_value == "Сумма не указана" else nmck_value }}</td>
         <td>
           <div class="hint">Публ.: {{ item.published_at | ru_dt if item.published_at else "-" }}</div>
           <div class="hint">Дедлайн: {{ item.deadline | ru_dt if item.deadline else "-" }}</div>

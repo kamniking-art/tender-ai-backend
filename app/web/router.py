@@ -909,6 +909,45 @@ async def dashboard(
     company = await db.scalar(select(Company).where(Company.id == current_user.company_id))
     monitoring_settings = get_monitoring_settings(company) if company else MonitoringSettings()
     monitoring_notifications = get_monitoring_notifications(company, limit=20) if company else []
+    if monitoring_notifications:
+        notifications_with_live_tender: list[dict[str, object]] = []
+        tender_ids: list[UUID] = []
+        for item in monitoring_notifications:
+            if not isinstance(item, dict):
+                continue
+            raw_tender_id = item.get("tender_id")
+            try:
+                tender_ids.append(UUID(str(raw_tender_id)))
+            except (TypeError, ValueError):
+                pass
+            notifications_with_live_tender.append(dict(item))
+
+        live_tenders_by_id: dict[UUID, Tender] = {}
+        if tender_ids:
+            stmt = select(Tender).where(
+                Tender.company_id == current_user.company_id,
+                Tender.id.in_(tender_ids),
+            )
+            live_tenders_by_id = {row.id: row for row in list((await db.scalars(stmt)).all())}
+
+        normalized_notifications: list[dict[str, object]] = []
+        for item in notifications_with_live_tender:
+            raw_tender_id = item.get("tender_id")
+            try:
+                tender_id = UUID(str(raw_tender_id))
+            except (TypeError, ValueError):
+                normalized_notifications.append(item)
+                continue
+            live_tender = live_tenders_by_id.get(tender_id)
+            if live_tender is None:
+                normalized_notifications.append(item)
+                continue
+            # Use current Tender values as the source of truth for UI rendering.
+            item["nmck"] = float(live_tender.nmck) if live_tender.nmck is not None else None
+            item["external_id"] = live_tender.external_id or item.get("external_id")
+            item["source_url"] = live_tender.source_url or item.get("source_url")
+            normalized_notifications.append(item)
+        monitoring_notifications = normalized_notifications
     monitoring_last_result = {}
     if company and isinstance(company.profile, dict):
         state = company.profile.get("monitoring_state")
