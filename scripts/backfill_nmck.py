@@ -90,6 +90,7 @@ async def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Preview changes without committing.")
     parser.add_argument("--sample-limit", type=int, default=10, help="How many sample rows to include in report.")
     parser.add_argument("--parallel", type=int, default=3, help="Parallel HTTP fetch workers for source_url reparsing.")
+    parser.add_argument("--commit-batch", type=int, default=300, help="How many changed rows to commit per batch.")
     args = parser.parse_args()
 
     report: dict[str, Any] = {
@@ -145,12 +146,27 @@ async def main() -> None:
                 for url, fetched in chunk_results:
                     fetch_cache[url] = fetched
 
+        changed_in_batch = 0
+
+        async def _commit_batch_if_needed(force: bool = False) -> None:
+            nonlocal changed_in_batch
+            if args.dry_run:
+                return
+            if changed_in_batch <= 0:
+                return
+            if not force and changed_in_batch < max(1, int(args.commit_batch)):
+                return
+            await db.commit()
+            changed_in_batch = 0
+
         for row in invalid_rows:
             old_value = str(row.nmck) if row.nmck is not None else None
             if row.source_url:
                 fetched_nmck = fetch_cache.get(str(row.source_url))
                 if fetched_nmck is not None:
-                    row.nmck = fetched_nmck
+                    if row.nmck != fetched_nmck:
+                        row.nmck = fetched_nmck
+                        changed_in_batch += 1
                     report["reparsed_success"] += 1
                     if len(samples) < args.sample_limit:
                         samples.append(
@@ -164,7 +180,9 @@ async def main() -> None:
                             )
                         )
                 else:
-                    row.nmck = None
+                    if row.nmck is not None:
+                        row.nmck = None
+                        changed_in_batch += 1
                     report["nulled_after_failed_reparse"] += 1
                     if len(samples) < args.sample_limit:
                         samples.append(
@@ -178,7 +196,9 @@ async def main() -> None:
                             )
                         )
             else:
-                row.nmck = None
+                if row.nmck is not None:
+                    row.nmck = None
+                    changed_in_batch += 1
                 report["nulled_no_source_url"] += 1
                 if len(samples) < args.sample_limit:
                     samples.append(
@@ -191,11 +211,12 @@ async def main() -> None:
                             reason="no_source_url",
                         )
                     )
+            await _commit_batch_if_needed()
 
         if args.dry_run:
             await db.rollback()
         else:
-            await db.commit()
+            await _commit_batch_if_needed(force=True)
 
         after_last200: dict[str, int] | None = None
         if demo_company_id is not None:
