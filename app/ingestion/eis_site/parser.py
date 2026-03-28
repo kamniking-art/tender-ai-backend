@@ -22,6 +22,7 @@ _TITLE_VALUE_RE = re.compile(
 _DATE_RE = re.compile(r"(\d{2}\.\d{2}\.\d{4})(?:\s+(\d{2}:\d{2}))?")
 _MONEY_RE = re.compile(r"(\d[\d\s.,]{2,})")
 _TRAILING_TAG_GARBAGE_RE = re.compile(r"<[^>]*$")
+_MAX_VALID_NMCK = Decimal("1000000000000")
 _FIELD_BY_TITLE_RE = re.compile(
     r'<div class="registry-entry__body-title">\s*(?P<label>[^<]+?)\s*</div>\s*'
     r'(?P<body><div class="registry-entry__body-(?:value|href)">.*?</div>)',
@@ -108,11 +109,19 @@ def _parse_money(value: str | None) -> Decimal | None:
     match = _MONEY_RE.search(value)
     if not match:
         return None
-    raw = match.group(1).replace(" ", "").replace(",", ".")
+    raw = match.group(1).strip()
+    compact = raw.replace(" ", "").replace(",", ".")
+    digits_only = "".join(ch for ch in compact if ch.isdigit())
+    # EIS IDs/regNumbers are often long digit-only sequences; do not treat them as NMCK.
+    if digits_only and len(digits_only) >= 13 and "." not in compact:
+        return None
     try:
-        return Decimal(raw)
+        parsed = Decimal(compact)
     except Exception:
         return None
+    if parsed <= 0 or parsed > _MAX_VALID_NMCK:
+        return None
+    return parsed
 
 
 def parse_search_page(html_text: str, base_url: str) -> ParseResult:
@@ -186,9 +195,6 @@ def parse_search_page(html_text: str, base_url: str) -> ParseResult:
                     published_at = _parse_datetime(" ".join(x for x in dates[0] if x))
                 if len(dates) > 1 and not deadline:
                     deadline = _parse_datetime(" ".join(x for x in dates[1] if x))
-            if nmck is None:
-                nmck = _parse_money(block)
-
             candidates.append(
                 EISSiteCandidate(
                     external_id=external_id,

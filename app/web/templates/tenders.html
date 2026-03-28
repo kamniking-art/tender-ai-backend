@@ -377,7 +377,8 @@
         </td>
         <td class="col-deadline">{{ tender.submission_deadline | ru_dt }}</td>
         <td class="col-published">{{ tender.published_at | ru_dt }}</td>
-        <td class="money-cell col-nmck">{% if tender.nmck is not none %}{{ tender.nmck | ru_money("RUB") }}{% else %}—{% endif %}</td>
+        {% set nmck_value = tender.nmck | tender_money_ru("RUB", tender.id, tender.external_id) %}
+        <td class="money-cell col-nmck">{{ "—" if nmck_value == "Сумма не указана" else nmck_value }}</td>
         <td class="col-link">
           {% if tender.source_url %}
             <a class="nowrap-link" href="{{ tender.source_url }}" target="_blank" rel="noopener noreferrer">Открыть на ЕИС</a>

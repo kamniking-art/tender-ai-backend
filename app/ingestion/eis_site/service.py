@@ -25,6 +25,7 @@ logger = logging.getLogger("uvicorn.error")
 
 EIS_SITE_SEARCH_URL = "https://zakupki.gov.ru/epz/order/extendedsearch/results.html"
 _SPACE_RE = re.compile(r"\s+")
+_MAX_VALID_NMCK = Decimal("1000000000000")
 
 _REGION_SYNONYMS: dict[str, tuple[str, ...]] = {
     "санкт петербург": ("спб", "питер", "saint petersburg", "st petersburg", "sankt peterburg"),
@@ -434,7 +435,7 @@ async def _upsert_tender(db: AsyncSession, company_id: UUID, candidate: EISSiteC
                 customer_name=candidate.customer_name,
                 region=candidate.region,
                 place_text=candidate.place_text,
-                nmck=_normalize_decimal(candidate.nmck),
+                nmck=_normalize_decimal(candidate.nmck, external_id=candidate.external_id),
                 published_at=candidate.published_at,
                 submission_deadline=candidate.submission_deadline,
                 status="new",
@@ -456,7 +457,7 @@ async def _upsert_tender(db: AsyncSession, company_id: UUID, candidate: EISSiteC
         existing.source_url = source_url
         changed = True
 
-    nmck = _normalize_decimal(candidate.nmck)
+    nmck = _normalize_decimal(candidate.nmck, external_id=candidate.external_id)
     if nmck is not None and existing.nmck != nmck:
         existing.nmck = nmck
         changed = True
@@ -464,13 +465,23 @@ async def _upsert_tender(db: AsyncSession, company_id: UUID, candidate: EISSiteC
     return "updated" if changed else "skipped"
 
 
-def _normalize_decimal(value: Decimal | None) -> Decimal | None:
+def _normalize_decimal(value: Decimal | None, *, external_id: str | None = None) -> Decimal | None:
     if value is None:
         return None
     try:
-        return Decimal(value)
+        parsed = Decimal(value)
     except Exception:
         return None
+    if parsed <= 0:
+        return None
+    if parsed > _MAX_VALID_NMCK:
+        logger.warning(
+            "invalid nmck detected, value=%s external_id=%s source=eis_site",
+            str(parsed),
+            external_id or "-",
+        )
+        return None
+    return parsed
 
 
 def _default_source_url(external_id: str | None) -> str | None:

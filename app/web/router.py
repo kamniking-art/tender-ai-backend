@@ -176,6 +176,7 @@ RELEVANCE_CATEGORIES = [
     "строительные материалы",
     "нерелевантно / прочее",
 ]
+MAX_UI_NMCK = Decimal("1000000000000")
 
 
 def _translate(value: str | None, mapping: dict[str, str], fallback: str = "-") -> str:
@@ -223,6 +224,29 @@ def _format_money_ru(value: Decimal | float | int | str | None, currency: str | 
     if currency:
         return f"{formatted} {str(currency).upper()}"
     return formatted
+
+
+def _format_tender_nmck_ru(
+    value: Decimal | float | int | str | None,
+    currency: str = "RUB",
+    tender_id: UUID | str | None = None,
+    external_id: str | None = None,
+) -> str:
+    if value is None or value == "":
+        return "Сумма не указана"
+    try:
+        parsed = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return "Сумма не указана"
+    if parsed <= 0 or parsed > MAX_UI_NMCK:
+        logger.warning(
+            "invalid nmck detected, value=%s tender_id=%s external_id=%s source=ui_sanity",
+            str(parsed),
+            str(tender_id or "-"),
+            external_id or "-",
+        )
+        return "Сумма не указана"
+    return _format_money_ru(parsed, currency)
 
 
 def _humanize_risk_flag(flag: str) -> str:
@@ -511,6 +535,7 @@ templates.env.filters["ru_dt"] = _format_datetime_ru
 templates.env.filters["ru_money"] = _format_money_ru
 templates.env.filters["finance_recommendation_ru"] = lambda value: _translate(value, FINANCE_RECOMMENDATION_RU)
 templates.env.filters["priority_label_ru"] = lambda value: _translate(value, PRIORITY_LABEL_RU)
+templates.env.filters["tender_money_ru"] = _format_tender_nmck_ru
 
 
 def _get_migrations_head() -> str:
@@ -1509,7 +1534,12 @@ async def tender_detail_page(
             mvp_summary={
                 "pipeline_status": pipeline_status,
                 "recommendation": recommendation_value,
-                "amount": _format_money_ru(tender.nmck, "RUB") if tender.nmck is not None else "Сумма не указана",
+                "amount": _format_tender_nmck_ru(
+                    tender.nmck,
+                    currency="RUB",
+                    tender_id=tender.id,
+                    external_id=tender.external_id,
+                ),
                 "next_action": next_action_items[0] if next_action_items else next_step or "-",
             },
             action_result={

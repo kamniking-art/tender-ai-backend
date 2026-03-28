@@ -200,7 +200,7 @@
     <div><strong>Статус:</strong> {{ tender.status | tender_status_ru }}</div>
     <div><strong>Опубликован:</strong> {{ tender.published_at | ru_dt }}</div>
     <div><strong>Дедлайн:</strong> {{ tender.submission_deadline | ru_dt }}</div>
-    <div><strong>НМЦК:</strong> {{ tender.nmck | ru_money("RUB") }}</div>
+    <div><strong>НМЦК:</strong> {{ tender.nmck | tender_money_ru("RUB", tender.id, tender.external_id) }}</div>
     <div><strong>Заказчик:</strong> {{ tender.customer_name or '-' }}</div>
     <div><strong>Регион:</strong> {{ tender.region or '-' }}</div>
     <div><strong>Место поставки:</strong> {{ tender.place_text or '-' }}</div>
