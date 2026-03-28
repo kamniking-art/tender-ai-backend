@@ -1,7 +1,7 @@
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,7 +9,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models import User
 from app.tender_documents.schemas import TenderDocumentRead
-from app.tender_documents.analyze import analyze_from_source, fetch_and_store_source_documents
+from app.tender_documents.analyze import analyze_from_source, fetch_and_store_source_documents, process_latest_tenders_pipeline
 from app.tender_documents.service import (
     DocumentStorageError,
     ScopedNotFoundError,
@@ -163,4 +163,20 @@ async def analyze_tender_from_source(
         company_id=current_user.company_id,
         user_id=current_user.id,
         tender_id=tender_id,
+    )
+
+
+@router.post("/tenders/pipeline/process-latest")
+async def process_latest_tenders(
+    limit: int = Query(default=100, ge=1, le=200),
+    parallel: int = Query(default=5, ge=1, le=10),
+    timeout_seconds: int = Query(default=25, ge=5, le=60),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    return await process_latest_tenders_pipeline(
+        company_id=current_user.company_id,
+        user_id=current_user.id,
+        limit=limit,
+        parallel=parallel,
+        timeout_seconds=timeout_seconds,
     )

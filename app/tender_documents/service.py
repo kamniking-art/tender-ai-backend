@@ -4,7 +4,9 @@ import random
 import re
 import time
 import uuid
+import logging
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urljoin, urlparse, urlunparse
 from uuid import UUID
@@ -62,6 +64,16 @@ class SourceFetchResult:
     found_links_count: int
     http_status: int | None
     files: list[SourceFetchedFile]
+    errors_sample: list[str]
+
+
+@dataclass
+class NmckFetchResult:
+    nmck: Decimal | None
+    source_status: str
+    http_status: int | None
+    raw_value: str | None
+    warning: str | None
     errors_sample: list[str]
 
 
@@ -274,6 +286,12 @@ _SOURCE_DOC_URL_BLACKLIST_TOKENS = (
 _SOURCE_DOC_FILENAME_BLACKLIST = {
     "zakupki-traffic.xlsx",
 }
+_NMCK_LABEL_RE = re.compile(
+    r"(?:начальная(?:\s*\(максимальная\))?\s*цена(?:\s*контракта)?|нмцк)[^0-9]{0,80}([0-9][0-9\\s.,]{2,})",
+    re.IGNORECASE,
+)
+_MAX_VALID_NMCK = Decimal("1000000000000")
+logger = logging.getLogger(__name__)
 
 
 async def _paced_delay() -> None:
@@ -358,6 +376,112 @@ def _is_generic_download_filename(file_name: str) -> bool:
     if suffix in _ALLOWED_DOC_EXTENSIONS and len(stem) <= 1:
         return True
     return False
+
+
+def _parse_nmck_value(raw_value: str | None) -> Decimal | None:
+    if not raw_value:
+        return None
+    compact = raw_value.replace(" ", "").replace(",", ".")
+    digits_only = "".join(ch for ch in compact if ch.isdigit())
+    # Skip registry-like identifiers and obviously invalid huge numbers.
+    if digits_only and len(digits_only) >= 13 and "." not in compact:
+        return None
+    try:
+        parsed = Decimal(compact)
+    except (InvalidOperation, ValueError):
+        return None
+    if parsed <= 0 or parsed > _MAX_VALID_NMCK:
+        return None
+    return parsed
+
+
+def _extract_nmck_from_html(html_text: str) -> tuple[Decimal | None, str | None, str | None]:
+    plain_text = _clean_visible_text(html_text)
+    match = _NMCK_LABEL_RE.search(plain_text)
+    if not match:
+        return None, None, None
+    raw = (match.group(1) or "").strip()
+    nmck = _parse_nmck_value(raw)
+    if nmck is None and raw:
+        return None, raw, "invalid_nmck_candidate"
+    return nmck, raw, None
+
+
+async def fetch_nmck_from_source_page(source_url: str) -> NmckFetchResult:
+    timeout = httpx.Timeout(20)
+    errors: list[str] = []
+    last_http_status: int | None = None
+    try:
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            follow_redirects=True,
+            headers={
+                "User-Agent": _SOURCE_DOC_UA[0],
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+                "Referer": "https://zakupki.gov.ru/epz/main/public/home.html",
+                "Connection": "keep-alive",
+            },
+        ) as client:
+            await _paced_delay()
+            resp = await client.get(source_url)
+            last_http_status = resp.status_code
+            body = resp.text or ""
+            body_lower = body.lower()
+
+            if resp.status_code in {403, 429, 434} or "captcha" in body_lower:
+                status = "blocked"
+                warning = "http_434_blocked" if resp.status_code == 434 else "blocked_source"
+                if resp.status_code == 434:
+                    _set_blocked_cooldown(source_url)
+                return NmckFetchResult(
+                    nmck=None,
+                    source_status=status,
+                    http_status=resp.status_code,
+                    raw_value=None,
+                    warning=warning,
+                    errors_sample=[],
+                )
+
+            if any(marker in body_lower for marker in ("регламентных работ", "технических работ")):
+                return NmckFetchResult(
+                    nmck=None,
+                    source_status="maintenance",
+                    http_status=resp.status_code,
+                    raw_value=None,
+                    warning="maintenance",
+                    errors_sample=[],
+                )
+
+            if resp.status_code >= 400:
+                return NmckFetchResult(
+                    nmck=None,
+                    source_status="error",
+                    http_status=resp.status_code,
+                    raw_value=None,
+                    warning="http_error",
+                    errors_sample=[],
+                )
+
+            nmck, raw_value, warning = _extract_nmck_from_html(body)
+            return NmckFetchResult(
+                nmck=nmck,
+                source_status="ok",
+                http_status=resp.status_code,
+                raw_value=raw_value,
+                warning=warning,
+                errors_sample=[],
+            )
+    except httpx.HTTPError as exc:
+        errors.append(exc.__class__.__name__)
+        return NmckFetchResult(
+            nmck=None,
+            source_status="error",
+            http_status=last_http_status,
+            raw_value=None,
+            warning="network_error",
+            errors_sample=errors[:3],
+        )
 
 
 def _normalize_link(base_url: str, link: str) -> str | None:
