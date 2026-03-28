@@ -332,6 +332,30 @@ def _guess_filename_from_response(resp: httpx.Response, link: str, index: int) -
     return _guess_filename_from_url(link, index)
 
 
+def _is_generic_download_filename(file_name: str) -> bool:
+    normalized = sanitize_filename(file_name).lower()
+    generic = {
+        "file",
+        "file.html",
+        "download",
+        "download.html",
+        "doc",
+        "docx",
+        "pdf",
+        "rar",
+        "zip",
+        "xls",
+        "xlsx",
+    }
+    if normalized in generic:
+        return True
+    stem = Path(normalized).stem
+    suffix = Path(normalized).suffix.lower()
+    if suffix in _ALLOWED_DOC_EXTENSIONS and len(stem) <= 1:
+        return True
+    return False
+
+
 def _normalize_link(base_url: str, link: str) -> str | None:
     raw = (link or "").strip()
     if not raw or raw.startswith(("javascript:", "mailto:", "#")):
@@ -358,6 +382,11 @@ def is_blacklisted_source_document(*, source_link: str | None = None, file_name:
 def _clean_html_text(value: str) -> str:
     no_tags = re.sub(r"<[^>]+>", " ", value or "", flags=re.DOTALL)
     return " ".join(no_tags.split()).strip().lower()
+
+
+def _clean_visible_text(value: str) -> str:
+    no_tags = re.sub(r"<[^>]+>", " ", value or "", flags=re.DOTALL)
+    return " ".join(no_tags.split()).strip()
 
 
 def _extract_candidate_links(base_url: str, html_text: str) -> tuple[list[str], list[str]]:
@@ -438,8 +467,14 @@ def _extract_attachment_sections(html_text: str) -> list[str]:
     return sections
 
 
-def extract_attachments_from_documents_page(html_text: str, base_url: str = "") -> list[str]:
-    links: list[str] = []
+@dataclass
+class AttachmentCandidate:
+    url: str
+    display_name: str | None
+
+
+def extract_attachment_candidates_from_documents_page(html_text: str, base_url: str = "") -> list[AttachmentCandidate]:
+    links: list[AttachmentCandidate] = []
     sections = _extract_attachment_sections(html_text)
     for section in sections:
         for attrs, inner_html in _ANCHOR_RE.findall(section):
@@ -456,8 +491,17 @@ def extract_attachments_from_documents_page(html_text: str, base_url: str = "") 
                 continue
             if is_blacklisted_source_document(source_link=normalized):
                 continue
-            links.append(normalized)
-    return list(dict.fromkeys(links))
+            human_name = (title_text or _clean_visible_text(inner_html) or "").strip()
+            links.append(AttachmentCandidate(url=normalized, display_name=human_name or None))
+    unique: dict[str, AttachmentCandidate] = {}
+    for item in links:
+        if item.url not in unique:
+            unique[item.url] = item
+    return list(unique.values())
+
+
+def extract_attachments_from_documents_page(html_text: str, base_url: str = "") -> list[str]:
+    return [item.url for item in extract_attachment_candidates_from_documents_page(html_text, base_url)]
 
 
 def _guess_related_document_pages(source_url: str) -> list[str]:
@@ -511,6 +555,7 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
         related_pages_to_try: list[str] = []
         all_doc_links: list[str] = []
         attachment_doc_links: list[str] = []
+        attachment_display_names: dict[str, str] = {}
         visited_page_links: set[str] = set()
 
         async def fetch_html(page_url: str, retries: int = 2) -> str:
@@ -599,7 +644,11 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
             )
 
         if _looks_like_documents_page(source_url):
-            attachment_doc_links.extend(extract_attachments_from_documents_page(html_text, source_url))
+            candidates = extract_attachment_candidates_from_documents_page(html_text, source_url)
+            attachment_doc_links.extend(item.url for item in candidates)
+            for item in candidates:
+                if item.display_name and item.url not in attachment_display_names:
+                    attachment_display_names[item.url] = item.display_name
         main_doc_links, page_links = _extract_candidate_links(source_url, html_text)
         all_doc_links.extend(main_doc_links)
         # Always prioritize canonical documents pages first; common-info contains many noisy links.
@@ -624,7 +673,11 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
                 errors.append(f"{normalized}: {exc}")
                 continue
             if _looks_like_documents_page(normalized):
-                attachment_doc_links.extend(extract_attachments_from_documents_page(page_html, normalized))
+                candidates = extract_attachment_candidates_from_documents_page(page_html, normalized)
+                attachment_doc_links.extend(item.url for item in candidates)
+                for item in candidates:
+                    if item.display_name and item.url not in attachment_display_names:
+                        attachment_display_names[item.url] = item.display_name
             doc_links, _ = _extract_candidate_links(normalized, page_html)
             all_doc_links.extend(doc_links)
 
@@ -696,6 +749,9 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
             if total_bytes + len(resp.content) > max_total_bytes:
                 break
             file_name = _guess_filename_from_response(resp, current_link, idx)
+            display_name = attachment_display_names.get(current_link) or attachment_display_names.get(link)
+            if display_name and _is_generic_download_filename(file_name):
+                file_name = sanitize_filename(display_name[:200])
             if is_blacklisted_source_document(source_link=current_link, file_name=file_name):
                 errors.append(f"{current_link}: skipped_blacklist_filename")
                 continue
