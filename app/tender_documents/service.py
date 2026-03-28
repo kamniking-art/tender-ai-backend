@@ -571,8 +571,9 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
             attachment_doc_links.extend(extract_attachments_from_documents_page(html_text, source_url))
         main_doc_links, page_links = _extract_candidate_links(source_url, html_text)
         all_doc_links.extend(main_doc_links)
-        related_pages_to_try.extend(page_links)
+        # Always prioritize canonical documents pages first; common-info contains many noisy links.
         related_pages_to_try.extend(_guess_related_document_pages(source_url))
+        related_pages_to_try.extend(page_links)
 
         max_related_pages = 5
         for page_link in related_pages_to_try:
