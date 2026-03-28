@@ -179,8 +179,10 @@
           {% endif %}
         </td>
         <td>
-          {% if item.recommendation == "strong_go" or item.recommendation == "go" %}
+          {% if item.recommendation == "strong_go" %}
             <span class="badge badge-good">{{ item.recommendation | decision_status_ru }}</span>
+          {% elif item.recommendation == "go" %}
+            <span class="badge badge-good-soft">{{ item.recommendation | decision_status_ru }}</span>
           {% elif item.recommendation == "review" %}
             <span class="badge badge-mid">{{ item.recommendation | decision_status_ru }}</span>
           {% elif item.recommendation == "weak" %}

@@ -207,6 +207,12 @@ a {
   color: #067647;
 }
 
+.badge-good-soft {
+  background: #f3fff7;
+  border-color: #a6f4c5;
+  color: #15803d;
+}
+
 .badge-mid {
   background: #fffaeb;
   border-color: #fec84b;

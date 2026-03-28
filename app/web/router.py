@@ -84,12 +84,12 @@ ANALYSIS_STATUS_RU = {
 
 DECISION_STATUS_RU = {
     "none": "нет",
-    "strong_go": "точно смотреть",
-    "go": "идём",
-    "review": "быстро проверить",
-    "weak": "сомнительно",
-    "no_go": "не идём",
-    "unsure": "сомнительно",
+    "strong_go": "Точно стоит участвовать",
+    "go": "Можно участвовать",
+    "review": "Нужно проверить",
+    "weak": "Нужно проверить",
+    "no_go": "Не подходит",
+    "unsure": "Нужно проверить",
 }
 
 INGESTION_STATE_RU = {
@@ -177,6 +177,7 @@ RELEVANCE_CATEGORIES = [
     "нерелевантно / прочее",
 ]
 MAX_UI_NMCK = Decimal("1000000000000")
+DASHBOARD_FRESH_DAYS = 3
 
 
 def _translate(value: str | None, mapping: dict[str, str], fallback: str = "-") -> str:
@@ -517,6 +518,38 @@ def _recommendation_breakdown(
     }
 
 
+def _short_recommendation_summary(
+    *,
+    recommendation: str | None,
+    breakdown: dict[str, list[str]],
+) -> str:
+    pros = breakdown.get("pros", [])
+    cons = breakdown.get("cons", [])
+    red_flags = breakdown.get("red_flags", [])
+    rec = (recommendation or "").lower()
+
+    if any("нерелевант" in item.lower() for item in red_flags + cons) or rec == "no_go":
+        reason = next((item for item in red_flags + cons if "нерелевант" in item.lower()), "Нерелевантная тематика")
+        return f"{reason} — не подходит."
+
+    if any("нет документов" in item.lower() for item in red_flags + cons):
+        return "Нет документов — требуется проверка."
+
+    if rec in {"strong_go", "go"}:
+        p1 = pros[0] if pros else "Есть признаки релевантности"
+        p2 = pros[1] if len(pros) > 1 else None
+        if p2:
+            return f"{p1} и {p2.lower()} — можно участвовать."
+        return f"{p1} — можно участвовать."
+
+    if rec in {"review", "weak", "unsure"}:
+        p1 = pros[0] if pros else "Есть частичные сигналы"
+        c1 = cons[0] if cons else "нужна ручная проверка"
+        return f"{p1}, но {c1.lower()} — требуется проверка."
+
+    return "Недостаточно данных — требуется проверка."
+
+
 def _next_action_items(
     *,
     documents_state: str,
@@ -816,6 +849,9 @@ async def dashboard(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_from_cookie),
 ):
+    now_utc = datetime.now(UTC)
+    dashboard_cutoff = now_utc - timedelta(days=DASHBOARD_FRESH_DAYS)
+
     digest = await build_alert_digest(
         db,
         company_id=current_user.company_id,
@@ -825,8 +861,38 @@ async def dashboard(
         categories=None,
         limit=20,
     )
-    dashboard_items: list[dict[str, object]] = []
+
+    digest_by_tender: dict[UUID, object] = {}
     for item in digest.items:
+        if item.tender_id not in digest_by_tender:
+            digest_by_tender[item.tender_id] = item
+
+    fresh_tenders_by_id: dict[UUID, Tender] = {}
+    if digest_by_tender:
+        fresh_stmt = (
+            select(Tender)
+            .where(
+                Tender.company_id == current_user.company_id,
+                Tender.id.in_(list(digest_by_tender.keys())),
+                Tender.published_at.is_not(None),
+                Tender.published_at >= dashboard_cutoff,
+                Tender.published_at <= now_utc,
+            )
+            .order_by(Tender.published_at.desc())
+            .limit(20)
+        )
+        fresh_tenders = list((await db.scalars(fresh_stmt)).all())
+        fresh_tenders_by_id = {t.id: t for t in fresh_tenders}
+
+    dashboard_items: list[dict[str, object]] = []
+    for tender in sorted(
+        fresh_tenders_by_id.values(),
+        key=lambda value: value.published_at or datetime.min.replace(tzinfo=UTC),
+        reverse=True,
+    ):
+        item = digest_by_tender.get(tender.id)
+        if item is None:
+            continue
         category_value = str(item.category)
         recommendation_display = item.recommendation if _is_recommendation_category(category_value) else None
         dashboard_items.append(
@@ -839,6 +905,7 @@ async def dashboard(
                 "recommendation_display": recommendation_display,
             }
         )
+
     company = await db.scalar(select(Company).where(Company.id == current_user.company_id))
     monitoring_settings = get_monitoring_settings(company) if company else MonitoringSettings()
     monitoring_notifications = get_monitoring_notifications(company, limit=20) if company else []
@@ -1556,6 +1623,10 @@ async def tender_detail_page(
         documents_state=documents_state,
         risk_score=risk_score,
     )
+    short_recommendation_summary = _short_recommendation_summary(
+        recommendation=recommendation_value,
+        breakdown=recommendation_breakdown,
+    )
     next_action_items = _next_action_items(
         documents_state=documents_state,
         recommendation=recommendation_value,
@@ -1612,6 +1683,7 @@ async def tender_detail_page(
             documents_state=documents_state,
             recommendation_factors=recommendation_factors,
             recommendation_breakdown=recommendation_breakdown,
+            short_recommendation_summary=short_recommendation_summary,
             next_action_items=next_action_items,
             mvp_summary={
                 "pipeline_status": pipeline_status,

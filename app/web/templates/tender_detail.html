@@ -62,6 +62,7 @@
 
 <section class="card">
   <h2>Почему такая рекомендация</h2>
+  <p><strong>Короткий вывод:</strong> {{ short_recommendation_summary }}</p>
   <div class="badges">
     <span class="badge">Score: {{ badges.score if badges.score is not none else '-' }} / 100</span>
     <span class="badge">Рекомендация: {{ badges.decision | decision_status_ru }}</span>

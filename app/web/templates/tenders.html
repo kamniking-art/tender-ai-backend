@@ -353,8 +353,10 @@
           {% set d = tender_decisions.get(tender.id|string) %}
           {% if d and d.get("recommendation") %}
             {% set rec = d.get("recommendation") %}
-            {% if rec in ["strong_go", "go"] %}
+            {% if rec == "strong_go" %}
               <span class="badge badge-good">{{ rec | decision_status_ru }}</span>
+            {% elif rec == "go" %}
+              <span class="badge badge-good-soft">{{ rec | decision_status_ru }}</span>
             {% elif rec == "review" %}
               <span class="badge badge-mid">{{ rec | decision_status_ru }}</span>
             {% elif rec == "weak" %}
@@ -362,7 +364,7 @@
             {% elif rec == "no_go" %}
               <span class="badge badge-bad">{{ rec | decision_status_ru }}</span>
             {% else %}
-              <span class="badge">{{ rec }}</span>
+              <span class="badge">{{ rec | decision_status_ru }}</span>
             {% endif %}
             {% if d.get("decision_score") is not none %}
               <div class="hint">score: {{ d.get("decision_score") }}</div>
