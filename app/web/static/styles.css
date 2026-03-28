@@ -390,6 +390,30 @@ pre {
   margin-bottom: 12px;
 }
 
+.quick-picks {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.quick-picks-label {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.quick-pick-chip {
+  display: inline-block;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #f8fafc;
+  text-decoration: none;
+  color: inherit;
+  white-space: nowrap;
+}
+
 .mvp-summary-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

@@ -1356,6 +1356,13 @@ async def tenders_page(
         "sort_by": sort_mode,
     }
 
+    urgent_deadline_to = (datetime.now(UTC) + timedelta(days=14)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    quick_pick_urls = {
+        "new_and_large": f"/web/tenders?{_query_string({'fresh_only': 'true', 'sort_by': 'published_desc', 'price_min': '3000000', 'page_size': page_size})}",
+        "urgent": f"/web/tenders?{_query_string({'fresh_only': 'true', 'sort_by': 'deadline_asc', 'deadline_to': urgent_deadline_to, 'page_size': page_size})}",
+        "all": "/web/tenders",
+    }
+
     prev_qs = _query_string({**base_filters, "page": page - 1}) if page > 1 else ""
     next_qs = _query_string({**base_filters, "page": page + 1}) if page < total_pages else ""
 
@@ -1421,6 +1428,7 @@ async def tenders_page(
             tender_relevance=tender_relevance,
             tender_decisions=tender_decisions,
             relevance_categories=RELEVANCE_CATEGORIES,
+            quick_pick_urls=quick_pick_urls,
             ingest_result={
                 "status": ingest_status,
                 "message": ingest_message,

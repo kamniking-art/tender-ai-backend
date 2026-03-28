@@ -113,6 +113,12 @@
 
 <section class="card">
   <h2>Фильтры</h2>
+  <div class="quick-picks">
+    <span class="quick-picks-label">Быстрый отбор:</span>
+    <a class="quick-pick-chip" href="{{ quick_pick_urls.new_and_large }}">Новые и крупные</a>
+    <a class="quick-pick-chip" href="{{ quick_pick_urls.urgent }}">Срочные</a>
+    <a class="quick-pick-chip" href="{{ quick_pick_urls.all }}">Все</a>
+  </div>
   <div class="quick-filters">
     <a href="/web/tenders?fresh_only=true">Все свежие</a>
     <a href="/web/tenders?fresh_only=true&relevance_category=камень / гранит / памятники">Камень</a>
