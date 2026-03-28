@@ -246,6 +246,14 @@ _DOC_PAGE_KEYWORDS = (
     "скачат",
     "прикреп",
 )
+_ATTACHMENT_BLOCK_KEYWORDS = (
+    "прикреплен",
+    "прикреплён",
+    "вложен",
+    "attached file",
+    "attached files",
+)
+_SECTION_END_RE = re.compile(r"<h[1-4]\b|<section\b|<script\b|<footer\b", re.IGNORECASE)
 _SOURCE_DOC_UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
@@ -374,6 +382,46 @@ def _extract_candidate_links(base_url: str, html_text: str) -> tuple[list[str], 
     return list(dict.fromkeys(doc_links)), list(dict.fromkeys(page_links))
 
 
+def _looks_like_documents_page(page_url: str) -> bool:
+    path = (urlparse(page_url).path or "").lower()
+    return any(token in path for token in ("documents", "docs", "attachments"))
+
+
+def _extract_attachment_sections(html_text: str) -> list[str]:
+    html_lower = html_text.lower()
+    sections: list[str] = []
+    for marker in _ATTACHMENT_BLOCK_KEYWORDS:
+        start = 0
+        while True:
+            idx = html_lower.find(marker, start)
+            if idx < 0:
+                break
+            tail = html_text[idx:]
+            boundary = _SECTION_END_RE.search(tail[1:])
+            end = idx + (boundary.start() + 1 if boundary else min(len(tail), 150_000))
+            snippet = html_text[idx:end]
+            if snippet:
+                sections.append(snippet)
+            start = idx + len(marker)
+    return sections
+
+
+def extract_attachments_from_documents_page(html_text: str, base_url: str = "") -> list[str]:
+    links: list[str] = []
+    sections = _extract_attachment_sections(html_text)
+    for section in sections:
+        for href in _DOC_HREF_RE.findall(section):
+            normalized = _normalize_link(base_url, href) if base_url else href.strip()
+            if not normalized:
+                continue
+            if not _is_doc_link(normalized):
+                continue
+            if is_blacklisted_source_document(source_link=normalized):
+                continue
+            links.append(normalized)
+    return list(dict.fromkeys(links))
+
+
 def _guess_related_document_pages(source_url: str) -> list[str]:
     parsed = urlparse(source_url)
     path = parsed.path or ""
@@ -417,6 +465,7 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
         last_http_status: int | None = None
         related_pages_to_try: list[str] = []
         all_doc_links: list[str] = []
+        attachment_doc_links: list[str] = []
         visited_page_links: set[str] = set()
 
         async def fetch_html(page_url: str, retries: int = 2) -> str:
@@ -504,6 +553,8 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
                 errors_sample=errors[:3],
             )
 
+        if _looks_like_documents_page(source_url):
+            attachment_doc_links.extend(extract_attachments_from_documents_page(html_text, source_url))
         main_doc_links, page_links = _extract_candidate_links(source_url, html_text)
         all_doc_links.extend(main_doc_links)
         related_pages_to_try.extend(page_links)
@@ -526,10 +577,13 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
                     raise
                 errors.append(f"{normalized}: {exc}")
                 continue
+            if _looks_like_documents_page(normalized):
+                attachment_doc_links.extend(extract_attachments_from_documents_page(page_html, normalized))
             doc_links, _ = _extract_candidate_links(normalized, page_html)
             all_doc_links.extend(doc_links)
 
-        unique_links = list(dict.fromkeys(link for link in all_doc_links if _DOC_EXT_RE.search(link)))
+        preferred_links = attachment_doc_links if attachment_doc_links else all_doc_links
+        unique_links = list(dict.fromkeys(link for link in preferred_links if _DOC_EXT_RE.search(link)))
         found_links_count = len(unique_links)
         if not unique_links:
             raise SourceFetchError(
