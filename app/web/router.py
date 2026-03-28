@@ -1236,13 +1236,16 @@ async def tenders_page(
             stmt = stmt.where(TenderAnalysis.status == analysis_status)
             count_stmt = count_stmt.where(TenderAnalysis.status == analysis_status)
 
+    decision_values: list[str] = []
     if decision_filter:
-        if decision_filter == "none":
+        decision_values = [part.strip() for part in decision_filter.split(",") if part.strip()]
+    if decision_values:
+        if len(decision_values) == 1 and decision_values[0] == "none":
             stmt = stmt.where(TenderDecision.id.is_(None))
             count_stmt = count_stmt.where(TenderDecision.id.is_(None))
         else:
-            stmt = stmt.where(TenderDecision.recommendation == decision_filter)
-            count_stmt = count_stmt.where(TenderDecision.recommendation == decision_filter)
+            stmt = stmt.where(TenderDecision.recommendation.in_(decision_values))
+            count_stmt = count_stmt.where(TenderDecision.recommendation.in_(decision_values))
 
     if parsed_deadline_from:
         stmt = stmt.where(Tender.submission_deadline >= parsed_deadline_from)
@@ -1356,10 +1359,17 @@ async def tenders_page(
         "sort_by": sort_mode,
     }
 
-    urgent_deadline_to = (datetime.now(UTC) + timedelta(days=14)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    now_utc = datetime.now(UTC)
+    urgent_deadline_from = now_utc.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    urgent_deadline_to = (now_utc + timedelta(days=14)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    new_from = (now_utc - timedelta(days=3)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     quick_pick_urls = {
-        "new_and_large": f"/web/tenders?{_query_string({'fresh_only': 'true', 'sort_by': 'published_desc', 'price_min': '3000000', 'page_size': page_size})}",
-        "urgent": f"/web/tenders?{_query_string({'fresh_only': 'true', 'sort_by': 'deadline_asc', 'deadline_to': urgent_deadline_to, 'page_size': page_size})}",
+        "new": f"/web/tenders?{_query_string({'published_from': new_from, 'sort_by': 'published_desc', 'page_size': page_size})}",
+        "new_and_large": f"/web/tenders?{_query_string({'published_from': new_from, 'sort_by': 'published_desc', 'price_min': '3000000', 'page_size': page_size})}",
+        "urgent": f"/web/tenders?{_query_string({'deadline_from': urgent_deadline_from, 'deadline_to': urgent_deadline_to, 'sort_by': 'deadline_asc', 'page_size': page_size})}",
+        "large": f"/web/tenders?{_query_string({'price_min': '3000000', 'sort_by': 'nmck_desc', 'page_size': page_size})}",
+        "review": f"/web/tenders?{_query_string({'decision': 'review', 'sort_by': 'published_desc', 'page_size': page_size})}",
+        "promising": f"/web/tenders?{_query_string({'decision': 'go,strong_go', 'sort_by': 'published_desc', 'page_size': page_size})}",
         "all": "/web/tenders",
     }
 
