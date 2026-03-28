@@ -62,12 +62,57 @@
 
 <section class="card">
   <h2>Почему такая рекомендация</h2>
+  <div class="badges">
+    <span class="badge">Score: {{ badges.score if badges.score is not none else '-' }} / 100</span>
+    <span class="badge">Рекомендация: {{ badges.decision | decision_status_ru }}</span>
+  </div>
+  <div class="kv-grid">
+    <div>
+      <h3>Плюсы</h3>
+      {% if recommendation_breakdown.pros %}
+      <ul class="mvp-list">
+        {% for item in recommendation_breakdown.pros %}
+        <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p>—</p>
+      {% endif %}
+    </div>
+    <div>
+      <h3>Минусы</h3>
+      {% if recommendation_breakdown.cons %}
+      <ul class="mvp-list">
+        {% for item in recommendation_breakdown.cons %}
+        <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p>—</p>
+      {% endif %}
+    </div>
+    <div>
+      <h3>Риски</h3>
+      {% if recommendation_breakdown.red_flags %}
+      <ul class="mvp-list">
+        {% for item in recommendation_breakdown.red_flags %}
+        <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p>—</p>
+      {% endif %}
+    </div>
+  </div>
   {% if recommendation_factors %}
-  <ul class="mvp-list">
+  <details>
+    <summary>Дополнительные факторы</summary>
+    <ul class="mvp-list">
     {% for item in recommendation_factors %}
     <li>{{ item }}</li>
     {% endfor %}
-  </ul>
+    </ul>
+  </details>
   {% else %}
   <p>Недостаточно данных для объяснения рекомендации.</p>
   {% endif %}
@@ -226,6 +271,7 @@
   {% if decision %}
   <div class="kv-grid">
     <div><strong>Рекомендация:</strong> {{ decision.recommendation | decision_status_ru }}</div>
+    <div><strong>Score:</strong> {{ decision.score if decision.score is not none else '-' }}</div>
     <div><strong>Decision score:</strong> {{ decision.decision_score if decision.decision_score is not none else '-' }}</div>
     <div><strong>Причина рекомендации:</strong> {{ decision.recommendation_reason or '-' }}</div>
     <div><strong>Риск score:</strong> {{ decision.risk_score or '-' }}</div>

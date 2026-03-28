@@ -38,6 +38,7 @@ async def _to_tender_read(db: AsyncSession, company_id: UUID, tender) -> TenderR
         return payload
     return payload.model_copy(
         update={
+            "score": decision.score,
             "decision_score": decision.decision_score,
             "recommendation": decision.recommendation,
             "recommendation_reason": decision.recommendation_reason,

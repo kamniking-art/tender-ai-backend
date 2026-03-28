@@ -73,6 +73,7 @@ class TenderRead(BaseModel):
     published_at: datetime | None
     submission_deadline: datetime | None
     status: TenderStatus
+    score: int | None = None
     decision_score: int | None = None
     recommendation: str | None = None
     recommendation_reason: str | None = None

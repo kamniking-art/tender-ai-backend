@@ -117,24 +117,7 @@ def _resolve_harsh_penalties(analysis: TenderAnalysis | None) -> bool:
 
 
 def _keyword_strength(matched_keywords: list[str]) -> int:
-    if not matched_keywords:
-        return 0
-
-    strong_terms = (
-        "гранит",
-        "памятник",
-        "мемориал",
-        "надгроб",
-        "изделия из камня",
-        "бордюрный камень",
-        "гранитная плитка",
-    )
-    normalized = [item.lower() for item in matched_keywords]
-    if any(any(term in kw for term in strong_terms) for kw in normalized):
-        return 30
-    if len(normalized) >= 2:
-        return 20
-    return 10
+    return 40 if matched_keywords else 0
 
 
 def _nmck_factor(nmck: Decimal | None) -> int:
@@ -160,52 +143,103 @@ def _risk_penalty(risk_score: int | None) -> int:
 
 
 def _recommendation_for_score(score: int) -> Literal["strong_go", "go", "review", "weak", "no_go"]:
-    if score >= 90:
-        return "strong_go"
     if score >= 70:
-        return "go"
+        return "strong_go"
     if score >= 50:
-        return "review"
+        return "go"
     if score >= 30:
-        return "weak"
+        return "review"
     return "no_go"
+
+
+def _high_nmck_points(nmck: Decimal | None) -> int:
+    if nmck is None:
+        return 0
+    return 20 if nmck >= Decimal("3000000") else 0
+
+
+def _small_nmck_penalty(nmck: Decimal | None) -> int:
+    if nmck is None:
+        return 0
+    return 10 if nmck < Decimal("300000") else 0
+
+
+def _is_fresh_tender(published_at: datetime | None) -> bool:
+    if published_at is None:
+        return False
+    now = datetime.now(UTC)
+    dt = published_at if published_at.tzinfo is not None else published_at.replace(tzinfo=UTC)
+    age = now - dt
+    return timedelta(0) <= age <= timedelta(days=3)
+
+
+def _build_recommendation_explanation(
+    *,
+    matched_keywords: list[str],
+    negative_keywords: list[str],
+    nmck: Decimal | None,
+    has_documents: bool,
+    is_fresh: bool,
+    risk_score: int | None,
+) -> dict[str, list[str]]:
+    pros: list[str] = []
+    cons: list[str] = []
+    red_flags: list[str] = []
+
+    if matched_keywords:
+        pros.append(f'Совпадение по ключевым словам: {", ".join(matched_keywords[:3])}')
+    else:
+        cons.append("Нет совпадений по ключевым словам")
+        red_flags.append("Пустые ключевые совпадения")
+
+    if nmck is not None and nmck >= Decimal("3000000"):
+        pros.append("Высокая сумма тендера")
+    elif nmck is not None and nmck < Decimal("300000"):
+        cons.append("Слишком маленькая сумма")
+        red_flags.append("Низкая НМЦК")
+
+    if is_fresh:
+        pros.append("Свежая публикация (до 3 дней)")
+
+    if has_documents:
+        pros.append("Есть документы тендера")
+    else:
+        cons.append("Нет документов")
+        red_flags.append("Нет документов")
+
+    if negative_keywords:
+        cons.append(f'Найдены нерелевантные слова: {", ".join(negative_keywords[:3])}')
+        red_flags.append("Нерелевантная тематика")
+
+    if risk_score is None:
+        red_flags.append("Риск не рассчитан")
+    elif risk_score >= 60:
+        red_flags.append("Повышенный риск")
+
+    return {
+        "pros": pros[:5],
+        "cons": cons[:5],
+        "red_flags": red_flags[:5],
+    }
 
 
 def _recommendation_reason(
     *,
     recommendation: str,
-    relevance_score: int,
-    category: str | None,
-    matched_keywords: list[str],
-    nmck: Decimal | None,
-    risk_score: int | None,
-    has_documents: bool,
+    score: int,
+    pros: list[str],
+    cons: list[str],
+    red_flags: list[str],
 ) -> str:
-    keywords = ", ".join(matched_keywords[:3]) if matched_keywords else "без явных ключевых совпадений"
-    nmck_text = f"НМЦК {int(nmck):,} ₽".replace(",", " ") if nmck is not None else "НМЦК не указана"
-    risk_text = f"риск {risk_score}" if risk_score is not None else "риск не рассчитан"
-    docs_text = "документы обработаны" if has_documents else "документы не обработаны"
-    category_text = category or "категория не определена"
-
     if recommendation in {"strong_go", "go"}:
-        return (
-            f"Тендер имеет высокую бизнес-ценность: категория «{category_text}», "
-            f"совпадения ({keywords}), {nmck_text}, {risk_text}, {docs_text}."
-        )
+        main = pros[0] if pros else "Сильных плюсов мало"
+        return f"Сильный профиль ({score}/100): {main}."
     if recommendation == "review":
-        return (
-            f"Требуется быстрая проверка: релевантность {relevance_score}/100, категория «{category_text}», "
-            f"совпадения ({keywords}), {risk_text}."
-        )
-    if recommendation == "weak":
-        return (
-            f"Сомнительный тендер: релевантность {relevance_score}/100, категория «{category_text}», "
-            f"{risk_text}, {docs_text}."
-        )
-    return (
-        f"Не рекомендуется к проработке: недостаточная релевантность/ценность "
-        f"(релевантность {relevance_score}/100, категория «{category_text}», {risk_text})."
-    )
+        main = pros[0] if pros else "Есть частичные сигналы"
+        caution = red_flags[0] if red_flags else (cons[0] if cons else "Нужна ручная проверка")
+        return f"Пограничный профиль ({score}/100): {main}; ограничение: {caution}."
+    main = red_flags[0] if red_flags else (cons[0] if cons else "Недостаточно данных")
+    return f"Низкий приоритет ({score}/100): {main}."
 
 
 def _to_float(value: Decimal | None) -> float | None:
@@ -422,8 +456,10 @@ def compute_decision_engine_v1(
     *,
     relevance_score: int | None = None,
     matched_keywords: list[str] | None = None,
+    negative_keywords: list[str] | None = None,
     nmck: Decimal | None = None,
     has_documents: bool = False,
+    published_at: datetime | None = None,
     risk_score: int | None,
     category: str | None = None,
     # Backward-compat inputs from v1:
@@ -433,48 +469,75 @@ def compute_decision_engine_v1(
     harsh_penalties: bool = False,
     high_security: bool = False,
 ) -> dict:
-    rel = relevance_score if relevance_score is not None else 0
-    rel = _clamp(rel, 0, 100)
-    kw = _keyword_strength(matched_keywords or [])
-    nmck_points = _nmck_factor(nmck)
-    doc_points = 10 if has_documents else 0
-    penalty = _risk_penalty(risk_score)
-    weighted = (Decimal(rel) * Decimal("0.6")) + (Decimal(kw) * Decimal("0.2")) + (Decimal(nmck_points) * Decimal("0.1")) + (Decimal(doc_points) * Decimal("0.1"))
-    total_score = _clamp(int(round(float(weighted - Decimal(penalty)))), 0, 100)
+    rel = _clamp(relevance_score if relevance_score is not None else 0, 0, 100)
+    matched_keywords = matched_keywords or []
+    negative_keywords = negative_keywords or []
+    keyword_points = _keyword_strength(matched_keywords)
+    high_nmck_points = _high_nmck_points(nmck)
+    fresh_points = 15 if _is_fresh_tender(published_at) else 0
+    docs_points = 15 if has_documents else 0
+    negative_penalty = 20 if negative_keywords else 0
+    missing_docs_penalty = 20 if not has_documents else 0
+    small_nmck_penalty = _small_nmck_penalty(nmck)
+    risk_penalty = _risk_penalty(risk_score)
+
+    total_score = _clamp(
+        rel
+        + keyword_points
+        + high_nmck_points
+        + fresh_points
+        + docs_points
+        - negative_penalty
+        - missing_docs_penalty
+        - small_nmck_penalty
+        - risk_penalty,
+        0,
+        100,
+    )
     recommendation = _recommendation_for_score(total_score)
+    explanation = _build_recommendation_explanation(
+        matched_keywords=matched_keywords,
+        negative_keywords=negative_keywords,
+        nmck=nmck,
+        has_documents=has_documents,
+        is_fresh=bool(fresh_points),
+        risk_score=risk_score,
+    )
 
     explain: list[str] = [
-        f"relevance_component={rel}*0.6",
-        f"keyword_strength={kw}*0.2",
-        f"nmck_factor={nmck_points}*0.1",
-        f"document_factor={doc_points}*0.1",
-        f"risk_penalty=-{penalty} (risk_score={risk_score})",
+        f"relevance_score={rel}",
+        f"keyword_match=+{keyword_points}",
+        f"high_nmck_bonus=+{high_nmck_points}",
+        f"fresh_tender_bonus=+{fresh_points}",
+        f"documents_bonus=+{docs_points}",
+        f"negative_keywords_penalty=-{negative_penalty}",
+        f"missing_documents_penalty=-{missing_docs_penalty}",
+        f"small_nmck_penalty=-{small_nmck_penalty}",
+        f"risk_penalty=-{risk_penalty} (risk_score={risk_score})",
         f"decision_score={total_score} -> recommendation={recommendation}",
     ]
-    reason = _recommendation_reason(
-        recommendation=recommendation,
-        relevance_score=rel,
-        category=category,
-        matched_keywords=matched_keywords or [],
-        nmck=nmck,
-        risk_score=risk_score,
-        has_documents=has_documents,
-    )
+    reason = _recommendation_reason(recommendation=recommendation, score=total_score, **explanation)
 
     return {
         "score": total_score,
         "decision_score": total_score,
         "recommendation_reason": reason,
         "relevance_component": rel,
-        "keyword_strength": kw,
-        "nmck_factor": nmck_points,
-        "document_factor": doc_points,
-        "risk_penalty": penalty,
+        "keyword_strength": keyword_points,
+        "nmck_factor": high_nmck_points,
+        "fresh_factor": fresh_points,
+        "document_factor": docs_points,
+        "negative_keywords_penalty": negative_penalty,
+        "missing_documents_penalty": missing_docs_penalty,
+        "small_nmck_penalty": small_nmck_penalty,
+        "risk_penalty": risk_penalty,
         "inputs": {
             "relevance_score": rel,
-            "matched_keywords": matched_keywords or [],
+            "matched_keywords": matched_keywords,
+            "negative_keywords": negative_keywords,
             "nmck": float(nmck) if nmck is not None else None,
             "has_documents": has_documents,
+            "published_at": published_at.isoformat() if isinstance(published_at, datetime) else None,
             "margin_pct": float(margin_pct) if margin_pct is not None else None,
             "margin_value": float(margin_value) if margin_value is not None else None,
             "risk_score": risk_score,
@@ -483,6 +546,7 @@ def compute_decision_engine_v1(
             "high_security": high_security,
         },
         "explain": explain,
+        "explanation": explanation,
         "computed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "recommendation": recommendation,
     }
@@ -592,14 +656,23 @@ async def recompute_decision_engine_v1(
     high_security = _resolve_high_security(extracted, decision, tender)
     finance = await _get_finance_scoped(db, company_id, tender_id)
     docs_count = await _documents_count(db, company_id, tender_id)
-    has_documents = docs_count > 0
+    valid_docs_count_stmt = select(func.count()).select_from(TenderDocument).where(
+        TenderDocument.company_id == company_id,
+        TenderDocument.tender_id == tender_id,
+        func.coalesce(func.lower(TenderDocument.doc_type), "") != "source_import",
+    )
+    valid_docs_count = int((await db.execute(valid_docs_count_stmt)).scalar_one() or 0)
+    has_documents = valid_docs_count > 0
     matched_keywords = [str(item) for item in relevance.get("matched_keywords", []) if isinstance(item, str)]
+    negative_keywords = [str(item) for item in relevance.get("negative_keywords", []) if isinstance(item, str)]
 
     engine = compute_decision_engine_v1(
         relevance_score=relevance.get("score"),
         matched_keywords=matched_keywords,
+        negative_keywords=negative_keywords,
         nmck=tender.nmck,
-        has_documents=has_documents and extracted is not None,
+        has_documents=has_documents,
+        published_at=tender.published_at,
         margin_pct=decision.expected_margin_pct,
         margin_value=decision.expected_margin_value,
         risk_score=risk_score,
@@ -614,12 +687,7 @@ async def recompute_decision_engine_v1(
         participation_cost=finance.participation_cost if finance else None,
         win_probability_pct=finance.win_probability if finance else None,
     )
-    final_recommendation = _final_recommendation_from_finance(
-        finance_recommendation=finance_result["finance_recommendation"],
-        risk_score=risk_score,
-        relevance_score=relevance.get("score"),
-        base_recommendation=engine["recommendation"],
-    )
+    final_recommendation = engine["recommendation"]
 
     engine["finance"] = finance_result
     engine["relevance"] = relevance
@@ -646,6 +714,7 @@ async def recompute_decision_engine_v1(
     engine["priority"] = priority
 
     decision.recommendation = engine["recommendation"]
+    decision.score = engine.get("score")
     decision.risk_score = int(risk_score) if risk_score is not None else 0
     decision.risk_flags = list(analysis.risk_flags or []) if analysis and isinstance(analysis.risk_flags, list) else []
     decision.decision_score = engine.get("decision_score")

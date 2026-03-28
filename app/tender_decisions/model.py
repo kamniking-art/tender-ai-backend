@@ -43,6 +43,7 @@ class TenderDecision(Base):
 
     risk_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     risk_flags: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
+    score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     decision_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     recommendation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     priority_score: Mapped[int | None] = mapped_column(Integer, nullable=True)

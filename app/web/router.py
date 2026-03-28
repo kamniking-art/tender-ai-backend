@@ -477,6 +477,46 @@ def _recommendation_factors(
     return compact
 
 
+def _recommendation_breakdown(
+    *,
+    decision: TenderDecision | None,
+    fallback_factors: list[str],
+    documents_state: str,
+    risk_score: int | None,
+) -> dict[str, list[str]]:
+    payload = decision.engine_meta if decision and isinstance(decision.engine_meta, dict) else {}
+    explanation = payload.get("explanation") if isinstance(payload.get("explanation"), dict) else {}
+
+    pros = [str(item).strip() for item in explanation.get("pros", []) if str(item).strip()] if isinstance(explanation, dict) else []
+    cons = [str(item).strip() for item in explanation.get("cons", []) if str(item).strip()] if isinstance(explanation, dict) else []
+    red_flags = (
+        [str(item).strip() for item in explanation.get("red_flags", []) if str(item).strip()]
+        if isinstance(explanation, dict)
+        else []
+    )
+
+    if not pros and fallback_factors:
+        pros.append(fallback_factors[0])
+    if not cons:
+        if documents_state in {"не найдены", "только служебные файлы ЕИС"}:
+            cons.append("Нет подтверждённых документов тендера")
+        elif decision is not None and (decision.score or 0) < 50:
+            cons.append("Недостаточно сильных сигналов для уверенного решения")
+    if not red_flags:
+        if risk_score is None:
+            red_flags.append("Риск не рассчитан")
+        elif risk_score >= 60:
+            red_flags.append("Повышенный риск")
+        elif documents_state in {"не найдены", "только служебные файлы ЕИС"}:
+            red_flags.append("Решение без документов")
+
+    return {
+        "pros": pros[:5],
+        "cons": cons[:5],
+        "red_flags": red_flags[:5],
+    }
+
+
 def _next_action_items(
     *,
     documents_state: str,
@@ -1400,6 +1440,7 @@ async def tenders_page(
         if decision is not None:
             tender_decisions[str(tender.id)] = {
                 "recommendation": decision.recommendation,
+                "score": decision.score,
                 "decision_score": decision.decision_score,
                 "recommendation_reason": decision.recommendation_reason,
                 "priority_score": decision.priority_score,
@@ -1509,6 +1550,12 @@ async def tender_detail_page(
         documents_state=documents_state,
         has_requirements=has_requirements,
     )
+    recommendation_breakdown = _recommendation_breakdown(
+        decision=decision,
+        fallback_factors=recommendation_factors,
+        documents_state=documents_state,
+        risk_score=risk_score,
+    )
     next_action_items = _next_action_items(
         documents_state=documents_state,
         recommendation=recommendation_value,
@@ -1541,6 +1588,7 @@ async def tender_detail_page(
                 "risk_score": risk_score,
                 "risk_flags": risk_flags_top,
                 "decision": decision.recommendation if decision else "none",
+                "score": decision.score if decision else None,
                 "decision_score": decision.decision_score if decision else None,
                 "recommendation_reason": decision.recommendation_reason if decision else None,
                 "priority_score": decision.priority_score if decision else None,
@@ -1563,6 +1611,7 @@ async def tender_detail_page(
             happened_steps=happened_steps,
             documents_state=documents_state,
             recommendation_factors=recommendation_factors,
+            recommendation_breakdown=recommendation_breakdown,
             next_action_items=next_action_items,
             mvp_summary={
                 "pipeline_status": pipeline_status,
