@@ -6,7 +6,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import unquote, urljoin, urlparse, urlunparse
+from urllib.parse import parse_qs, unquote, urljoin, urlparse, urlunparse
 from uuid import UUID
 
 import httpx
@@ -72,7 +72,11 @@ _SOURCE_FETCH_BLOCKED_UNTIL: dict[str, float] = {}
 
 def sanitize_filename(filename: str | None) -> str:
     candidate = Path(filename or "").name
-    sanitized = re.sub(r"[^A-Za-z0-9._-]", "_", candidate).strip("._")
+    candidate = candidate.replace("/", "_").replace("\\", "_")
+    candidate = re.sub(r"\s+", " ", candidate).strip()
+    # Keep unicode letters/digits so human-readable Russian file names survive.
+    sanitized = re.sub(r"[^\w.\- ()]", "_", candidate, flags=re.UNICODE)
+    sanitized = re.sub(r"\s+", " ", sanitized).strip(" .")
     return sanitized or "file"
 
 
@@ -443,6 +447,56 @@ def _extract_candidate_links(base_url: str, html_text: str) -> tuple[list[str], 
     return list(dict.fromkeys(doc_links)), list(dict.fromkeys(page_links))
 
 
+def _extract_link_display_names(html_text: str, base_url: str) -> dict[str, str]:
+    names: dict[str, str] = {}
+    for attrs, inner_html in _ANCHOR_RE.findall(html_text):
+        href_match = _ATTR_LINK_RE.search(attrs)
+        href = href_match.group(1) if href_match else ""
+        normalized = _normalize_link(base_url, href)
+        if not normalized:
+            continue
+        title_match = _TITLE_RE.search(attrs or "")
+        title_text = (title_match.group(1) if title_match else "") or ""
+        visible_text = _clean_visible_text(inner_html)
+        candidate = (title_text or visible_text or "").strip()
+        if not candidate:
+            continue
+        if not (_DOC_EXT_RE.search(candidate) or _is_doc_link(normalized)):
+            continue
+        if is_blacklisted_source_document(source_link=normalized):
+            continue
+        names.setdefault(normalized, candidate)
+    return names
+
+
+def _extract_uid_from_link(link: str) -> str | None:
+    if not link:
+        return None
+    parsed = urlparse(link)
+    uid = parse_qs(parsed.query).get("uid", [None])[0]
+    if uid:
+        return uid.strip().lower() or None
+    return None
+
+
+def _build_documents_page_url(source_url: str) -> str | None:
+    parsed = urlparse(source_url)
+    reg = ""
+    if parsed.query:
+        for pair in parsed.query.split("&"):
+            if pair.lower().startswith("regnumber="):
+                reg = pair.split("=", 1)[1].strip()
+                break
+    if not reg:
+        return None
+    path = parsed.path or ""
+    if "/view/" not in path:
+        return None
+    base, _, _tail = path.rpartition("/")
+    doc_path = f"{base}/documents.html"
+    return urlunparse((parsed.scheme, parsed.netloc, doc_path, "", f"regNumber={reg}", ""))
+
+
 def _looks_like_documents_page(page_url: str) -> bool:
     path = (urlparse(page_url).path or "").lower()
     return any(token in path for token in ("documents", "docs", "attachments"))
@@ -556,6 +610,7 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
         all_doc_links: list[str] = []
         attachment_doc_links: list[str] = []
         attachment_display_names: dict[str, str] = {}
+        attachment_display_names_by_uid: dict[str, str] = {}
         visited_page_links: set[str] = set()
 
         async def fetch_html(page_url: str, retries: int = 2) -> str:
@@ -649,10 +704,21 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
             for item in candidates:
                 if item.display_name and item.url not in attachment_display_names:
                     attachment_display_names[item.url] = item.display_name
+                uid = _extract_uid_from_link(item.url)
+                if uid and item.display_name:
+                    attachment_display_names_by_uid.setdefault(uid, item.display_name)
+        for link_url, display_name in _extract_link_display_names(html_text, source_url).items():
+            attachment_display_names.setdefault(link_url, display_name)
+            uid = _extract_uid_from_link(link_url)
+            if uid:
+                attachment_display_names_by_uid.setdefault(uid, display_name)
         main_doc_links, page_links = _extract_candidate_links(source_url, html_text)
         all_doc_links.extend(main_doc_links)
         # Always prioritize canonical documents pages first; common-info contains many noisy links.
         related_pages_to_try.extend(_guess_related_document_pages(source_url))
+        canonical_documents_page = _build_documents_page_url(source_url)
+        if canonical_documents_page:
+            related_pages_to_try.insert(0, canonical_documents_page)
         related_pages_to_try.extend(page_links)
 
         max_related_pages = 5
@@ -678,6 +744,14 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
                 for item in candidates:
                     if item.display_name and item.url not in attachment_display_names:
                         attachment_display_names[item.url] = item.display_name
+                    uid = _extract_uid_from_link(item.url)
+                    if uid and item.display_name:
+                        attachment_display_names_by_uid.setdefault(uid, item.display_name)
+            for link_url, display_name in _extract_link_display_names(page_html, normalized).items():
+                attachment_display_names.setdefault(link_url, display_name)
+                uid = _extract_uid_from_link(link_url)
+                if uid:
+                    attachment_display_names_by_uid.setdefault(uid, display_name)
             doc_links, _ = _extract_candidate_links(normalized, page_html)
             all_doc_links.extend(doc_links)
 
@@ -750,6 +824,10 @@ async def fetch_source_documents(source_url: str, *, max_docs: int = 20) -> Sour
                 break
             file_name = _guess_filename_from_response(resp, current_link, idx)
             display_name = attachment_display_names.get(current_link) or attachment_display_names.get(link)
+            if not display_name:
+                uid = _extract_uid_from_link(current_link) or _extract_uid_from_link(link)
+                if uid:
+                    display_name = attachment_display_names_by_uid.get(uid)
             if display_name and _is_generic_download_filename(file_name):
                 file_name = sanitize_filename(display_name[:200])
             if is_blacklisted_source_document(source_link=current_link, file_name=file_name):
