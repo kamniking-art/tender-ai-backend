@@ -15,6 +15,7 @@ from app.tender_decisions.model import TenderDecision
 from app.tender_documents.model import TenderDocument
 from app.tender_finance.model import TenderFinance
 from app.tenders.model import Tender
+from app.tenders.nmck import get_sane_nmck
 from app.tenders.service import get_tender_by_id_scoped
 
 MIN_MARGIN_PCT = Decimal("10")
@@ -82,8 +83,8 @@ def _is_manual_recommendation(decision: TenderDecision) -> bool:
     return (decision.recommendation != "unsure") and (not has_engine)
 
 
-def _resolve_high_security(extracted: ExtractedTenderV1 | None, decision: TenderDecision, tender: Tender) -> bool:
-    nmck = extracted.nmck if extracted and extracted.nmck is not None else (decision.nmck or tender.nmck)
+def _resolve_high_security(extracted: ExtractedTenderV1 | None, tender: Tender) -> bool:
+    nmck = get_sane_nmck(tender.nmck)
 
     if extracted is not None:
         if extracted.bid_security_pct is not None and extracted.bid_security_pct >= Decimal("5"):
@@ -653,7 +654,7 @@ async def recompute_decision_engine_v1(
     risk_score, risk_source = _resolve_effective_risk_score(analysis, decision)
     short_deadline = _resolve_short_deadline(analysis, extracted)
     harsh_penalties = _resolve_harsh_penalties(analysis)
-    high_security = _resolve_high_security(extracted, decision, tender)
+    high_security = _resolve_high_security(extracted, tender)
     finance = await _get_finance_scoped(db, company_id, tender_id)
     docs_count = await _documents_count(db, company_id, tender_id)
     valid_docs_count_stmt = select(func.count()).select_from(TenderDocument).where(

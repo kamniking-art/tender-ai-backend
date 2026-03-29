@@ -354,7 +354,7 @@
   <h2>Анализ</h2>
   {% if analysis %}
   <p><strong>Статус:</strong> {{ analysis.status | analysis_status_ru }}</p>
-  <p><strong>Резюме:</strong> {{ analysis.summary or '-' }}</p>
+  <p><strong>Резюме:</strong> {{ analysis_summary_display or '-' }}</p>
   <h3>Риск-флаги</h3>
   <pre>{{ analysis.risk_flags | tojson(indent=2) }}</pre>
   <h3>Недостающие документы</h3>

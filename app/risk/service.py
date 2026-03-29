@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from app.ai_extraction.schemas import ExtractedTenderV1
+from app.tenders.nmck import get_sane_nmck
 from app.tenders.model import Tender
 
 
@@ -145,7 +146,7 @@ def compute_risk_flags(extracted: ExtractedTenderV1, tender: Tender) -> list[dic
     flags: list[dict] = []
     now = _now_utc()
 
-    nmck = extracted.nmck or tender.nmck
+    nmck = get_sane_nmck(tender.nmck)
     deadline = extracted.submission_deadline_at or tender.submission_deadline
 
     if deadline is not None and deadline <= now + timedelta(days=3):
@@ -213,7 +214,7 @@ def compute_risk_flags(extracted: ExtractedTenderV1, tender: Tender) -> list[dic
 
 def compute_risk_score_v1(extracted: ExtractedTenderV1, tender: Tender) -> dict:
     explain: list[str] = []
-    nmck = extracted.nmck or tender.nmck
+    nmck = get_sane_nmck(tender.nmck)
     deadline = extracted.submission_deadline_at or tender.submission_deadline
 
     components = {

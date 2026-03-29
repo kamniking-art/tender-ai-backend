@@ -250,6 +250,27 @@ def _format_tender_nmck_ru(
     return _format_money_ru(parsed, currency)
 
 
+def _summary_with_db_nmck(
+    summary: str | None,
+    *,
+    tender_nmck: Decimal | float | int | str | None,
+    tender_id: UUID | str | None,
+    external_id: str | None,
+) -> str | None:
+    if not summary:
+        return summary
+    nmck_value = _format_tender_nmck_ru(
+        tender_nmck,
+        currency="RUB",
+        tender_id=tender_id,
+        external_id=external_id,
+    )
+    nmck_line = "NMCK: -" if nmck_value == "Сумма не указана" else f"NMCK: {nmck_value}"
+    if re.search(r"(?im)^NMCK:.*$", summary):
+        return re.sub(r"(?im)^NMCK:.*$", nmck_line, summary)
+    return f"{nmck_line}\n{summary}"
+
+
 def _humanize_risk_flag(flag: str) -> str:
     normalized = flag.strip()
     if not normalized:
@@ -1680,6 +1701,12 @@ async def tender_detail_page(
         has_recommendation=has_recommendation,
         has_package=has_package,
     )
+    analysis_summary_display = _summary_with_db_nmck(
+        analysis.summary if analysis else None,
+        tender_nmck=tender.nmck,
+        tender_id=tender.id,
+        external_id=tender.external_id,
+    )
 
     return templates.TemplateResponse(
         "tender_detail.html",
@@ -1689,6 +1716,7 @@ async def tender_detail_page(
             tender=tender,
             decision=decision,
             analysis=analysis,
+            analysis_summary_display=analysis_summary_display,
             tasks=tasks,
             documents=documents,
             package=package,

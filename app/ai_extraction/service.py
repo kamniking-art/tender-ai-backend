@@ -16,6 +16,7 @@ from app.risk.service import compute_risk_flags, compute_risk_score_v1
 from app.tender_analysis.model import TenderAnalysis
 from app.tender_analysis.service import AnalysisConflictError, ScopedNotFoundError
 from app.tender_documents.model import TenderDocument
+from app.tenders.nmck import get_sane_nmck
 from app.tenders.service import get_tender_by_id_scoped
 
 logger = logging.getLogger(__name__)
@@ -29,10 +30,11 @@ def _line_or_dash(value: object | None) -> str:
     return str(value) if value is not None else "-"
 
 
-def build_summary(extracted: ExtractedTenderV1) -> str:
+def build_summary(extracted: ExtractedTenderV1, *, tender_nmck: object | None) -> str:
+    nmck = get_sane_nmck(tender_nmck)
     lines = [
         f"Subject: {_line_or_dash(extracted.subject)}",
-        f"NMCK: {_line_or_dash(extracted.nmck)} {_line_or_dash(extracted.currency)}",
+        f"NMCK: {_line_or_dash(nmck)} {'RUB' if nmck is not None else '-'}",
         f"Submission deadline: {_line_or_dash(extracted.submission_deadline_at)}",
         f"Bid security: {_line_or_dash(extracted.bid_security_amount)} ({_line_or_dash(extracted.bid_security_pct)}%)",
         f"Contract security: {_line_or_dash(extracted.contract_security_amount)} ({_line_or_dash(extracted.contract_security_pct)}%)",
@@ -156,7 +158,7 @@ async def run_extraction(
     extracted = provider_result.extracted
     risk_flags = compute_risk_flags(extracted, tender)
     risk_v1 = compute_risk_score_v1(extracted, tender)
-    summary = build_summary(extracted)
+    summary = build_summary(extracted, tender_nmck=tender.nmck)
 
     analysis = await db.scalar(
         select(TenderAnalysis).where(

@@ -17,6 +17,7 @@ from app.tender_analysis.service import get_analysis_scoped
 from app.tender_decisions.service import get_decision_scoped
 from app.tender_documents.model import TenderDocument
 from app.tender_documents.service import create_document_from_bytes
+from app.tenders.nmck import get_sane_nmck
 from app.tenders.model import Tender
 from app.tenders.service import get_tender_by_id_scoped
 
@@ -203,6 +204,8 @@ def _template_context(company_profile: dict, tender: Tender, analysis: TenderAna
     bid_security = extracted.get("bid_security_amount") or extracted.get("bid_security_pct")
     contract_security = extracted.get("contract_security_amount") or extracted.get("contract_security_pct")
 
+    sane_nmck = get_sane_nmck(tender.nmck)
+
     return {
         "LEGAL_NAME": _safe_text(company_profile.get("legal_name")),
         "INN": _safe_text(company_profile.get("inn")),
@@ -211,7 +214,7 @@ def _template_context(company_profile: dict, tender: Tender, analysis: TenderAna
         "PHONE": _safe_text(company_profile.get("phone")),
         "EMAIL": _safe_text(company_profile.get("email")),
         "TENDER_SUBJECT": _safe_text(tender.title),
-        "TENDER_NMCK": _format_decimal(tender.nmck),
+        "TENDER_NMCK": _format_decimal(sane_nmck),
         "DEADLINE_AT": _safe_text(deadline),
         "BID_SECURITY": _safe_text(bid_security),
         "CONTRACT_SECURITY": _safe_text(contract_security),
