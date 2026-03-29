@@ -1,4 +1,5 @@
 import os
+import logging
 from datetime import datetime, timezone
 
 from alembic.config import Config
@@ -34,6 +35,7 @@ from app.monitoring.scheduler import scheduler as monitoring_scheduler
 from app.users import router as users_router
 from app.web import router as web_router
 
+logger = logging.getLogger(__name__)
 app = FastAPI(title="Tender AI Backend Core", version="1.0.0")
 app.mount("/static", StaticFiles(directory="app/web/static"), name="static")
 
@@ -62,6 +64,17 @@ app.include_router(users_router)
 app.include_router(web_router)
 
 
+def _db_error_reason(db_error: str | None) -> str | None:
+    if not db_error:
+        return None
+    lowered = db_error.lower()
+    if "invalidpassworderror" in lowered or "password authentication failed" in lowered:
+        return "db_auth_mismatch"
+    if "timeout" in lowered:
+        return "db_timeout"
+    return "db_unavailable"
+
+
 async def _db_ready() -> tuple[bool, str | None]:
     try:
         async with AsyncSessionLocal() as session:
@@ -76,17 +89,19 @@ async def _db_ready() -> tuple[bool, str | None]:
 @app.get("/health")
 async def health(response: Response) -> dict[str, object]:
     db_ok, db_error = await _db_ready()
+    db_reason = _db_error_reason(db_error)
     if not db_ok:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-    return {"ok": db_ok, "db_ok": db_ok, "db_error": db_error}
+    return {"ok": db_ok, "db_ok": db_ok, "db_error": db_error, "db_reason": db_reason}
 
 
 @app.get("/readiness")
 async def readiness(response: Response) -> dict[str, object]:
     db_ok, db_error = await _db_ready()
+    db_reason = _db_error_reason(db_error)
     if not db_ok:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-    return {"ok": db_ok, "db_ok": db_ok, "db_error": db_error}
+    return {"ok": db_ok, "db_ok": db_ok, "db_error": db_error, "db_reason": db_reason}
 
 
 def _get_migrations_head() -> str:
@@ -114,6 +129,12 @@ async def version() -> dict[str, str]:
 
 @app.on_event("startup")
 async def startup_event() -> None:
+    db_ok, db_error = await _db_ready()
+    if not db_ok:
+        db_reason = _db_error_reason(db_error)
+        logger.error("startup db preflight failed: reason=%s error=%s", db_reason, db_error)
+        raise RuntimeError(f"startup db preflight failed: reason={db_reason} error={db_error}")
+    logger.info("startup db preflight ok")
     await tender_task_scheduler.start()
     await ingestion_scheduler.start()
     await telegram_notify_scheduler.start()
