@@ -19,6 +19,23 @@ if [ -f .env ]; then
   set +a
 fi
 
+# Canonical DB credentials source of truth is DB_*.
+# Keep backward compatibility with legacy POSTGRES_* envs.
+if [ -z "${DB_NAME:-}" ] && [ -n "${POSTGRES_DB:-}" ]; then
+  export DB_NAME="${POSTGRES_DB}"
+fi
+if [ -z "${DB_USER:-}" ] && [ -n "${POSTGRES_USER:-}" ]; then
+  export DB_USER="${POSTGRES_USER}"
+fi
+if [ -z "${DB_PASSWORD:-}" ] && [ -n "${POSTGRES_PASSWORD:-}" ]; then
+  export DB_PASSWORD="${POSTGRES_PASSWORD}"
+fi
+
+DB_NAME="${DB_NAME:-tender_ai}"
+DB_USER="${DB_USER:-postgres}"
+DB_PASSWORD="${DB_PASSWORD:-postgres}"
+export DB_NAME DB_USER DB_PASSWORD
+
 git pull --ff-only
 
 APP_VERSION="$(git rev-parse --short HEAD)"
@@ -29,6 +46,7 @@ DEPLOY_BASE_URL="${DEPLOY_BASE_URL:-http://127.0.0.1:${APP_EXTERNAL_PORT:-8000}}
 echo "Deploy commit: ${APP_VERSION}"
 echo "Expected image tag: ${APP_IMAGE_TAG}"
 echo "Readiness base URL: ${DEPLOY_BASE_URL}"
+echo "DB credentials source: DB_NAME=${DB_NAME} DB_USER=${DB_USER} DB_PASSWORD=<hidden>"
 
 # Wait for immutable image tag to appear in GHCR.
 PULL_MAX_ATTEMPTS=12
@@ -51,6 +69,11 @@ echo "App image: ${APP_IMAGE}"
 
 # Bring up database first; do not touch app until DB credentials are verified.
 docker compose up -d tender_ai_db
+
+# Enforce DB role password to match canonical runtime DB_PASSWORD.
+DB_PASSWORD_SQL="$(python3 -c "import os; print((os.getenv('DB_PASSWORD') or 'postgres').replace(\"'\", \"''\"))")"
+docker compose exec -T tender_ai_db psql -U "${DB_USER}" -d postgres -v ON_ERROR_STOP=1 -c "ALTER ROLE \"${DB_USER}\" WITH PASSWORD '${DB_PASSWORD_SQL}';"
+echo "DB role password synced for user '${DB_USER}'"
 
 DB_PREFLIGHT_MAX_ATTEMPTS=5
 DB_PREFLIGHT_DELAY_SEC=3
