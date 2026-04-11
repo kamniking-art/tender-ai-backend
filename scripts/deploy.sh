@@ -19,22 +19,35 @@ if [ -f .env ]; then
   set +a
 fi
 
-# Canonical DB credentials source of truth is DB_*.
-# Keep backward compatibility with legacy POSTGRES_* envs.
+# Database credentials model:
+# - POSTGRES_*: DB superuser credentials used only for DB administration.
+# - DB_APP_*: application runtime credentials (source of truth for app).
+# Backward compatibility:
+# - DB_USER/DB_PASSWORD map to DB_APP_USER/DB_APP_PASSWORD when DB_APP_* are absent.
+if [ -z "${POSTGRES_DB:-}" ] && [ -n "${DB_NAME:-}" ]; then
+  export POSTGRES_DB="${DB_NAME}"
+fi
 if [ -z "${DB_NAME:-}" ] && [ -n "${POSTGRES_DB:-}" ]; then
   export DB_NAME="${POSTGRES_DB}"
 fi
-if [ -z "${DB_USER:-}" ] && [ -n "${POSTGRES_USER:-}" ]; then
-  export DB_USER="${POSTGRES_USER}"
+if [ -z "${DB_APP_USER:-}" ] && [ -n "${DB_USER:-}" ]; then
+  export DB_APP_USER="${DB_USER}"
 fi
-if [ -z "${DB_PASSWORD:-}" ] && [ -n "${POSTGRES_PASSWORD:-}" ]; then
-  export DB_PASSWORD="${POSTGRES_PASSWORD}"
+if [ -z "${DB_APP_PASSWORD:-}" ] && [ -n "${DB_PASSWORD:-}" ]; then
+  export DB_APP_PASSWORD="${DB_PASSWORD}"
 fi
 
-DB_NAME="${DB_NAME:-tender_ai}"
-DB_USER="${DB_USER:-postgres}"
-DB_PASSWORD="${DB_PASSWORD:-postgres}"
-export DB_NAME DB_USER DB_PASSWORD
+POSTGRES_DB="${POSTGRES_DB:-tender_ai}"
+POSTGRES_USER="${POSTGRES_USER:-postgres}"
+POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-postgres}"
+DB_NAME="${DB_NAME:-${POSTGRES_DB}}"
+DB_APP_USER="${DB_APP_USER:-tender_app}"
+DB_APP_PASSWORD="${DB_APP_PASSWORD:-tender_app}"
+
+# Keep legacy DB_USER/DB_PASSWORD exported for app compatibility.
+DB_USER="${DB_USER:-${DB_APP_USER}}"
+DB_PASSWORD="${DB_PASSWORD:-${DB_APP_PASSWORD}}"
+export POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD DB_NAME DB_APP_USER DB_APP_PASSWORD DB_USER DB_PASSWORD
 
 git pull --ff-only
 
@@ -46,7 +59,7 @@ DEPLOY_BASE_URL="${DEPLOY_BASE_URL:-http://127.0.0.1:${APP_EXTERNAL_PORT:-8000}}
 echo "Deploy commit: ${APP_VERSION}"
 echo "Expected image tag: ${APP_IMAGE_TAG}"
 echo "Readiness base URL: ${DEPLOY_BASE_URL}"
-echo "DB credentials source: DB_NAME=${DB_NAME} DB_USER=${DB_USER} DB_PASSWORD=<hidden>"
+echo "DB credentials source: DB_NAME=${DB_NAME} DB_APP_USER=${DB_APP_USER} DB_APP_PASSWORD=<hidden>; POSTGRES_USER=${POSTGRES_USER}"
 
 # Wait for immutable image tag to appear in GHCR.
 PULL_MAX_ATTEMPTS=12
@@ -70,10 +83,32 @@ echo "App image: ${APP_IMAGE}"
 # Bring up database first; do not touch app until DB credentials are verified.
 docker compose up -d tender_ai_db
 
-# Enforce DB role password to match canonical runtime DB_PASSWORD.
-DB_PASSWORD_SQL="$(python3 -c "import os; print((os.getenv('DB_PASSWORD') or 'postgres').replace(\"'\", \"''\"))")"
-docker compose exec -T tender_ai_db psql -U "${DB_USER}" -d postgres -v ON_ERROR_STOP=1 -c "ALTER ROLE \"${DB_USER}\" WITH PASSWORD '${DB_PASSWORD_SQL}';"
-echo "DB role password synced for user '${DB_USER}'"
+# Ensure application DB role exists and matches canonical DB_APP_* credentials.
+DB_APP_PASSWORD_SQL="$(python3 -c "import os; print((os.getenv('DB_APP_PASSWORD') or 'tender_app').replace(\"'\", \"''\"))")"
+DB_APP_USER_SQL="$(python3 -c "import os; print((os.getenv('DB_APP_USER') or 'tender_app').replace('\"', ''))")"
+DB_NAME_SQL="$(python3 -c "import os; print((os.getenv('DB_NAME') or 'tender_ai').replace('\"', ''))")"
+
+docker compose exec -T tender_ai_db psql -U "${POSTGRES_USER}" -d postgres -v ON_ERROR_STOP=1 <<SQL
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${DB_APP_USER_SQL}') THEN
+    EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', '${DB_APP_USER_SQL}', '${DB_APP_PASSWORD_SQL}');
+  ELSE
+    EXECUTE format('ALTER ROLE %I WITH LOGIN PASSWORD %L', '${DB_APP_USER_SQL}', '${DB_APP_PASSWORD_SQL}');
+  END IF;
+END
+\$\$;
+SQL
+
+docker compose exec -T tender_ai_db psql -U "${POSTGRES_USER}" -d postgres -v ON_ERROR_STOP=1 -c "GRANT CONNECT ON DATABASE \"${DB_NAME_SQL}\" TO \"${DB_APP_USER_SQL}\";"
+docker compose exec -T tender_ai_db psql -U "${POSTGRES_USER}" -d "${DB_NAME_SQL}" -v ON_ERROR_STOP=1 <<SQL
+GRANT USAGE, CREATE ON SCHEMA public TO "${DB_APP_USER_SQL}";
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "${DB_APP_USER_SQL}";
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "${DB_APP_USER_SQL}";
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "${DB_APP_USER_SQL}";
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "${DB_APP_USER_SQL}";
+SQL
+echo "DB app role synced and granted: user='${DB_APP_USER}' db='${DB_NAME}'"
 
 DB_PREFLIGHT_MAX_ATTEMPTS=5
 DB_PREFLIGHT_DELAY_SEC=3
@@ -83,7 +118,7 @@ for attempt in $(seq 1 "${DB_PREFLIGHT_MAX_ATTEMPTS}"); do
     break
   fi
   if [ "${attempt}" -eq "${DB_PREFLIGHT_MAX_ATTEMPTS}" ]; then
-    echo "ERROR: DB preflight failed. Check DB_* / POSTGRES_* / DATABASE_URL_* consistency in .env"
+    echo "ERROR: DB preflight failed for app user '${DB_APP_USER}'. Check DB_APP_* / DATABASE_URL_* consistency in .env"
     exit 1
   fi
   echo "DB preflight retry in ${DB_PREFLIGHT_DELAY_SEC}s (${attempt}/${DB_PREFLIGHT_MAX_ATTEMPTS})..."

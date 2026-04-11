@@ -3,9 +3,9 @@ services:
     image: postgres:16
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${DB_NAME:-tender_ai}
-      POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-tender_ai}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
       - "5433:5432"
     volumes:
@@ -21,16 +21,16 @@ services:
       APP_VERSION: ${APP_VERSION:-unknown}
       APP_BUILT_AT: ${APP_BUILT_AT:-unknown}
       DB_NAME: ${DB_NAME:-tender_ai}
-      DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_USER: ${DB_APP_USER:-tender_app}
+      DB_PASSWORD: ${DB_APP_PASSWORD:-tender_app}
       DB_HOST: ${DB_HOST:-tender_ai_db}
       DB_PORT: ${DB_PORT:-5432}
-      DATABASE_URL: postgresql+asyncpg://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@${DB_HOST:-tender_ai_db}:${DB_PORT:-5432}/${DB_NAME:-tender_ai}
-      DATABASE_URL_SYNC: postgresql+psycopg2://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@${DB_HOST:-tender_ai_db}:${DB_PORT:-5432}/${DB_NAME:-tender_ai}
+      DATABASE_URL: postgresql+asyncpg://${DB_APP_USER:-tender_app}:${DB_APP_PASSWORD:-tender_app}@${DB_HOST:-tender_ai_db}:${DB_PORT:-5432}/${DB_NAME:-tender_ai}
+      DATABASE_URL_SYNC: postgresql+psycopg2://${DB_APP_USER:-tender_app}:${DB_APP_PASSWORD:-tender_app}@${DB_HOST:-tender_ai_db}:${DB_PORT:-5432}/${DB_NAME:-tender_ai}
     depends_on:
       - tender_ai_db
     ports:
-      - "8000:8000"
+      - "${APP_EXTERNAL_PORT:-8000}:8000"
     volumes:
       - tender_ai_storage:/data
 
