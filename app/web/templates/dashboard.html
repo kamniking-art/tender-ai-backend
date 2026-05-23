@@ -147,14 +147,16 @@
     <label>Таймаут deep (сек)
       <input type="number" name="deep_analysis_timeout_seconds" min="30" max="900" value="{{ monitoring_settings.deep_analysis_timeout_seconds }}" />
     </label>
-    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-top:16px;">
+    <div style="margin-top:16px;">
       <button type="submit" class="btn-primary">Сохранить настройки мониторинга</button>
-      <form method="post" action="/web/monitoring/run-once" style="margin:0;">
-        <button type="submit" class="btn-secondary">Запустить мониторинг сейчас</button>
-      </form>
-      <a href="/web/tenders?status=new&relevant_only=true">Только новые релевантные</a>
     </div>
   </form>
+  <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-top:12px;">
+    <form method="post" action="/web/monitoring/run-once" style="margin:0;">
+      <button type="submit" class="btn-secondary">Запустить мониторинг сейчас</button>
+    </form>
+    <a href="/web/tenders?status=new&relevant_only=true">Только новые релевантные</a>
+  </div>
   {% if monitor_result and monitor_result.message %}
   <p>
     <strong>{% if monitor_result.status == "ok" %}Успешно{% else %}Ошибка{% endif %}:</strong>
