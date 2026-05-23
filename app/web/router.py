@@ -3,8 +3,11 @@ from decimal import Decimal, InvalidOperation
 import logging
 from pathlib import Path
 import re
+from typing import Any
 from uuid import UUID
 from urllib.parse import urlencode
+
+from pydantic import BaseModel
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
@@ -71,6 +74,10 @@ from app.decision_engine.service import (
 from app.web.deps import ACCESS_COOKIE_NAME, get_current_user_from_cookie
 
 templates = Jinja2Templates(directory="app/web/templates")
+import json as _json
+templates.env.filters["tojson"] = lambda v, indent=None, **kw: _json.dumps(
+    v, ensure_ascii=False, indent=indent, **kw
+)
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/web", tags=["web"])
@@ -1279,6 +1286,37 @@ async def web_ack_alert(
     return RedirectResponse(url=request.headers.get("referer", "/web"), status_code=status.HTTP_303_SEE_OTHER)
 
 
+@router.get("/policies")
+async def policies_page(
+    request: Request,
+    current_user: User = Depends(get_current_user_from_cookie),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.policy_engine.loader import Policy
+    rows = list((await db.scalars(
+        select(Policy)
+        .where(Policy.company_id == current_user.company_id)
+        .order_by(Policy.priority.desc(), Policy.created_at.asc())
+    )).all())
+    return templates.TemplateResponse(
+        "policies.html",
+        _template_context(request, current_user, policies=rows),
+    )
+
+
+@router.get("/company/profile")
+async def company_profile_page(
+    request: Request,
+    current_user: User = Depends(get_current_user_from_cookie),
+    db: AsyncSession = Depends(get_db),
+):
+    company = await db.scalar(select(Company).where(Company.id == current_user.company_id))
+    return templates.TemplateResponse(
+        "company_profile.html",
+        _template_context(request, current_user, company=company),
+    )
+
+
 @router.get("/tenders")
 async def tenders_page(
     request: Request,
@@ -2228,3 +2266,102 @@ async def web_download_tender_document(
         filename=document.file_name,
         media_type=document.content_type or "application/octet-stream",
     )
+
+
+# ── Company profile API — cookie auth (used by company_profile.html) ──────────
+
+_COMPANY_TOP_LEVEL_FIELDS = {"inn", "ogrn", "name", "legal_address", "bank_details"}
+
+
+class _CompanyFullProfileResponse(BaseModel):
+    id: Any
+    name: str | None
+    inn: str | None
+    ogrn: str | None
+    legal_address: str | None
+    bank_details: dict | None
+    okved_main: str | None = None
+    okved_additional: list[str] = []
+    sro: dict = {}
+    licenses: list[dict] = []
+    experience: dict = {}
+    financial: dict = {}
+    regions: list[str] = []
+    documents: list[dict] = []
+
+
+class _CompanyFullProfilePatch(BaseModel):
+    name: str | None = None
+    inn: str | None = None
+    ogrn: str | None = None
+    legal_address: str | None = None
+    bank_details: dict | None = None
+    okved_main: str | None = None
+    okved_additional: list[str] | None = None
+    sro: dict | None = None
+    licenses: list[dict] | None = None
+    experience: dict | None = None
+    financial: dict | None = None
+    regions: list[str] | None = None
+    documents: list[dict] | None = None
+
+
+def _build_company_full_response(company: Company) -> _CompanyFullProfileResponse:
+    p = company.profile if isinstance(company.profile, dict) else {}
+    return _CompanyFullProfileResponse(
+        id=str(company.id),
+        name=company.name,
+        inn=company.inn,
+        ogrn=company.ogrn,
+        legal_address=company.legal_address,
+        bank_details=company.bank_details,
+        okved_main=p.get("okved_main"),
+        okved_additional=p.get("okved_additional", []),
+        sro=p.get("sro", {}),
+        licenses=p.get("licenses", []),
+        experience=p.get("experience", {}),
+        financial=p.get("financial", {}),
+        regions=p.get("regions", []),
+        documents=p.get("documents", []),
+    )
+
+
+@router.get("/api/company/profile", response_model=_CompanyFullProfileResponse)
+async def web_get_company_profile(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_cookie),
+) -> _CompanyFullProfileResponse:
+    """Return full company profile — cookie auth for use by company_profile.html."""
+    company = await db.scalar(select(Company).where(Company.id == current_user.company_id))
+    if company is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    return _build_company_full_response(company)
+
+
+@router.patch("/api/company/profile", response_model=_CompanyFullProfileResponse)
+async def web_patch_company_profile(
+    payload: _CompanyFullProfilePatch,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_cookie),
+) -> _CompanyFullProfileResponse:
+    """Update full company profile — cookie auth for use by company_profile.html."""
+    company = await db.scalar(select(Company).where(Company.id == current_user.company_id))
+    if company is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    data = payload.model_dump(exclude_unset=True)
+
+    for field in _COMPANY_TOP_LEVEL_FIELDS:
+        if field in data:
+            setattr(company, field, data.pop(field))
+
+    if data:
+        current_profile = company.profile if isinstance(company.profile, dict) else {}
+        company.profile = {**current_profile, **data}
+
+    from sqlalchemy.orm import attributes
+    attributes.flag_modified(company, "profile")
+
+    await db.commit()
+    await db.refresh(company)
+    return _build_company_full_response(company)
