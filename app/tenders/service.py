@@ -54,6 +54,7 @@ def _apply_filters(
 
 
 async def create_tender(db: AsyncSession, company_id: UUID, payload: TenderCreate) -> Tender:
+    from app.deadline_control.service import upsert_deadline_control
     tender = Tender(
         company_id=company_id,
         source=payload.source,
@@ -71,6 +72,8 @@ async def create_tender(db: AsyncSession, company_id: UUID, payload: TenderCreat
     db.add(tender)
     await db.commit()
     await db.refresh(tender)
+    # Populate deadline_control immediately after creation
+    await upsert_deadline_control(db, tender.id, company_id, tender.submission_deadline)
     return tender
 
 
@@ -144,12 +147,16 @@ async def get_tender_by_id_scoped(db: AsyncSession, company_id: UUID, tender_id:
 
 
 async def update_tender(db: AsyncSession, tender: Tender, payload: TenderUpdate) -> Tender:
+    from app.deadline_control.service import upsert_deadline_control
     updates = payload.model_dump(exclude_unset=True)
     for field, value in updates.items():
         setattr(tender, field, value)
 
     await db.commit()
     await db.refresh(tender)
+    # Recalculate deadline_control if submission_deadline was part of the update
+    if "submission_deadline" in updates:
+        await upsert_deadline_control(db, tender.id, tender.company_id, tender.submission_deadline)
     return tender
 
 

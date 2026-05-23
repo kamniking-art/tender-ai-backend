@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+{% block title %}Правила | Tender AI{% endblock %}
+{% block content %}
+<h1>Правила оценки тендеров</h1>
+
+<div id="toast" class="toast hidden"></div>
+
+{% set type_names = {
+  "deadline_urgent": "Срочный дедлайн",
+  "missing_sro": "Отсутствует СРО",
+  "no_okved_match": "ОКВЭД не совпадает",
+  "low_fit_score": "Низкое соответствие",
+  "high_nmck": "Крупный контракт"
+} %}
+
+{% set action_labels = {
+  "block_recommendation": "Блокирует участие",
+  "add_risk_flag": "Флаг риска",
+  "require_approval": "Требует согласования",
+  "adjust_score": "Корректирует балл",
+  "notify": "Уведомление",
+  "skip_tender": "Пропустить тендер"
+} %}
+
+{% set action_badge_class = {
+  "block_recommendation": "badge-red",
+  "add_risk_flag": "badge-orange",
+  "require_approval": "badge-yellow",
+  "adjust_score": "badge-blue",
+  "notify": "badge-gray",
+  "skip_tender": "badge-red"
+} %}
+
+<section class="card">
+  {% if policies %}
+  <table class="policies-table">
+    <thead>
+      <tr>
+        <th>Название</th>
+        <th>Описание</th>
+        <th>Действие</th>
+        <th class="col-priority">Приоритет</th>
+        <th class="col-toggle">Активно</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in policies %}
+      {% set action = p.action if p.action is mapping else {} %}
+      {% set action_type = action.get("type", "") %}
+      {% set payload = action.get("payload", {}) %}
+      {% set description = payload.get("message") or payload.get("reason") or "" %}
+      <tr id="row-{{ p.policy_id }}" class="{% if not p.active %}policy-inactive{% endif %}">
+        <td class="policy-name">
+          {{ type_names.get(p.policy_type, p.policy_type) }}
+          <span class="policy-type-hint">{{ p.policy_type }}</span>
+        </td>
+        <td class="policy-desc">{{ description }}</td>
+        <td>
+          <span class="badge {{ action_badge_class.get(action_type, 'badge-gray') }}">
+            {{ action_labels.get(action_type, action_type) }}
+          </span>
+        </td>
+        <td class="col-priority">{{ p.priority }}</td>
+        <td class="col-toggle">
+          <button
+            type="button"
+            class="toggle-btn {% if p.active %}toggle-on{% else %}toggle-off{% endif %}"
+            data-policy-id="{{ p.policy_id }}"
+            data-active="{{ 'true' if p.active else 'false' }}"
+            onclick="togglePolicy(this)"
+            aria-label="{% if p.active %}Выключить{% else %}Включить{% endif %} правило"
+          >
+            <span class="toggle-track">
+              <span class="toggle-thumb"></span>
+            </span>
+          </button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty-state">Правила ещё не созданы. Запустите <code>python scripts/seed_policies.py --company-id &lt;UUID&gt;</code> для загрузки базовых правил.</p>
+  {% endif %}
+</section>
+
+<style>
+.policies-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.policies-table th,
+.policies-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+  text-align: left;
+  vertical-align: middle;
+}
+.policies-table th {
+  font-weight: 600;
+  color: var(--text-secondary, #6b7280);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--bg-subtle, #f9fafb);
+}
+.policies-table tbody tr:hover {
+  background: var(--bg-hover, #f3f4f6);
+}
+.policy-inactive td {
+  opacity: 0.45;
+}
+.policy-name {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.policy-type-hint {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted, #9ca3af);
+  margin-top: 2px;
+}
+.policy-desc {
+  color: var(--text-secondary, #6b7280);
+  max-width: 340px;
+}
+.col-priority {
+  text-align: center;
+  width: 80px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary, #6b7280);
+}
+.col-toggle {
+  text-align: center;
+  width: 64px;
+}
+
+/* Badges */
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.badge-red    { background: #fee2e2; color: #b91c1c; }
+.badge-orange { background: #ffedd5; color: #c2410c; }
+.badge-yellow { background: #fef9c3; color: #92400e; }
+.badge-blue   { background: #dbeafe; color: #1d4ed8; }
+.badge-gray   { background: #f3f4f6; color: #374151; }
+
+/* Toggle switch */
+.toggle-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.toggle-track {
+  display: inline-flex;
+  align-items: center;
+  width: 40px;
+  height: 22px;
+  border-radius: 999px;
+  background: #d1d5db;
+  transition: background 0.2s;
+  position: relative;
+}
+.toggle-on .toggle-track {
+  background: #2563eb;
+}
+.toggle-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  position: absolute;
+  left: 2px;
+  transition: left 0.2s;
+}
+.toggle-on .toggle-thumb {
+  left: 20px;
+}
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #fff;
+  background: #1e293b;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  z-index: 1000;
+  transition: opacity 0.3s;
+}
+.toast.hidden { opacity: 0; pointer-events: none; }
+.toast.success { background: #16a34a; }
+.toast.error   { background: #dc2626; }
+
+.empty-state {
+  color: var(--text-secondary, #6b7280);
+  padding: 24px 0;
+  text-align: center;
+}
+</style>
+
+<script>
+function showToast(msg, type) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.className = "toast " + type;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.className = "toast hidden"; }, 3000);
+}
+
+async function togglePolicy(btn) {
+  const policyId = btn.dataset.policyId;
+  const wasActive = btn.dataset.active === "true";
+
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/policies/${policyId}/toggle`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const nowActive = data.active;
+
+    btn.dataset.active = nowActive ? "true" : "false";
+    if (nowActive) {
+      btn.classList.add("toggle-on");
+      btn.classList.remove("toggle-off");
+      btn.setAttribute("aria-label", "Выключить правило");
+    } else {
+      btn.classList.add("toggle-off");
+      btn.classList.remove("toggle-on");
+      btn.setAttribute("aria-label", "Включить правило");
+    }
+
+    const row = document.getElementById("row-" + policyId);
+    if (row) {
+      row.classList.toggle("policy-inactive", !nowActive);
+    }
+
+    showToast(nowActive ? "Правило включено" : "Правило выключено", "success");
+  } catch (e) {
+    showToast("Ошибка: " + e.message, "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+</script>
+{% endblock %}

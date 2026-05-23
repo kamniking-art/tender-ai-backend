@@ -1,0 +1,379 @@
+{% extends "base.html" %}
+{% block title %}Профиль компании | Tender AI{% endblock %}
+{% block content %}
+<h1>Профиль компании</h1>
+
+<div id="toast" class="toast hidden"></div>
+
+<form id="profile-form">
+
+  <!-- 1. Реквизиты -->
+  <section class="card">
+    <h2>1. Реквизиты</h2>
+    <div class="grid-form">
+      <label>Название компании
+        <input type="text" name="name" id="f-name" />
+      </label>
+      <label>ИНН <span class="hint">(10 или 12 цифр)</span>
+        <input type="text" name="inn" id="f-inn" inputmode="numeric" />
+        <span class="field-error" id="err-inn"></span>
+      </label>
+      <label>ОГРН <span class="hint">(13 или 15 цифр)</span>
+        <input type="text" name="ogrn" id="f-ogrn" inputmode="numeric" />
+        <span class="field-error" id="err-ogrn"></span>
+      </label>
+      <label>Юридический адрес
+        <input type="text" name="legal_address" id="f-legal-address" />
+      </label>
+    </div>
+    <h3 style="margin-top:16px">Банковские реквизиты</h3>
+    <div class="grid-form">
+      <label>БИК
+        <input type="text" name="bank_bik" id="f-bank-bik" />
+      </label>
+      <label>Расчётный счёт
+        <input type="text" name="bank_account" id="f-bank-account" />
+      </label>
+      <label>Банк
+        <input type="text" name="bank_name" id="f-bank-name" />
+      </label>
+      <label>Корреспондентский счёт
+        <input type="text" name="bank_corr" id="f-bank-corr" />
+      </label>
+    </div>
+  </section>
+
+  <!-- 2. ОКВЭД -->
+  <section class="card">
+    <h2>2. ОКВЭД</h2>
+    <div class="grid-form">
+      <label>Основной ОКВЭД
+        <input type="text" name="okved_main" id="f-okved-main" placeholder="например, 41.20" />
+      </label>
+    </div>
+    <label>Дополнительные ОКВЭДы</label>
+    <div id="okved-list" class="tag-list"></div>
+    <div class="row-add">
+      <input type="text" id="okved-input" placeholder="Добавить ОКВЭД, напр. 43.11" />
+      <button type="button" class="btn-secondary" onclick="addOkved()">+ Добавить</button>
+    </div>
+  </section>
+
+  <!-- 3. СРО -->
+  <section class="card">
+    <h2>3. СРО</h2>
+    <label class="checkbox-label">
+      <input type="checkbox" id="f-has-sro" onchange="toggleSro()" />
+      Есть СРО
+    </label>
+    <div id="sro-fields" class="grid-form" style="display:none;margin-top:12px">
+      <label>Название СРО
+        <input type="text" id="f-sro-name" />
+      </label>
+      <label>Номер свидетельства
+        <input type="text" id="f-sro-number" />
+      </label>
+      <label>Срок действия
+        <input type="date" id="f-sro-expiry" />
+      </label>
+    </div>
+  </section>
+
+  <!-- 4. Лицензии -->
+  <section class="card">
+    <h2>4. Лицензии</h2>
+    <div id="licenses-list"></div>
+    <button type="button" class="btn-secondary" onclick="addLicense()">+ Добавить лицензию</button>
+  </section>
+
+  <!-- 5. Опыт и финансы -->
+  <section class="card">
+    <h2>5. Опыт и финансы</h2>
+    <div class="grid-form">
+      <label>Лет в бизнесе
+        <input type="number" id="f-years" min="0" />
+      </label>
+      <label>Завершённых контрактов
+        <input type="number" id="f-contracts" min="0" />
+      </label>
+      <label>Максимальный контракт (руб.)
+        <input type="number" id="f-max-contract" min="0" />
+      </label>
+      <label>Доступные средства на обеспечение (руб.)
+        <input type="number" id="f-available-funds" min="0" />
+      </label>
+      <label>Месячная мощность выполнения (руб.)
+        <input type="number" id="f-monthly-capacity" min="0" />
+      </label>
+    </div>
+  </section>
+
+  <!-- 6. Регионы -->
+  <section class="card">
+    <h2>6. Регионы работы</h2>
+    <div id="regions-list" class="tag-list"></div>
+    <div class="row-add">
+      <input type="text" id="region-input" placeholder="Добавить регион, напр. Москва" />
+      <button type="button" class="btn-secondary" onclick="addRegion()">+ Добавить</button>
+    </div>
+  </section>
+
+  <div class="save-bar">
+    <button type="submit" class="btn-primary">Сохранить профиль</button>
+  </div>
+
+</form>
+
+<style>
+  h1 { margin-bottom: 16px; }
+  h2 { font-size: 16px; margin-bottom: 14px; color: var(--accent); }
+  h3 { font-size: 14px; font-weight: 600; margin-bottom: 10px; color: var(--muted); }
+
+  .grid-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  .grid-form label { display: flex; flex-direction: column; font-size: 13px; font-weight: 600; color: var(--muted); gap: 4px; }
+  .grid-form input { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 14px; background: #fff; outline: none; }
+  .grid-form input:focus { border-color: var(--accent); }
+  .hint { font-weight: 400; font-size: 11px; color: #aaa; }
+
+  .checkbox-label { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+  .checkbox-label input { width: 16px; height: 16px; accent-color: var(--accent); }
+
+  /* Tags */
+  .tag-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; min-height: 30px; }
+  .tag { display: flex; align-items: center; gap: 4px; background: var(--accent-soft); color: var(--accent); border: 1px solid #bdd5f5; border-radius: 20px; padding: 3px 10px; font-size: 13px; }
+  .tag button { background: none; border: none; cursor: pointer; color: var(--muted); font-size: 14px; line-height: 1; padding: 0 2px; }
+  .tag button:hover { color: var(--danger); }
+
+  .row-add { display: flex; gap: 8px; align-items: center; }
+  .row-add input { flex: 1; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 14px; }
+
+  /* License rows */
+  .license-row { display: grid; grid-template-columns: 1fr 1fr 140px 80px 32px; gap: 8px; align-items: center; padding: 8px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; }
+  .license-row.expired { border-color: #f4b8b8; background: #fff5f5; }
+  .license-row input[type=text], .license-row input[type=date] { padding: 6px 8px; border: 1px solid var(--line); border-radius: 5px; font-size: 13px; width: 100%; }
+  .license-row .expired-badge { font-size: 11px; color: var(--danger); font-weight: 600; }
+  .license-row label { display: flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap; }
+  .btn-remove { background: none; border: none; cursor: pointer; color: var(--muted); font-size: 18px; line-height: 1; }
+  .btn-remove:hover { color: var(--danger); }
+
+  .btn-primary { background: var(--accent); color: #fff; border: none; padding: 10px 28px; border-radius: 7px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  .btn-primary:hover { background: #0856a8; }
+  .btn-secondary { background: #fff; color: var(--accent); border: 1px solid var(--accent); padding: 7px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .btn-secondary:hover { background: var(--accent-soft); }
+
+  .save-bar { text-align: right; padding: 16px 0 24px; }
+
+  .field-error { font-size: 11px; color: var(--danger); min-height: 14px; }
+  input.invalid { border-color: var(--danger) !important; }
+
+  /* Toast */
+  .toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: 600; z-index: 9999; box-shadow: 0 4px 16px rgba(0,0,0,.15); transition: opacity .3s; }
+  .toast.success { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+  .toast.error   { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+  .toast.hidden  { display: none; }
+</style>
+
+<script>
+  const COMPANY_ID = "{{ company.id }}";
+  const API_BASE = "/web/api/company/profile";
+
+  // ── State ────────────────────────────────────────────────────────────────────
+  let okvedAdditional = [];
+  let licenses = [];
+  let regions = [];
+
+  // ── Load data ────────────────────────────────────────────────────────────────
+  async function loadProfile() {
+    try {
+      const res = await fetch(API_BASE);
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const d = await res.json();
+
+      document.getElementById("f-name").value           = d.name || "";
+      document.getElementById("f-inn").value            = d.inn || "";
+      document.getElementById("f-ogrn").value           = d.ogrn || "";
+      document.getElementById("f-legal-address").value  = d.legal_address || "";
+
+      const bd = d.bank_details || {};
+      document.getElementById("f-bank-bik").value     = bd.bik || "";
+      document.getElementById("f-bank-account").value = bd.account || "";
+      document.getElementById("f-bank-name").value    = bd.bank || "";
+      document.getElementById("f-bank-corr").value    = bd.corr || "";
+
+      document.getElementById("f-okved-main").value = d.okved_main || "";
+      okvedAdditional = d.okved_additional || [];
+      renderOkveds();
+
+      const sro = d.sro || {};
+      document.getElementById("f-has-sro").checked = !!sro.has_sro;
+      document.getElementById("f-sro-name").value   = sro.sro_name || "";
+      document.getElementById("f-sro-number").value = sro.sro_number || "";
+      document.getElementById("f-sro-expiry").value = sro.sro_expiry || "";
+      toggleSro();
+
+      licenses = d.licenses || [];
+      renderLicenses();
+
+      const exp = d.experience || {};
+      document.getElementById("f-years").value     = exp.years ?? "";
+      document.getElementById("f-contracts").value = exp.contracts_completed ?? "";
+      document.getElementById("f-max-contract").value = exp.max_contract_value ?? "";
+
+      const fin = d.financial || {};
+      document.getElementById("f-available-funds").value   = fin.available_funds ?? "";
+      document.getElementById("f-monthly-capacity").value  = fin.monthly_capacity ?? "";
+
+      regions = d.regions || [];
+      renderRegions();
+    } catch (e) {
+      showToast("Ошибка загрузки данных", "error");
+    }
+  }
+
+  // ── ОКВЭД ─────────────────────────────────────────────────────────────────────
+  function renderOkveds() {
+    const el = document.getElementById("okved-list");
+    el.innerHTML = okvedAdditional.map((v, i) =>
+      `<span class="tag">${v}<button type="button" onclick="removeOkved(${i})" title="Удалить">×</button></span>`
+    ).join("");
+  }
+  function addOkved() {
+    const inp = document.getElementById("okved-input");
+    const val = inp.value.trim();
+    if (val && !okvedAdditional.includes(val)) { okvedAdditional.push(val); renderOkveds(); }
+    inp.value = "";
+  }
+  function removeOkved(i) { okvedAdditional.splice(i, 1); renderOkveds(); }
+  document.getElementById("okved-input").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); addOkved(); } });
+
+  // ── СРО ──────────────────────────────────────────────────────────────────────
+  function toggleSro() {
+    document.getElementById("sro-fields").style.display =
+      document.getElementById("f-has-sro").checked ? "grid" : "none";
+  }
+
+  // ── Лицензии ─────────────────────────────────────────────────────────────────
+  function isExpired(expiry) {
+    return expiry && new Date(expiry) < new Date();
+  }
+  function renderLicenses() {
+    const el = document.getElementById("licenses-list");
+    el.innerHTML = licenses.map((lic, i) => {
+      const exp = isExpired(lic.expiry);
+      return `<div class="license-row${exp ? " expired" : ""}">
+        <input type="text" placeholder="Тип (напр. МЧС)" value="${esc(lic.type||"")}" oninput="licenses[${i}].type=this.value" />
+        <input type="text" placeholder="Номер" value="${esc(lic.number||"")}" oninput="licenses[${i}].number=this.value" />
+        <input type="date" value="${lic.expiry||""}" oninput="licenses[${i}].expiry=this.value;renderLicenses()" />
+        <label><input type="checkbox" ${lic.active?"checked":""} onchange="licenses[${i}].active=this.checked" /> Активна</label>
+        ${exp ? '<span class="expired-badge">Истекла</span>' : '<span></span>'}
+        <button type="button" class="btn-remove" onclick="removeLicense(${i})" title="Удалить">×</button>
+      </div>`;
+    }).join("");
+  }
+  function addLicense() {
+    licenses.push({ type: "", number: "", expiry: "", active: true });
+    renderLicenses();
+  }
+  function removeLicense(i) { licenses.splice(i, 1); renderLicenses(); }
+
+  // ── Регионы ───────────────────────────────────────────────────────────────────
+  function renderRegions() {
+    const el = document.getElementById("regions-list");
+    el.innerHTML = regions.map((r, i) =>
+      `<span class="tag">${r}<button type="button" onclick="removeRegion(${i})" title="Удалить">×</button></span>`
+    ).join("");
+  }
+  function addRegion() {
+    const inp = document.getElementById("region-input");
+    const val = inp.value.trim();
+    if (val && !regions.includes(val)) { regions.push(val); renderRegions(); }
+    inp.value = "";
+  }
+  function removeRegion(i) { regions.splice(i, 1); renderRegions(); }
+  document.getElementById("region-input").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); addRegion(); } });
+
+  // ── Валидация ─────────────────────────────────────────────────────────────────
+  function validateField(id, errId, regex, msg) {
+    const val = document.getElementById(id).value.trim();
+    const el = document.getElementById(id);
+    const err = document.getElementById(errId);
+    if (val && !regex.test(val)) {
+      el.classList.add("invalid"); err.textContent = msg; return false;
+    }
+    el.classList.remove("invalid"); err.textContent = ""; return true;
+  }
+  function validate() {
+    const a = validateField("f-inn",  "err-inn",  /^\d{10}$|^\d{12}$/, "ИНН должен содержать 10 или 12 цифр");
+    const b = validateField("f-ogrn", "err-ogrn", /^\d{13}$|^\d{15}$/, "ОГРН должен содержать 13 или 15 цифр");
+    return a && b;
+  }
+
+  // ── Сохранение ───────────────────────────────────────────────────────────────
+  document.getElementById("profile-form").addEventListener("submit", async e => {
+    e.preventDefault();
+    if (!validate()) return;
+
+    const payload = {
+      name:          document.getElementById("f-name").value.trim() || null,
+      inn:           document.getElementById("f-inn").value.trim() || null,
+      ogrn:          document.getElementById("f-ogrn").value.trim() || null,
+      legal_address: document.getElementById("f-legal-address").value.trim() || null,
+      bank_details: {
+        bik:     document.getElementById("f-bank-bik").value.trim(),
+        account: document.getElementById("f-bank-account").value.trim(),
+        bank:    document.getElementById("f-bank-name").value.trim(),
+        corr:    document.getElementById("f-bank-corr").value.trim(),
+      },
+      okved_main:       document.getElementById("f-okved-main").value.trim() || null,
+      okved_additional: okvedAdditional,
+      sro: {
+        has_sro:    document.getElementById("f-has-sro").checked,
+        sro_name:   document.getElementById("f-sro-name").value.trim(),
+        sro_number: document.getElementById("f-sro-number").value.trim(),
+        sro_expiry: document.getElementById("f-sro-expiry").value || null,
+      },
+      licenses,
+      experience: {
+        years:               numOrNull("f-years"),
+        contracts_completed: numOrNull("f-contracts"),
+        max_contract_value:  numOrNull("f-max-contract"),
+      },
+      financial: {
+        available_funds:  numOrNull("f-available-funds"),
+        monthly_capacity: numOrNull("f-monthly-capacity"),
+      },
+      regions,
+    };
+
+    try {
+      const res = await fetch(API_BASE, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      showToast("Профиль сохранён ✓", "success");
+    } catch {
+      showToast("Ошибка сохранения", "error");
+    }
+  });
+
+  // ── Helpers ───────────────────────────────────────────────────────────────────
+  function numOrNull(id) {
+    const v = document.getElementById(id).value;
+    return v === "" ? null : Number(v);
+  }
+  function esc(s) {
+    return s.replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+  function showToast(msg, type) {
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.className = "toast " + type;
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => { t.className = "toast hidden"; }, 3500);
+  }
+
+  loadProfile();
+</script>
+{% endblock %}

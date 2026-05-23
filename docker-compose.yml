@@ -12,8 +12,10 @@ services:
       - tender_ai_pgdata:/var/lib/postgresql/data
 
   tender_ai_app:
-    image: ghcr.io/kamniking-art/tender-ai-backend:${APP_IMAGE_TAG:-latest}
-    pull_policy: always
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tender-ai-backend:local
     restart: unless-stopped
     env_file:
       - .env

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from uuid import UUID
 
@@ -9,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai_extraction.client import get_extractor_provider
 from app.ai_extraction.interfaces import ExtractionProviderError
+from app.ai_extraction.model import AICostLog
 from app.ai_extraction.schemas import ExtractedTenderV1
 from app.ai_extraction.text_extract import NoExtractableTextError, build_normalized_text
 from app.core.config import settings
@@ -24,6 +26,24 @@ logger = logging.getLogger(__name__)
 
 class ExtractionBadRequestError(ValueError):
     pass
+
+
+def _build_document_signature(documents: list[TenderDocument]) -> str:
+    parts: list[str] = []
+    for doc in sorted(documents, key=lambda d: str(d.id)):
+        parts.append(f"{doc.id}:{doc.file_name}:{doc.file_size}:{doc.uploaded_at.isoformat() if doc.uploaded_at else '-'}")
+    return "|".join(parts)
+
+
+def _to_decimal_or_none(value: object) -> Decimal | None:
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
 
 
 def _line_or_dash(value: object | None) -> str:
@@ -94,6 +114,7 @@ async def run_extraction(
         tender_id=tender_id,
         document_ids=document_ids,
     )
+    document_signature = _build_document_signature(documents)
 
     docs_paths = [
         str((Path(settings.storage_root) / doc.storage_path)) if doc.storage_path else "-"
@@ -110,15 +131,49 @@ async def run_extraction(
         logger.warning("Extraction missing files: tender_id=%s paths=%s", tender_id, missing_paths)
         raise ExtractionBadRequestError("Документ не найден на сервере")
 
-    supported_suffixes = {".pdf", ".docx", ".txt", ".xlsx"}
+    supported_suffixes = {".pdf", ".docx", ".doc", ".txt", ".xlsx"}
     has_supported = any((doc.file_name or "").lower().endswith(tuple(supported_suffixes)) for doc in documents)
     if not has_supported:
-        raise ExtractionProviderError("UNSUPPORTED_FORMAT", "No supported document formats (.pdf/.docx/.txt/.xlsx)")
+        raise ExtractionProviderError("UNSUPPORTED_FORMAT", "No supported document formats (.pdf/.docx/.doc/.txt/.xlsx)")
+
+    analysis = await db.scalar(
+        select(TenderAnalysis).where(
+            TenderAnalysis.company_id == company_id,
+            TenderAnalysis.tender_id == tender_id,
+        )
+    )
+
+    if analysis is not None:
+        cached_requirements = dict(analysis.requirements or {})
+        cached_signature = str(cached_requirements.get("extract_doc_signature_v1") or "")
+        cached_extracted = cached_requirements.get("extracted_v1")
+        if cached_signature and cached_signature == document_signature and isinstance(cached_extracted, dict):
+            logger.info("Extraction cache hit: tender_id=%s", tender_id)
+            return analysis, ExtractedTenderV1.model_validate(cached_extracted)
+
+    # Create action record for this extraction run (best-effort — never blocks extraction).
+    _action_record = None
+    try:
+        from app.agent_actions.service import SYSTEM_AGENT_ID, create_action
+        _action_record = await create_action(
+            db,
+            company_id=company_id,
+            agent_id=SYSTEM_AGENT_ID,
+            action_type="extract_documents",
+            target=str(tender_id),
+            payload={"doc_count": len(documents)},
+        )
+    except Exception:
+        logger.exception(
+            "Failed to create action record for extraction tender_id=%s", tender_id
+        )
 
     merged_text = build_normalized_text(
         documents=documents,
         storage_root=settings.storage_root,
-        max_chars=settings.ai_extractor_max_chars,
+        max_chars=settings.ai_max_input_chars or settings.ai_extractor_max_chars,
+        max_files=settings.ai_max_files,
+        max_pages=settings.ai_max_pages,
     )
 
     provider = get_extractor_provider()
@@ -153,19 +208,20 @@ async def run_extraction(
             analysis_err.requirements = req_err
             analysis_err.updated_by = user_id
             await db.commit()
+        if _action_record is not None:
+            try:
+                from app.agent_actions.service import fail_action
+                await fail_action(
+                    db, _action_record.action_id, result={"error": "provider_error"}
+                )
+            except Exception:
+                pass
         raise
 
     extracted = provider_result.extracted
     risk_flags = compute_risk_flags(extracted, tender)
     risk_v1 = compute_risk_score_v1(extracted, tender)
     summary = build_summary(extracted, tender_nmck=tender.nmck)
-
-    analysis = await db.scalar(
-        select(TenderAnalysis).where(
-            TenderAnalysis.company_id == company_id,
-            TenderAnalysis.tender_id == tender_id,
-        )
-    )
 
     if analysis is not None and analysis.status == "approved":
         raise AnalysisConflictError("Approved analysis cannot be overwritten")
@@ -177,7 +233,12 @@ async def run_extraction(
             company_id=company_id,
             tender_id=tender_id,
             status="ready",
-            requirements={"extracted_v1": extracted_payload, "risk_v1": risk_v1, "extract_meta_v1": provider_result.extract_meta},
+            requirements={
+                "extracted_v1": extracted_payload,
+                "risk_v1": risk_v1,
+                "extract_meta_v1": provider_result.extract_meta,
+                "extract_doc_signature_v1": document_signature,
+            },
             missing_docs=[],
             risk_flags=risk_flags,
             summary=summary,
@@ -190,6 +251,7 @@ async def run_extraction(
         merged_requirements["extracted_v1"] = extracted_payload
         merged_requirements["risk_v1"] = risk_v1
         merged_requirements["extract_meta_v1"] = provider_result.extract_meta
+        merged_requirements["extract_doc_signature_v1"] = document_signature
         merged_requirements.pop("extract_error_v1", None)
         analysis.requirements = merged_requirements
         analysis.risk_flags = risk_flags
@@ -198,8 +260,76 @@ async def run_extraction(
             analysis.status = "ready"
         analysis.updated_by = user_id
 
+    extract_meta = provider_result.extract_meta if isinstance(provider_result.extract_meta, dict) else {}
+    cost_log = AICostLog(
+        company_id=company_id,
+        tender_id=tender_id,
+        model=str(extract_meta.get("model") or "unknown"),
+        chars_sent=int(extract_meta.get("chars_sent") or len(merged_text)),
+        estimated_cost=_to_decimal_or_none(extract_meta.get("estimated_cost")),
+        duration_ms=int(extract_meta.get("latency_ms")) if extract_meta.get("latency_ms") is not None else None,
+    )
+    db.add(cost_log)
+
     await db.commit()
     await db.refresh(analysis)
+
+    # Sync nmck from extraction to tender if tender.nmck is empty
+    try:
+        if extracted.nmck is not None and (tender.nmck is None or tender.nmck == 0):
+            tender.nmck = extracted.nmck
+            await db.commit()
+            logger.info(
+                "Synced nmck from extraction: tender_id=%s nmck=%s",
+                tender_id, extracted.nmck
+            )
+    except Exception:
+        logger.exception("Failed to sync nmck for tender_id=%s", tender_id)
+
+    # Build requirements checklist deterministically from extracted data.
+    # Lazy import — avoids pulling SQLAlchemy into pure test environments.
+    # Wrapped in try/except so a checklist failure never breaks extraction.
+    try:
+        from app.requirements.normalizer import RequirementNormalizer
+        from app.requirements.service import upsert_checklist
+        _normalizer = RequirementNormalizer()
+        _reqs = _normalizer.normalize(extracted)
+        await upsert_checklist(db, tender_id, company_id, _reqs)
+    except Exception:
+        logger.exception(
+            "Failed to build requirements checklist for tender_id=%s", tender_id
+        )
+        _reqs = []  # ensure _reqs is always defined for fit_score step below
+
+    # Calculate company fit score using the same extracted data.
+    # Lazy import + try/except — fit score failure never breaks extraction.
+    try:
+        from app.fit_score.scorer import FitScorer
+        from app.fit_score.service import upsert_fit_score
+        from app.models import Company
+        from app.requirements.normalizer import RequirementNormalizer
+        _company = await db.scalar(select(Company).where(Company.id == company_id))
+        _profile: dict = _company.profile if _company and isinstance(_company.profile, dict) else {}
+        _checklist = _reqs if _reqs else RequirementNormalizer().normalize(extracted)
+        _fit_result = FitScorer().score(_profile, _checklist, extracted)
+        await upsert_fit_score(db, tender_id, company_id, _fit_result)
+    except Exception:
+        logger.exception(
+            "Failed to calculate fit score for tender_id=%s", tender_id
+        )
+
+    # Mark the extraction action as completed (best-effort).
+    if _action_record is not None:
+        try:
+            from app.agent_actions.service import complete_action
+            await complete_action(
+                db, _action_record.action_id, result={"status": "ok"}
+            )
+        except Exception:
+            logger.exception(
+                "Failed to complete action record for tender_id=%s", tender_id
+            )
+
     return analysis, extracted
 
 

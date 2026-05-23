@@ -10,9 +10,16 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.database import AsyncSessionLocal
+from app.agent_eval.router import router as agent_eval_router
 from app.ai_extraction.router import router as ai_extraction_router
 from app.auth import router as auth_router
+from app.clarification.router import router as clarification_router
+from app.deadline_control.router import router as deadline_control_router
+from app.escalation.router import router as escalation_router
+from app.escalation.scheduler import scheduler as escalation_timeout_scheduler
+from app.fit_score.router import router as fit_score_router
 from app.companies import router as companies_router
+from app.policy_engine.router import router as policy_engine_router
 from app.decision_engine.router import router as decision_engine_router
 from app.document_module.router import router as document_module_router
 from app.ingestion import health_router as ingestion_health_router, opendata_router as ingestion_opendata_router, settings_router as ingestion_settings_router
@@ -24,7 +31,7 @@ from app.tender_alerts import router as tender_alerts_router
 from app.tender_analysis import router as tender_analysis_router
 from app.tender_decisions import router as tender_decisions_router
 from app.tender_documents import router as tender_documents_router
-from app.tender_finance import router as tender_finance_router
+from app.tender_finance.router import router as tender_finance_router
 from app.tender_tasks import router as tender_tasks_router
 from app.tender_tasks.scheduler import scheduler as tender_task_scheduler
 from app.tenders import router as tenders_router
@@ -39,8 +46,14 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Tender AI Backend Core", version="1.0.0")
 app.mount("/static", StaticFiles(directory="app/web/static"), name="static")
 
+app.include_router(agent_eval_router)
 app.include_router(auth_router)
+app.include_router(clarification_router)
 app.include_router(companies_router)
+app.include_router(deadline_control_router)
+app.include_router(escalation_router)
+app.include_router(fit_score_router)
+app.include_router(policy_engine_router)
 app.include_router(ingestion_settings_router)
 app.include_router(ingestion_opendata_router)
 app.include_router(ingestion_eis_site_router)
@@ -139,6 +152,7 @@ async def startup_event() -> None:
     await ingestion_scheduler.start()
     await telegram_notify_scheduler.start()
     await monitoring_scheduler.start()
+    await escalation_timeout_scheduler.start()
 
 
 @app.on_event("shutdown")
@@ -147,3 +161,4 @@ async def shutdown_event() -> None:
     await ingestion_scheduler.stop()
     await telegram_notify_scheduler.stop()
     await monitoring_scheduler.stop()
+    await escalation_timeout_scheduler.stop()

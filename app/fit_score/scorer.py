@@ -1,0 +1,185 @@
+"""FitScorer — deterministic company ↔ tender fit calculation.
+
+Rules:
+  • Pure function — no IO, no LLM, no DB.
+  • aggregate fit_score = sum(component_score × weight), range 0–100.
+  • None component → contributes 50 % of its weight (neutral / unknown).
+
+Component weights:
+  okved      25 %
+  sro        20 %
+  license    20 %
+  experience 20 %
+  finance    15 %
+"""
+from __future__ import annotations
+
+from decimal import Decimal
+
+from app.ai_extraction.schemas import ExtractedTenderV1
+from app.fit_score.schema import FitScoreComponents, FitScoreResult
+from app.requirements.schema import NormalizedRequirement, RequirementType
+
+# (component_name, weight)
+_WEIGHTS: dict[str, float] = {
+    "okved":      25.0,
+    "sro":        20.0,
+    "license":    20.0,
+    "experience": 20.0,
+    "finance":    15.0,
+}
+
+
+def _component_points(value: bool | None, weight: float) -> float:
+    """Convert bool | None to weighted points."""
+    if value is True:
+        return weight
+    if value is False:
+        return 0.0
+    return weight * 0.5  # None → neutral
+
+
+def _checklist_required(
+    checklist: list[NormalizedRequirement],
+    req_type: RequirementType,
+) -> bool:
+    """Return True if this requirement type is marked required in the checklist."""
+    for item in checklist:
+        if item.canonical_type == req_type:
+            return item.required
+    return False  # not found → treat as not required
+
+
+class FitScorer:
+    def score(
+        self,
+        profile: dict,
+        checklist: list[NormalizedRequirement],
+        extracted: ExtractedTenderV1,
+    ) -> FitScoreResult:
+        """Compute fit score for the company against a tender.
+
+        Args:
+            profile:   companies.profile JSONB dict.
+            checklist: NormalizedRequirement list from RequirementNormalizer.
+            extracted: ExtractedTenderV1 from AI extraction.
+
+        Returns:
+            FitScoreResult with per-component flags and aggregate fit_score.
+        """
+        okved      = self._okved(profile, extracted)
+        sro        = self._sro(profile, checklist)
+        license_ok = self._license(profile, checklist)
+        experience = self._experience(profile, checklist)
+        finance    = self._finance(profile, extracted)
+
+        fit_score = (
+            _component_points(okved,      _WEIGHTS["okved"])
+            + _component_points(sro,      _WEIGHTS["sro"])
+            + _component_points(license_ok, _WEIGHTS["license"])
+            + _component_points(experience, _WEIGHTS["experience"])
+            + _component_points(finance,  _WEIGHTS["finance"])
+        )
+
+        return FitScoreResult(
+            components=FitScoreComponents(
+                okved=okved,
+                sro=sro,
+                license=license_ok,
+                experience=experience,
+                finance=finance,
+            ),
+            fit_score=round(fit_score, 2),
+        )
+
+    # ── Component calculators ─────────────────────────────────────────────────
+
+    def _okved(self, profile: dict, extracted: ExtractedTenderV1) -> bool | None:
+        okved_main: str | None = profile.get("okved_main")
+        if not okved_main:
+            return None  # no OKVED in profile → unknown
+
+        okved_lower = okved_main.lower()
+
+        # Check tender subject
+        subject = (extracted.subject or "").lower()
+        if okved_lower in subject:
+            return True
+
+        # Check qualification_requirements
+        for req in extracted.qualification_requirements:
+            if okved_lower in req.lower():
+                return True
+
+        # Check additional OKVEDs in profile against tender text
+        tender_text = subject + " " + " ".join(extracted.qualification_requirements).lower()
+        okved_additional: list[str] = profile.get("okved_additional") or []
+        for extra in okved_additional:
+            if extra.lower() in tender_text:
+                return True
+
+        return False
+
+    def _sro(
+        self, profile: dict, checklist: list[NormalizedRequirement]
+    ) -> bool | None:
+        required = _checklist_required(checklist, RequirementType.SRO)
+        if not required:
+            return True  # tender doesn't require SRO → ok
+
+        has_sro: bool | None = (profile.get("sro") or {}).get("has_sro")
+        if has_sro is True:
+            return True
+        if has_sro is False:
+            return False
+        return None  # no data
+
+    def _license(
+        self, profile: dict, checklist: list[NormalizedRequirement]
+    ) -> bool | None:
+        required = _checklist_required(checklist, RequirementType.LICENSE)
+        if not required:
+            return True
+
+        licenses: list[dict] = profile.get("licenses") or []
+        if not licenses:
+            return None  # no license data at all
+
+        has_active = any(item.get("active") is True for item in licenses)
+        return True if has_active else False
+
+    def _experience(
+        self, profile: dict, checklist: list[NormalizedRequirement]
+    ) -> bool | None:
+        required = _checklist_required(checklist, RequirementType.EXPERIENCE)
+        if not required:
+            return True
+
+        # Key not in profile at all → unknown
+        if "experience" not in profile:
+            return None
+
+        experience = profile["experience"]
+
+        # Empty dict → False (explicitly set but empty)
+        if not experience:
+            return False
+
+        # Non-empty → True (company has some experience data)
+        return True
+
+    def _finance(
+        self, profile: dict, extracted: ExtractedTenderV1
+    ) -> bool | None:
+        bid_amount: Decimal | None = extracted.bid_security_amount
+        if bid_amount is None:
+            return None  # no financial requirement to check against
+
+        available = (profile.get("financial") or {}).get("available_funds")
+        if available is None:
+            return None
+
+        try:
+            return Decimal(str(available)) >= bid_amount
+        except Exception:
+            return None
