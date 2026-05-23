@@ -977,10 +977,13 @@ async def dashboard(
             normalized_notifications.append(item)
         monitoring_notifications = normalized_notifications
     monitoring_last_result = {}
+    monitoring_last_run_at = None
     if company and isinstance(company.profile, dict):
         state = company.profile.get("monitoring_state")
-        if isinstance(state, dict) and isinstance(state.get("last_result"), dict):
-            monitoring_last_result = state.get("last_result") or {}
+        if isinstance(state, dict):
+            monitoring_last_run_at = state.get("last_run_at")
+            if isinstance(state.get("last_result"), dict):
+                monitoring_last_result = state.get("last_result") or {}
 
     return templates.TemplateResponse(
         "dashboard.html",
@@ -992,6 +995,7 @@ async def dashboard(
             monitoring_settings=monitoring_settings,
             monitoring_notifications=monitoring_notifications,
             monitoring_last_result=monitoring_last_result,
+            monitoring_last_run_at=monitoring_last_run_at,
             monitor_result={
                 "status": monitor_status,
                 "message": monitor_message,

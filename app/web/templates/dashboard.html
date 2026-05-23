@@ -1,6 +1,34 @@
 {% extends "base.html" %}
 {% block title %}Дашборд | Tender AI{% endblock %}
 {% block content %}
+<style>
+  .monitoring-metrics {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin: 12px 0;
+  }
+  .metric-card {
+    background: #f0f4f8;
+    border-radius: 8px;
+    padding: 12px 16px;
+    min-width: 120px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .metric-label {
+    font-size: 11px;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .metric-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: #1a3a5c;
+  }
+</style>
 <h1>Сводка уведомлений</h1>
 
 <section class="grid-cards">
@@ -117,15 +145,32 @@
   {% endif %}
   {% endif %}
   {% if monitoring_last_result %}
-  <p>
-    Последний цикл:
-    запросов={{ monitoring_last_result.queries_total or 0 }},
-    импортировано={{ monitoring_last_result.imported_total or 0 }},
-    новых={{ monitoring_last_result.new_tenders or 0 }},
-    релевантных={{ monitoring_last_result.relevant_found or 0 }},
-    deep={{ monitoring_last_result.deep_analysis_attempted or 0 }}/{{ monitoring_last_result.deep_analysis_completed or 0 }}/{{ monitoring_last_result.deep_analysis_partial or 0 }},
-    уведомлений={{ monitoring_last_result.notifications_sent or 0 }}
-  </p>
+  <div class="monitoring-metrics">
+    <div class="metric-card">
+      <span class="metric-label">Последний запуск</span>
+      <span class="metric-value">{{ monitoring_last_run_at or "—" }}</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-label">Найдено</span>
+      <span class="metric-value">{{ monitoring_last_result.imported_total or 0 }}</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-label">Новых</span>
+      <span class="metric-value">{{ monitoring_last_result.new_tenders or 0 }}</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-label">Релевантных</span>
+      <span class="metric-value">{{ monitoring_last_result.relevant_found or 0 }}</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-label">Уведомлений</span>
+      <span class="metric-value">{{ monitoring_last_result.notifications_sent or 0 }}</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-label">Источник</span>
+      <span class="metric-value">{{ monitoring_last_result.source_status or "—" }}</span>
+    </div>
+  </div>
   {% endif %}
 </section>
 
