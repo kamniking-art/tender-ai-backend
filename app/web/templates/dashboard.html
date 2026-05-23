@@ -36,6 +36,17 @@
   td, th { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
   td:first-child, th:first-child { white-space: normal; max-width: 250px; }
   .col-reason, .col-deep { display: none; }
+  .tender-list { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+  .tender-card { background: #f8fafc; border: 1px solid #d5dce5; border-radius: 8px; padding: 14px 16px; }
+  .tender-card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 8px; }
+  .tender-card-header a { font-weight: 600; color: #0a66c2; text-decoration: none; flex: 1; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .tender-card-header a:hover { text-decoration: underline; }
+  .tender-badges { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+  .tender-card-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: #6b7a90; margin-bottom: 8px; }
+  .tender-card-meta span { white-space: nowrap; }
+  .tender-card-footer { display: flex; gap: 12px; font-size: 13px; }
+  .tender-card-footer a { color: #0a66c2; text-decoration: none; }
+  .tender-card-footer a:hover { text-decoration: underline; }
 </style>
 <h1>Сводка уведомлений</h1>
 
@@ -187,53 +198,22 @@
 <section class="card">
   <h2>Новые релевантные тендеры</h2>
   {% if monitoring_notifications %}
-  <table>
-    <thead>
-      <tr>
-        <th>Тендер</th>
-        <th>Категория</th>
-        <th>Релевантность</th>
-        <th>Риск</th>
-        <th>Рекомендация</th>
-        <th>Приоритет</th>
-        <th>НМЦК</th>
-        <th>Сроки</th>
-        <th class="col-reason">Почему важно</th>
-        <th class="col-deep">Deep</th>
-        <th>Ссылки</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for item in monitoring_notifications %}
-      <tr>
-        <td>
-          <a href="/web/tenders/{{ item.tender_id }}">{{ item.title or item.external_id or item.tender_id }}</a>
-          <div class="hint">ID: {{ item.external_id or "-" }}</div>
-        </td>
-        <td>{{ item.category or "-" }}</td>
-        <td>
-          {% set rel_score = item.relevance_score %}
-          {% set rel_label = item.relevance_label or "-" %}
+  <div class="tender-list">
+    {% for item in monitoring_notifications %}
+    {% set rel_score = item.relevance_score %}
+    {% set rel_label = item.relevance_label or "-" %}
+    {% set nmck_value = item.nmck | tender_money_ru("RUB", item.tender_id, item.external_id) %}
+    <div class="tender-card">
+      <div class="tender-card-header">
+        <a href="/web/tenders/{{ item.tender_id }}">{{ item.title or item.external_id or item.tender_id }}</a>
+        <div class="tender-badges">
           {% if rel_score is not none and rel_score >= 70 %}
-            <span class="badge badge-good">{{ rel_score }}/100 ({{ rel_label }})</span>
+            <span class="badge badge-good">{{ rel_score }}/100</span>
           {% elif rel_score is not none and rel_score >= 45 %}
-            <span class="badge badge-mid">{{ rel_score }}/100 ({{ rel_label }})</span>
+            <span class="badge badge-mid">{{ rel_score }}/100</span>
           {% elif rel_score is not none %}
-            <span class="badge badge-low">{{ rel_score }}/100 ({{ rel_label }})</span>
-          {% else %}
-            -
+            <span class="badge badge-low">{{ rel_score }}/100</span>
           {% endif %}
-        </td>
-        <td>
-          {% if item.risk_score is not none and item.risk_score >= 70 %}
-            <span class="badge badge-bad">{{ item.risk_score }}</span>
-          {% elif item.risk_score is not none %}
-            <span class="badge badge-mid">{{ item.risk_score }}</span>
-          {% else %}
-            -
-          {% endif %}
-        </td>
-        <td>
           {% if item.recommendation == "strong_go" %}
             <span class="badge badge-good">{{ item.recommendation | decision_status_ru }}</span>
           {% elif item.recommendation == "go" %}
@@ -246,14 +226,7 @@
             <span class="badge badge-bad">{{ item.recommendation | decision_status_ru }}</span>
           {% elif item.recommendation %}
             <span class="badge badge-mid">{{ item.recommendation | decision_status_ru }}</span>
-          {% else %}
-            -
           {% endif %}
-          {% if item.decision_score is not none %}
-            <div class="hint">Decision score: {{ item.decision_score }}</div>
-          {% endif %}
-        </td>
-        <td>
           {% if item.priority_label %}
             {% if item.priority_label == "urgent" %}
               <span class="badge badge-bad">{{ item.priority_label | priority_label_ru }}</span>
@@ -264,46 +237,36 @@
             {% else %}
               <span class="badge">{{ item.priority_label | priority_label_ru }}</span>
             {% endif %}
-            {% if item.priority_score is not none %}
-              <div class="hint">Score: {{ item.priority_score }}</div>
-            {% endif %}
-            {% if item.priority_reason %}
-              <div class="hint">{{ item.priority_reason }}</div>
-            {% endif %}
+          {% endif %}
+        </div>
+      </div>
+      <div class="tender-card-meta">
+        {% if item.category %}<span>{{ item.category | alert_category_ru }}</span>{% endif %}
+        <span>НМЦК: {{ "—" if nmck_value == "Сумма не указана" else nmck_value }}</span>
+        <span>Дедлайн: {{ item.deadline | ru_dt if item.deadline else "—" }}</span>
+        {% if item.risk_score is not none %}
+          {% if item.risk_score >= 70 %}
+            <span>Риск: <span class="badge badge-bad">{{ item.risk_score }}</span></span>
           {% else %}
-            -
+            <span>Риск: <span class="badge badge-mid">{{ item.risk_score }}</span></span>
           {% endif %}
-        </td>
-        {% set nmck_value = item.nmck | tender_money_ru("RUB", item.tender_id, item.external_id) %}
-        <td>{{ "—" if nmck_value == "Сумма не указана" else nmck_value }}</td>
-        <td>
-          <div class="hint">Публ.: {{ item.published_at | ru_dt if item.published_at else "-" }}</div>
-          <div class="hint">Дедлайн: {{ item.deadline | ru_dt if item.deadline else "-" }}</div>
-        </td>
-        <td class="col-reason">
-          <div>{{ item.summary_reason or "-" }}</div>
-          {% if item.recommendation_reason %}
-            <div class="hint">Причина рекомендации: {{ item.recommendation_reason }}</div>
-          {% endif %}
-          {% if item.matched_keywords %}
-            <div class="hint">Совпадения: {{ item.matched_keywords | join(", ") }}</div>
-          {% endif %}
-        </td>
-        <td class="col-deep">
-          <div class="hint">Этап: {{ item.analysis_stage or "-" }}</div>
-          <div class="hint">Документы: {{ item.documents_downloaded_count or 0 }}</div>
-          <div class="hint">Extract: {{ item.extract_status or "-" }}</div>
-          <div class="hint">Risk: {{ item.risk_status or "-" }}</div>
-          <div class="hint">Decision: {{ item.decision_status or "-" }}</div>
-        </td>
-        <td>
-          {% if item.tender_ai_url %}<a href="{{ item.tender_ai_url }}">Открыть в Tender AI</a>{% elif item.tender_url %}<a href="{{ item.tender_url }}">Открыть в Tender AI</a>{% endif %}
-          {% if item.source_url %}<a href="{{ item.source_url }}" target="_blank" rel="noopener noreferrer">ЕИС</a>{% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+        {% endif %}
+      </div>
+      <div class="tender-card-footer">
+        {% if item.tender_ai_url %}
+          <a href="{{ item.tender_ai_url }}">Открыть в Tender AI</a>
+        {% elif item.tender_url %}
+          <a href="{{ item.tender_url }}">Открыть в Tender AI</a>
+        {% else %}
+          <a href="/web/tenders/{{ item.tender_id }}">Открыть</a>
+        {% endif %}
+        {% if item.source_url %}
+          <a href="{{ item.source_url }}" target="_blank" rel="noopener noreferrer">ЕИС ↗</a>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
   {% else %}
   <p>Новых релевантных тендеров пока нет.</p>
   {% endif %}
