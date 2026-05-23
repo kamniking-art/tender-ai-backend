@@ -352,6 +352,22 @@ async def process_company_notifications(db: AsyncSession, company: Company, clie
         if item.deadline_at is not None and item.deadline_at <= (now + timedelta(hours=24))
     ]
 
+    # Skip tenders whose deadline is more than 30 days in the past.
+    # Protects against stale data (e.g. tenders ingested with a 2020 deadline).
+    _cutoff = now - timedelta(days=30)
+    new_items = [
+        item for item in new_items
+        if item.deadline_at is None or item.deadline_at >= _cutoff
+    ]
+    risky_items = [
+        item for item in risky_items
+        if item.deadline_at is None or item.deadline_at >= _cutoff
+    ]
+    deadline_24h = [
+        item for item in deadline_24h
+        if item.deadline_at is None or item.deadline_at >= _cutoff
+    ]
+
     pending = {
         "new": dedup_unsent_items("new", new_items, state)[:5] if cfg.categories.get("new", True) else [],
         "deadline_24h": dedup_unsent_items("deadline_24h", deadline_24h, state)[:5] if cfg.categories.get("deadline_24h", True) else [],
