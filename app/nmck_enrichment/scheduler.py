@@ -25,6 +25,7 @@ class NmckEnrichmentScheduler:
             return
         self._running = True
         self._task = asyncio.create_task(self._loop())
+        logger.info("nmck enrichment scheduler started")
 
     async def stop(self) -> None:
         self._running = False
