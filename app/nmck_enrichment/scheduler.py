@@ -48,10 +48,16 @@ class NmckEnrichmentScheduler:
         from app.tender_documents.model import TenderDocument
 
         async with AsyncSessionLocal() as db:
-            # Берём тендеры без НМЦК у которых есть документы
+            # Берём тендеры без НМЦК у которых есть xlsx документы
             result = await db.execute(
                 select(Tender)
+                .join(TenderDocument, TenderDocument.tender_id == Tender.id)
                 .where(Tender.nmck.is_(None))
+                .where(
+                    TenderDocument.file_name.ilike('%.xlsx.zip') |
+                    TenderDocument.file_name.ilike('%.xlsx')
+                )
+                .distinct()
                 .limit(20)
             )
             tenders = result.scalars().all()
