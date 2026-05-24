@@ -20,11 +20,18 @@ logger = logging.getLogger(__name__)
 _NMCK_KEYWORDS = [
     "начальная (максимальная) цена",
     "начальная максимальная цена",
+    "цена договора составляет",
+    "цена контракта составляет",
+    "максимальная цена договора",
     "нмцк",
+    "нмцд",
     "цена договора",
     "цена контракта",
     "начальная цена",
 ]
+
+# Compiled once: thousands-separated "444 800" OR plain "44800"
+_NUMBER_RE = re.compile(r"\d{1,3}(?:[ \xa0]\d{3})+|\d+")
 
 
 class NoExtractableTextError(ValueError):
@@ -244,17 +251,58 @@ def _extract_zip_text(path: Path) -> str:
 # ── NMCK semantic extraction ───────────────────────────────────────────────────
 
 
+def _extract_inline_nmck(text: str) -> Decimal | None:
+    """
+    Extract NMCK when the number is embedded inside the label cell text, e.g.:
+    "Начальная (максимальная) цена Договора составляет: 444 800 рублей 00 копеек"
+    → Decimal('444800')
+
+    Strategy:
+    - Find the rightmost keyword position in the text.
+    - In the tail after the keyword, collect all digit sequences.
+    - Thousands-separated "444 800" is joined; kopek "00" is filtered by > 1000.
+    """
+    text_lower = text.lower()
+    kw_end = -1
+    for kw in _NMCK_KEYWORDS:
+        idx = text_lower.find(kw)
+        if idx >= 0:
+            pos = idx + len(kw)
+            if pos > kw_end:
+                kw_end = pos
+    if kw_end < 0:
+        return None
+
+    tail = text[kw_end:]
+    candidates: list[Decimal] = []
+    for m in _NUMBER_RE.findall(tail):
+        clean = re.sub(r"[ \xa0]", "", m)
+        try:
+            val = Decimal(clean)
+            if val > 1000:
+                candidates.append(val)
+        except InvalidOperation:
+            pass
+    return max(candidates) if candidates else None
+
+
 def extract_nmck_from_xlsx(path: Path) -> Decimal | None:
     """
     Deterministic NMCK search with row/column context.
 
-    Algorithm:
-    1. For each row that contains a cell whose text matches a known NMCK keyword,
-       collect all numeric cells in that same row.
-    2. Also check the immediately following row (label may be above the value).
-    3. Return the largest numeric value found that is > 1000 (noise filter).
+    Pass 1 — label-based (returns on first success):
+      1a. Inline: number embedded inside the label cell text itself.
+      1b. Sibling: numeric cell in the same row as the label.
+      1c. Below:   numeric cell in the row immediately below the label.
+
+    Pass 2 — fallback (no label found):
+      Take max of all numerics > 1000 in the sheet, but only when the sheet
+      has < 20 unique numeric values — prevents grabbing random data from
+      large price-list tables.
     """
     candidates: list[Decimal] = []
+    all_sheet_nums: list[Decimal] = []
+
     try:
         with ZipFile(path) as zf:
             names = set(zf.namelist())
@@ -271,20 +319,32 @@ def extract_nmck_from_xlsx(path: Path) -> Decimal | None:
                 for i, row_num in enumerate(row_nums):
                     cells = rows[row_num]
 
-                    # Does this row contain an NMCK label?
-                    has_label = any(
-                        text and any(kw in text.lower() for kw in _NMCK_KEYWORDS)
-                        for _col, text, _numeric in cells
-                    )
-                    if not has_label:
+                    # Accumulate all numerics for fallback
+                    for _col, _text, numeric in cells:
+                        if numeric is not None and numeric > 1000:
+                            all_sheet_nums.append(numeric)
+
+                    # Find label cell in this row
+                    label_text: str | None = None
+                    for _col, text, _numeric in cells:
+                        if text and any(kw in text.lower() for kw in _NMCK_KEYWORDS):
+                            label_text = text
+                            break
+
+                    if label_text is None:
                         continue
 
-                    # Collect numerics from same row
+                    # 1a — number embedded inside the label text
+                    inline = _extract_inline_nmck(label_text)
+                    if inline is not None:
+                        candidates.append(inline)
+
+                    # 1b — numeric sibling cells in the same row
                     for _col, _text, numeric in cells:
                         if numeric is not None and numeric > 1000:
                             candidates.append(numeric)
 
-                    # Also check the next row (value sometimes sits below label)
+                    # 1c — row below (value sometimes sits under label)
                     if i + 1 < len(row_nums):
                         for _col, _text, numeric in rows[row_nums[i + 1]]:
                             if numeric is not None and numeric > 1000:
@@ -293,7 +353,16 @@ def extract_nmck_from_xlsx(path: Path) -> Decimal | None:
     except Exception as exc:
         logger.warning("nmck xlsx extraction error for %s: %s", path, exc)
 
-    return max(candidates) if candidates else None
+    # Pass 1: label-based winner
+    if candidates:
+        return max(candidates)
+
+    # Pass 2: fallback — only for "small" sheets (< 20 unique values)
+    unique_nums = set(all_sheet_nums)
+    if unique_nums and len(unique_nums) < 20:
+        return max(unique_nums)
+
+    return None
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
