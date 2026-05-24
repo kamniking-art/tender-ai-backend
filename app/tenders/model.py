@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Index, Numeric, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -33,6 +33,8 @@ class Tender(Base):
     place_text: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     procurement_type: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     nmck: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True, index=True)
+    nmck_source: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    nmck_confidence: Mapped[Decimal | None] = mapped_column(Numeric(4, 2), nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     submission_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="new", server_default="new", index=True)

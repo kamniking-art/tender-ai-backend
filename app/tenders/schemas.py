@@ -70,6 +70,8 @@ class TenderRead(BaseModel):
     place_text: str | None
     procurement_type: str | None
     nmck: Decimal | None
+    nmck_source: str | None = None
+    nmck_confidence: Decimal | None = None
     published_at: datetime | None
     submission_deadline: datetime | None
     status: TenderStatus
