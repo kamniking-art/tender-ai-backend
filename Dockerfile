@@ -14,6 +14,9 @@ ENV APP_BUILT_AT=${APP_BUILT_AT}
 ENV APP_VERSION_IMAGE=${APP_VERSION_IMAGE}
 ENV APP_BUILT_AT_IMAGE=${APP_BUILT_AT_IMAGE}
 
+RUN apt-get update && apt-get install -y --no-install-recommends antiword \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --retries 10 --timeout 120 -r requirements.txt
 

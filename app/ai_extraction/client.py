@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
@@ -20,6 +21,16 @@ class AIServiceUnavailableError(RuntimeError):
 
 class AIServiceBadResponseError(RuntimeError):
     pass
+
+
+_CLAUDE_FACT_FIELDS = (
+    "sro_required",
+    "licenses",
+    "experience_required",
+    "security_amount",
+    "deadline_days",
+    "bank_guarantee",
+)
 
 
 def _parse_decimal(raw: str | None) -> Decimal | None:
@@ -57,6 +68,98 @@ def _extract_deadline(text: str) -> datetime | None:
 def _extract_first_lines(text: str, limit: int = 3) -> list[str]:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     return lines[:limit]
+
+
+def _chunk_text(text: str, *, max_chars: int) -> list[str]:
+    payload = (text or "").strip()
+    if not payload:
+        return []
+    if len(payload) <= max_chars:
+        return [payload]
+
+    chunks: list[str] = []
+    current = ""
+    for line in payload.splitlines():
+        piece = line + "\n"
+        if len(piece) > max_chars:
+            if current:
+                chunks.append(current)
+                current = ""
+            start = 0
+            while start < len(piece):
+                chunks.append(piece[start : start + max_chars])
+                start += max_chars
+            continue
+        if len(current) + len(piece) <= max_chars:
+            current += piece
+        else:
+            if current:
+                chunks.append(current)
+            current = piece
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _safe_bool(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    return None
+
+
+def _safe_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        cleaned = re.sub(r"[^\d]", "", value)
+        if cleaned:
+            try:
+                return int(cleaned)
+            except Exception:
+                return None
+    return None
+
+
+def _safe_float(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return max(0.0, min(1.0, float(value)))
+    if isinstance(value, str):
+        try:
+            return max(0.0, min(1.0, float(value.strip())))
+        except Exception:
+            return None
+    return None
+
+
+def _strict_fact_item(raw: object) -> dict[str, object]:
+    if not isinstance(raw, dict):
+        return {"value": None, "confidence": 0.0, "evidence": ""}
+    return {
+        "value": raw.get("value"),
+        "confidence": _safe_float(raw.get("confidence")) or 0.0,
+        "evidence": str(raw.get("evidence") or ""),
+    }
+
+
+def _build_claude_prompt(chunk_text: str) -> str:
+    schema = {
+        key: {"value": None, "confidence": 0.0, "evidence": ""}
+        for key in _CLAUDE_FACT_FIELDS
+    }
+    return (
+        "Ты извлекаешь только факты из тендерного текста. Верни ТОЛЬКО JSON без markdown/комментариев.\n"
+        "Если факта нет, ставь value=null (или [] для licenses), confidence<=0.5 и пустой evidence.\n"
+        "Строгий формат:\n"
+        f"{json.dumps(schema, ensure_ascii=False)}\n\n"
+        "Текст:\n"
+        f"{chunk_text}"
+    )
 
 
 def _mock_extract(text: str) -> ExtractedTenderV1:
@@ -192,12 +295,155 @@ class RemoteExtractorProvider(ExtractionProvider):
         raise ExtractionProviderError("PROVIDER_ERROR", "AI extractor service unavailable")
 
 
+class ClaudeExtractorProvider(ExtractionProvider):
+    async def extract(
+        self,
+        *,
+        tender_id: UUID,
+        company_id: UUID,
+        tender_context: dict,
+        text: str,
+    ) -> ExtractionProviderResult:
+        if not settings.ai_extractor_api_key:
+            raise ExtractionProviderError("PROVIDER_ERROR", "Claude API key is not configured")
+
+        base_url = (settings.ai_extractor_base_url or "https://api.anthropic.com").rstrip("/")
+        url = f"{base_url}/v1/messages"
+        model = settings.ai_extractor_model
+
+        max_chars_total = max(1000, int(settings.ai_max_input_chars or settings.ai_extractor_max_chars))
+        max_chunk_chars = min(20000, max(2000, int(max_chars_total / max(1, int(settings.ai_max_files or 10)))))
+        text_limited = (text or "")[:max_chars_total]
+        chunks = _chunk_text(text_limited, max_chars=max_chunk_chars)
+        if not chunks:
+            raise ExtractionProviderError("VALIDATION_ERROR", "No text chunks for AI extraction")
+        chunks = chunks[: max(1, int(settings.ai_max_files or 10))]
+
+        delays = [0.0, 0.8, 1.8]
+        started = time.perf_counter()
+        chars_sent = 0
+        aggregated: dict[str, dict[str, object]] = {k: {"value": None, "confidence": 0.0, "evidence": ""} for k in _CLAUDE_FACT_FIELDS}
+        request_count = 0
+
+        for chunk in chunks:
+            request_count += 1
+            prompt = _build_claude_prompt(chunk)
+            chars_sent += len(prompt)
+            payload = {
+                "model": model,
+                "max_tokens": 1200,
+                "temperature": 0,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+            headers = {
+                "x-api-key": settings.ai_extractor_api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            }
+
+            raw_json: dict | None = None
+            for attempt, delay in enumerate(delays):
+                if delay:
+                    await asyncio.sleep(delay)
+                try:
+                    async with httpx.AsyncClient(timeout=settings.ai_extractor_timeout_sec) as client:
+                        response = await client.post(url, headers=headers, json=payload)
+                except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                    if attempt < len(delays) - 1:
+                        continue
+                    raise ExtractionProviderError("PROVIDER_TIMEOUT", "Claude timeout/unreachable") from exc
+
+                if response.status_code >= 500:
+                    if attempt < len(delays) - 1:
+                        continue
+                    raise ExtractionProviderError("PROVIDER_ERROR", f"claude upstream status {response.status_code}")
+                if response.status_code >= 400:
+                    raise ExtractionProviderError("PROVIDER_ERROR", f"claude status {response.status_code}")
+
+                try:
+                    wire = response.json()
+                except ValueError as exc:
+                    raise ExtractionProviderError("VALIDATION_ERROR", "Claude returned invalid JSON envelope") from exc
+
+                try:
+                    content = wire.get("content", [])
+                    text_parts = [item.get("text", "") for item in content if isinstance(item, dict) and item.get("type") == "text"]
+                    joined = "\n".join(text_parts).strip()
+                    raw_json = json.loads(joined)
+                except Exception as exc:
+                    raise ExtractionProviderError("VALIDATION_ERROR", "Claude returned non-JSON content") from exc
+                break
+
+            if raw_json is None or not isinstance(raw_json, dict):
+                raise ExtractionProviderError("VALIDATION_ERROR", "Claude JSON payload missing")
+
+            for key in _CLAUDE_FACT_FIELDS:
+                item = _strict_fact_item(raw_json.get(key))
+                old = aggregated[key]
+                old_conf = float(old.get("confidence", 0.0) or 0.0)
+                new_conf = float(item.get("confidence", 0.0) or 0.0)
+                if new_conf >= old_conf:
+                    aggregated[key] = item
+
+        # Convert strict facts into existing ExtractedTenderV1 schema.
+        licenses_val = aggregated["licenses"]["value"]
+        licenses = licenses_val if isinstance(licenses_val, list) else []
+        security_amount = _safe_int(aggregated["security_amount"]["value"])
+        deadline_days = _safe_int(aggregated["deadline_days"]["value"])
+        submission_deadline_at = (
+            datetime.utcnow().replace(microsecond=0) + timedelta(days=deadline_days)
+            if deadline_days is not None
+            else None
+        )
+
+        confidence = {k: float(v.get("confidence", 0.0) or 0.0) for k, v in aggregated.items()}
+        evidence = {k: str(v.get("evidence") or "") for k, v in aggregated.items()}
+
+        extracted = ExtractedTenderV1(
+            schema_version="v1",
+            subject=str(tender_context.get("title") or "")[:500] or None,
+            nmck=None,
+            currency=None,
+            submission_deadline_at=submission_deadline_at,
+            bid_security_required=_safe_bool(aggregated["bank_guarantee"]["value"]),
+            bid_security_amount=Decimal(security_amount) if security_amount is not None else None,
+            bid_security_pct=None,
+            contract_security_required=_safe_bool(aggregated["sro_required"]["value"]),
+            contract_security_amount=None,
+            contract_security_pct=None,
+            qualification_requirements=[str(x) for x in licenses][:10],
+            tech_parameters=[],
+            penalties=[],
+            confidence=confidence,
+            evidence=evidence,
+        )
+
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        # Approximate cost meter (very rough heuristic) for visibility.
+        estimated_cost = round((chars_sent / 1000.0) * 0.0008, 8)
+        return ExtractionProviderResult(
+            extracted=extracted,
+            extract_meta={
+                "provider": "claude",
+                "model": model,
+                "latency_ms": latency_ms,
+                "chars_sent": chars_sent,
+                "request_count": request_count,
+                "estimated_cost": estimated_cost,
+                "warnings": [],
+                "sources": [str(tender_id)],
+            },
+        )
+
+
 def get_extractor_provider() -> ExtractionProvider:
     mode = (settings.ai_extractor_mode or "mock").strip().lower()
     if mode == "mock":
         return MockExtractorProvider()
     if mode == "remote":
         return RemoteExtractorProvider()
+    if mode == "claude":
+        return ClaudeExtractorProvider()
     raise ExtractionProviderError("PROVIDER_ERROR", f"Unsupported AI_EXTRACTOR_MODE: {settings.ai_extractor_mode}")
 
 

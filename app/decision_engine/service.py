@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -688,6 +691,25 @@ async def recompute_decision_engine_v1(
         participation_cost=finance.participation_cost if finance else None,
         win_probability_pct=finance.win_probability if finance else None,
     )
+
+    # Persist financial snapshot — best-effort, never breaks decision engine.
+    try:
+        from app.tender_finance.service import save_finance_snapshot
+        await save_finance_snapshot(
+            db,
+            tender_id=tender_id,
+            company_id=company_id,
+            finance_result=finance_result,
+            contract_value=tender.nmck,
+            cost_estimate=finance.cost_estimate if finance else None,
+            participation_cost=finance.participation_cost if finance else None,
+            win_probability=finance.win_probability if finance else None,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to save finance snapshot for tender_id=%s", tender_id
+        )
+
     final_recommendation = engine["recommendation"]
 
     engine["finance"] = finance_result
@@ -728,6 +750,27 @@ async def recompute_decision_engine_v1(
 
     await db.commit()
     await db.refresh(decision)
+
+    # Persist reasoning trace (best-effort — never breaks decision engine).
+    try:
+        from app.reasoning.service import create_trace
+        from app.agent_actions.service import SYSTEM_AGENT_ID
+        await create_trace(
+            db,
+            company_id=company_id,
+            tender_id=tender_id,
+            recommendation=final_recommendation,
+            factors=engine.get("explain") or [],
+            rules_fired=engine.get("rules_fired") or [],
+            evidence_used=engine.get("evidence_used") or [],
+            confidence=engine.get("decision_score"),
+            agent_id=SYSTEM_AGENT_ID,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to create reasoning trace for tender_id=%s", tender_id
+        )
+
     return decision, engine
 
 
