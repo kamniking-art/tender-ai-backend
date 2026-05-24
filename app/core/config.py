@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     task_sla_check_interval_minutes: int = 5
     telegram_notify_interval_minutes: int = 5
     monitoring_interval_minutes: int = 360
+    escalation_timeout_hours: int = 48
     eis_source_blocked_cooldown_minutes: int = 30
     eis_source_request_delay_sec: float = 2.0
     eis_source_request_jitter_sec: float = 1.5
@@ -63,9 +64,13 @@ class Settings(BaseSettings):
     eis_site_default_queries: str = ",".join(DEFAULT_EIS_SITE_QUERIES)
 
     ai_extractor_base_url: str | None = None
+    ai_extractor_model: str = "claude-3-5-sonnet-20241022"
     ai_extractor_api_key: str | None = None
     ai_extractor_timeout_sec: int = 60
     ai_extractor_max_chars: int = 120000
+    ai_max_input_chars: int = 120000
+    ai_max_pages: int = 80
+    ai_max_files: int = 10
     ai_extractor_mode: str = "mock"
     auth_disabled: str = "false"
     auth_disabled_company_email: str = "admin@demo.ru"
