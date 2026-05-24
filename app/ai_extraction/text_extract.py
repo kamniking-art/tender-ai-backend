@@ -407,8 +407,10 @@ def build_normalized_text(
             continue
 
         # For xlsx files try deterministic NMCK extraction and prepend it
+        # Also handles .xlsx.zip (outer zip containing xlsx)
         prefix = ""
-        if file_path.suffix.lower() == ".xlsx":
+        _fname_lower = file_path.name.lower()
+        if _fname_lower.endswith(".xlsx") or _fname_lower.endswith(".xlsx.zip"):
             try:
                 nmck = extract_nmck_from_xlsx(file_path)
                 if nmck is not None:
