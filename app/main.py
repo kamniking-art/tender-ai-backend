@@ -39,6 +39,7 @@ from app.telegram_notify import router as telegram_notify_router
 from app.telegram_notify.scheduler import scheduler as telegram_notify_scheduler
 from app.monitoring.router import router as monitoring_router, settings_router as monitoring_settings_router
 from app.monitoring.scheduler import scheduler as monitoring_scheduler
+from app.nmck_enrichment.scheduler import scheduler as nmck_enrichment_scheduler
 from app.users import router as users_router
 from app.web import router as web_router
 
@@ -153,6 +154,7 @@ async def startup_event() -> None:
     await telegram_notify_scheduler.start()
     await monitoring_scheduler.start()
     await escalation_timeout_scheduler.start()
+    await nmck_enrichment_scheduler.start()
 
 
 @app.on_event("shutdown")
@@ -162,3 +164,4 @@ async def shutdown_event() -> None:
     await telegram_notify_scheduler.stop()
     await monitoring_scheduler.stop()
     await escalation_timeout_scheduler.stop()
+    await nmck_enrichment_scheduler.stop()
