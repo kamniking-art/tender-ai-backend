@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 import tempfile
 import xml.etree.ElementTree as ET
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Iterable
 from zipfile import ZipFile, BadZipFile
@@ -13,9 +15,129 @@ from pypdf import PdfReader
 
 logger = logging.getLogger(__name__)
 
+# ── NMCK keyword list (case-insensitive search) ────────────────────────────────
+
+_NMCK_KEYWORDS = [
+    "начальная (максимальная) цена",
+    "начальная максимальная цена",
+    "нмцк",
+    "цена договора",
+    "цена контракта",
+    "начальная цена",
+]
+
 
 class NoExtractableTextError(ValueError):
     pass
+
+
+# ── XLSX helpers ───────────────────────────────────────────────────────────────
+
+
+def _col_to_num(col_str: str) -> int:
+    """Convert column letter(s) 'A'→1, 'Z'→26, 'AA'→27, …"""
+    num = 0
+    for ch in col_str.upper():
+        num = num * 26 + (ord(ch) - ord("A") + 1)
+    return num
+
+
+def _parse_cell_ref(ref: str) -> tuple[int, int]:
+    """Parse 'A1', 'BC42' → (row, col) 1-based. Returns (0, 0) on failure."""
+    m = re.match(r"([A-Za-z]+)(\d+)", ref or "")
+    if not m:
+        return 0, 0
+    return int(m.group(2)), _col_to_num(m.group(1))
+
+
+def _load_shared_strings(zf: ZipFile, names: set[str]) -> list[str]:
+    shared: list[str] = []
+    if "xl/sharedStrings.xml" not in names:
+        return shared
+    with zf.open("xl/sharedStrings.xml") as fp:
+        tree = ET.parse(fp)
+    for el in tree.getroot().iter():
+        if el.tag.split("}")[-1] == "t" and el.text:
+            shared.append(el.text.strip())
+    return shared
+
+
+def _cell_value(
+    cell_el: ET.Element, shared_strings: list[str]
+) -> tuple[str | None, Decimal | None]:
+    """
+    Return (text, numeric) for a cell element.
+    - Shared-string cells → (text, None)
+    - Pure-numeric cells  → (None, Decimal)
+    - Unrecognised        → (None, None)
+    """
+    cell_type = cell_el.attrib.get("t")
+    value_el = next(
+        (ch for ch in cell_el if ch.tag.split("}")[-1] == "v"), None
+    )
+    if value_el is None or not value_el.text:
+        return None, None
+
+    raw = value_el.text.strip()
+    if not raw:
+        return None, None
+
+    if cell_type == "s":
+        try:
+            idx = int(raw)
+            text = shared_strings[idx] if 0 <= idx < len(shared_strings) else None
+        except ValueError:
+            text = None
+        return text, None
+
+    # Numeric or formula result
+    try:
+        return None, Decimal(raw.replace(",", "."))
+    except InvalidOperation:
+        # Treat as plain text (inline string, bool literal, etc.)
+        return raw if raw else None, None
+
+
+def _parse_sheet_rows(
+    zf: ZipFile, sheet_name: str, shared_strings: list[str]
+) -> dict[int, list[tuple[int, str | None, Decimal | None]]]:
+    """
+    Parse one worksheet into a dict:
+        row_number → [(col_number, text_or_None, numeric_or_None), …]
+    Cells are sorted by column within each row.
+    """
+    rows: dict[int, list[tuple[int, str | None, Decimal | None]]] = {}
+    with zf.open(sheet_name) as fp:
+        tree = ET.parse(fp)
+
+    for row_el in tree.getroot().iter():
+        if row_el.tag.split("}")[-1] != "row":
+            continue
+        raw_r = row_el.attrib.get("r")
+        if not raw_r:
+            continue
+        try:
+            row_num = int(raw_r)
+        except ValueError:
+            continue
+
+        cells: list[tuple[int, str | None, Decimal | None]] = []
+        for cell in row_el:
+            if cell.tag.split("}")[-1] != "c":
+                continue
+            _, col = _parse_cell_ref(cell.attrib.get("r", ""))
+            text, numeric = _cell_value(cell, shared_strings)
+            if text is not None or numeric is not None:
+                cells.append((col, text, numeric))
+
+        if cells:
+            cells.sort(key=lambda x: x[0])
+            rows[row_num] = cells
+
+    return rows
+
+
+# ── Text extractors ────────────────────────────────────────────────────────────
 
 
 def _extract_pdf_text(path: Path, *, max_pages: int | None = None) -> str:
@@ -48,7 +170,6 @@ def _extract_doc_text(path: Path) -> str:
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
-        # antiword failed — try reading as plain text fallback
         logger.warning("antiword failed for %s: %s", path, result.stderr)
         return ""
     except FileNotFoundError:
@@ -67,45 +188,31 @@ def _extract_txt_text(path: Path) -> str:
 
 
 def _extract_xlsx_text(path: Path) -> str:
+    """
+    Structured extraction: preserves row/column context.
+    Each row is emitted as pipe-separated cell values.
+    """
     try:
         with ZipFile(path) as zf:
             names = set(zf.namelist())
-            shared_strings: list[str] = []
-
-            if "xl/sharedStrings.xml" in names:
-                with zf.open("xl/sharedStrings.xml") as fp:
-                    tree = ET.parse(fp)
-                for si in tree.getroot().iter():
-                    tag = si.tag.split("}")[-1]
-                    if tag == "t" and si.text:
-                        shared_strings.append(si.text.strip())
+            shared_strings = _load_shared_strings(zf, names)
 
             lines: list[str] = []
             sheet_names = sorted(
-                name for name in names if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")
+                n for n in names
+                if n.startswith("xl/worksheets/sheet") and n.endswith(".xml")
             )
             for sheet_name in sheet_names:
-                with zf.open(sheet_name) as fp:
-                    tree = ET.parse(fp)
-                for cell in tree.getroot().iter():
-                    if cell.tag.split("}")[-1] != "c":
-                        continue
-                    cell_type = cell.attrib.get("t")
-                    value_el = next((ch for ch in list(cell) if ch.tag.split("}")[-1] == "v"), None)
-                    if value_el is None or value_el.text is None:
-                        continue
-                    raw_value = value_el.text.strip()
-                    if not raw_value:
-                        continue
-                    if cell_type == "s":
-                        try:
-                            idx = int(raw_value)
-                            if 0 <= idx < len(shared_strings):
-                                lines.append(shared_strings[idx])
-                        except ValueError:
-                            continue
-                    else:
-                        lines.append(raw_value)
+                rows = _parse_sheet_rows(zf, sheet_name, shared_strings)
+                for row_num in sorted(rows):
+                    parts: list[str] = []
+                    for _col, text, numeric in rows[row_num]:
+                        if text:
+                            parts.append(text)
+                        elif numeric is not None:
+                            parts.append(str(numeric))
+                    if parts:
+                        lines.append(" | ".join(parts))
 
             return "\n".join(lines)
     except Exception:
@@ -132,6 +239,64 @@ def _extract_zip_text(path: Path) -> str:
     except Exception as exc:
         logger.warning("zip extraction error for %s: %s", path, exc)
     return "\n".join(chunks)
+
+
+# ── NMCK semantic extraction ───────────────────────────────────────────────────
+
+
+def extract_nmck_from_xlsx(path: Path) -> Decimal | None:
+    """
+    Deterministic NMCK search with row/column context.
+
+    Algorithm:
+    1. For each row that contains a cell whose text matches a known NMCK keyword,
+       collect all numeric cells in that same row.
+    2. Also check the immediately following row (label may be above the value).
+    3. Return the largest numeric value found that is > 1000 (noise filter).
+    """
+    candidates: list[Decimal] = []
+    try:
+        with ZipFile(path) as zf:
+            names = set(zf.namelist())
+            shared_strings = _load_shared_strings(zf, names)
+
+            sheet_names = sorted(
+                n for n in names
+                if n.startswith("xl/worksheets/sheet") and n.endswith(".xml")
+            )
+            for sheet_name in sheet_names:
+                rows = _parse_sheet_rows(zf, sheet_name, shared_strings)
+                row_nums = sorted(rows)
+
+                for i, row_num in enumerate(row_nums):
+                    cells = rows[row_num]
+
+                    # Does this row contain an NMCK label?
+                    has_label = any(
+                        text and any(kw in text.lower() for kw in _NMCK_KEYWORDS)
+                        for _col, text, _numeric in cells
+                    )
+                    if not has_label:
+                        continue
+
+                    # Collect numerics from same row
+                    for _col, _text, numeric in cells:
+                        if numeric is not None and numeric > 1000:
+                            candidates.append(numeric)
+
+                    # Also check the next row (value sometimes sits below label)
+                    if i + 1 < len(row_nums):
+                        for _col, _text, numeric in rows[row_nums[i + 1]]:
+                            if numeric is not None and numeric > 1000:
+                                candidates.append(numeric)
+
+    except Exception as exc:
+        logger.warning("nmck xlsx extraction error for %s: %s", path, exc)
+
+    return max(candidates) if candidates else None
+
+
+# ── Public API ─────────────────────────────────────────────────────────────────
 
 
 def extract_text_for_file(path: Path, *, max_pages: int | None = None) -> str:
@@ -172,7 +337,17 @@ def build_normalized_text(
         if not text:
             continue
 
-        chunks.append(f"=== {doc.file_name} ===\n{text}\n")
+        # For xlsx files try deterministic NMCK extraction and prepend it
+        prefix = ""
+        if file_path.suffix.lower() == ".xlsx":
+            try:
+                nmck = extract_nmck_from_xlsx(file_path)
+                if nmck is not None:
+                    prefix = f"НМЦК: {nmck} руб.\n"
+            except Exception:
+                pass
+
+        chunks.append(f"=== {doc.file_name} ===\n{prefix}{text}\n")
 
     merged = "\n".join(chunks).strip()
     if len(merged) < 300:
