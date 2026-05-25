@@ -150,47 +150,6 @@ async def run_extraction(
     if not has_supported:
         raise ExtractionProviderError("UNSUPPORTED_FORMAT", "No supported document formats (.pdf/.docx/.doc/.txt/.xlsx/.zip)")
 
-    analysis = await db.scalar(
-        select(TenderAnalysis).where(
-            TenderAnalysis.company_id == company_id,
-            TenderAnalysis.tender_id == tender_id,
-        )
-    )
-
-    if analysis is not None:
-        cached_requirements = dict(analysis.requirements or {})
-        cached_signature = str(cached_requirements.get("extract_doc_signature_v1") or "")
-        cached_extracted = cached_requirements.get("extracted_v1")
-        if cached_signature and cached_signature == document_signature and isinstance(cached_extracted, dict):
-            try:
-                cached_meta = dict(cached_requirements.get("extract_meta_v1") or {}) if isinstance(cached_requirements.get("extract_meta_v1"), dict) else {}
-                if "parser_version" not in cached_meta:
-                    cached_meta["parser_version"] = PARSER_VERSION
-                    cached_requirements["extract_meta_v1"] = cached_meta
-                    analysis.requirements = cached_requirements
-                    await db.commit()
-            except Exception:
-                logger.exception("Failed to sync cached parser_version for tender_id=%s", tender_id)
-            logger.info("Extraction cache hit: tender_id=%s", tender_id)
-            return analysis, ExtractedTenderV1.model_validate(cached_extracted)
-
-    # Create action record for this extraction run (best-effort — never blocks extraction).
-    _action_record = None
-    if settings.feature_agent_actions:
-        try:
-            _action_record = await create_action(
-                db,
-                company_id=company_id,
-                agent_id=SYSTEM_AGENT_ID,
-                action_type="extract_documents",
-                target=str(tender_id),
-                payload={"doc_count": len(documents)},
-            )
-        except Exception:
-            logger.exception(
-                "Failed to create action record for extraction tender_id=%s", tender_id
-            )
-
     semantic_chunks = build_semantic_chunks(
         documents=documents,
         storage_root=settings.storage_root,
@@ -208,6 +167,53 @@ async def run_extraction(
             list(semantic_chunks.keys()),
             {domain: len(chunk) for domain, chunk in semantic_chunks.items()},
         )
+
+    analysis = await db.scalar(
+        select(TenderAnalysis).where(
+            TenderAnalysis.company_id == company_id,
+            TenderAnalysis.tender_id == tender_id,
+        )
+    )
+
+    if analysis is not None:
+        cached_requirements = dict(analysis.requirements or {})
+        cached_signature = str(cached_requirements.get("extract_doc_signature_v1") or "")
+        cached_extracted = cached_requirements.get("extracted_v1")
+        if cached_signature and cached_signature == document_signature and isinstance(cached_extracted, dict):
+            try:
+                cached_meta = dict(cached_requirements.get("extract_meta_v1") or {}) if isinstance(cached_requirements.get("extract_meta_v1"), dict) else {}
+                if semantic_chunks and "chunking_version" not in cached_meta:
+                    logger.info(
+                        "Extraction cache stale: tender_id=%s missing_chunking_meta=True",
+                        tender_id,
+                    )
+                else:
+                    if "parser_version" not in cached_meta:
+                        cached_meta["parser_version"] = PARSER_VERSION
+                        cached_requirements["extract_meta_v1"] = cached_meta
+                        analysis.requirements = cached_requirements
+                        await db.commit()
+                    logger.info("Extraction cache hit: tender_id=%s", tender_id)
+                    return analysis, ExtractedTenderV1.model_validate(cached_extracted)
+            except Exception:
+                logger.exception("Failed to sync cached parser_version for tender_id=%s", tender_id)
+
+    # Create action record for this extraction run (best-effort — never blocks extraction).
+    _action_record = None
+    if settings.feature_agent_actions:
+        try:
+            _action_record = await create_action(
+                db,
+                company_id=company_id,
+                agent_id=SYSTEM_AGENT_ID,
+                action_type="extract_documents",
+                target=str(tender_id),
+                payload={"doc_count": len(documents)},
+            )
+        except Exception:
+            logger.exception(
+                "Failed to create action record for extraction tender_id=%s", tender_id
+            )
 
     merged_text = build_normalized_text(
         documents=documents,
