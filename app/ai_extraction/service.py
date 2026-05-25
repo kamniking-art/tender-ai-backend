@@ -8,7 +8,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai_extraction.client import get_extractor_provider
+from app.ai_extraction.client import PARSER_VERSION, get_extractor_provider
 from app.ai_extraction.interfaces import ExtractionProviderError
 from app.ai_extraction.model import AICostLog
 from app.ai_extraction.schemas import ExtractedTenderV1
@@ -148,6 +148,15 @@ async def run_extraction(
         cached_signature = str(cached_requirements.get("extract_doc_signature_v1") or "")
         cached_extracted = cached_requirements.get("extracted_v1")
         if cached_signature and cached_signature == document_signature and isinstance(cached_extracted, dict):
+            try:
+                cached_meta = dict(cached_requirements.get("extract_meta_v1") or {}) if isinstance(cached_requirements.get("extract_meta_v1"), dict) else {}
+                if "parser_version" not in cached_meta:
+                    cached_meta["parser_version"] = PARSER_VERSION
+                    cached_requirements["extract_meta_v1"] = cached_meta
+                    analysis.requirements = cached_requirements
+                    await db.commit()
+            except Exception:
+                logger.exception("Failed to sync cached parser_version for tender_id=%s", tender_id)
             logger.info("Extraction cache hit: tender_id=%s", tender_id)
             return analysis, ExtractedTenderV1.model_validate(cached_extracted)
 
@@ -249,6 +258,9 @@ async def run_extraction(
         raise AnalysisConflictError("Approved analysis cannot be overwritten")
 
     extracted_payload = extracted.model_dump(mode="json")
+    extract_meta = dict(provider_result.extract_meta or {}) if isinstance(provider_result.extract_meta, dict) else {}
+    if "parser_version" not in extract_meta:
+        extract_meta["parser_version"] = PARSER_VERSION
 
     if analysis is None:
         analysis = TenderAnalysis(
@@ -258,7 +270,7 @@ async def run_extraction(
             requirements={
                 "extracted_v1": extracted_payload,
                 "risk_v1": risk_v1,
-                "extract_meta_v1": provider_result.extract_meta,
+                "extract_meta_v1": extract_meta,
                 "extract_doc_signature_v1": document_signature,
             },
             missing_docs=[],
@@ -272,7 +284,7 @@ async def run_extraction(
         merged_requirements = dict(analysis.requirements or {})
         merged_requirements["extracted_v1"] = extracted_payload
         merged_requirements["risk_v1"] = risk_v1
-        merged_requirements["extract_meta_v1"] = provider_result.extract_meta
+        merged_requirements["extract_meta_v1"] = extract_meta
         merged_requirements["extract_doc_signature_v1"] = document_signature
         merged_requirements.pop("extract_error_v1", None)
         analysis.requirements = merged_requirements
@@ -282,7 +294,6 @@ async def run_extraction(
             analysis.status = "ready"
         analysis.updated_by = user_id
 
-    extract_meta = provider_result.extract_meta if isinstance(provider_result.extract_meta, dict) else {}
     cost_log = AICostLog(
         company_id=company_id,
         tender_id=tender_id,
