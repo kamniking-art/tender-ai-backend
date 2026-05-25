@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai_extraction.client import PARSER_VERSION, get_extractor_provider
-from app.ai_extraction.interfaces import ExtractionProviderError
+from app.ai_extraction.interfaces import ExtractionProviderError, ExtractionProviderResult
 from app.ai_extraction.model import AICostLog
 from app.ai_extraction.schemas import ExtractedTenderV1
 from app.ai_extraction.text_extract import (
@@ -250,31 +250,59 @@ async def run_extraction(
             text=merged_text,
             chunks=semantic_chunks or None,
         )
-    except ExtractionProviderError:
-        # Best-effort persist of extraction error without schema changes.
-        analysis_err = await db.scalar(
-            select(TenderAnalysis).where(
-                TenderAnalysis.company_id == company_id,
-                TenderAnalysis.tender_id == tender_id,
+    except ExtractionProviderError as exc:
+        if exc.code == "PROVIDER_TIMEOUT" and _det_nmck is not None:
+            logger.warning(
+                "Extraction provider timeout fallback: tender_id=%s document_nmck=%s",
+                tender_id,
+                _det_nmck,
             )
-        )
-        if analysis_err and analysis_err.status != "approved":
-            req_err = dict(analysis_err.requirements or {})
-            req_err["extract_error_v1"] = {
-                "status": "failed",
-                "error": "provider_error",
-            }
-            analysis_err.requirements = req_err
-            analysis_err.updated_by = user_id
-            await db.commit()
-        if settings.feature_agent_actions and _action_record is not None:
-            try:
-                await fail_action(
-                    db, _action_record.action_id, result={"error": "provider_error"}
+            provider_result = ExtractionProviderResult(
+                extracted=ExtractedTenderV1(
+                    subject=getattr(tender, "title", None),
+                    nmck=_det_nmck,
+                    currency="RUB",
+                    confidence={"nmck": 0.99, "overall": 0.4},
+                    evidence={"nmck": "Deterministic NMCK extracted from XLSX/XLSX.ZIP document on RU after provider timeout"},
+                ),
+                extract_meta={
+                    "provider": "deterministic_fallback",
+                    "model": "ru-document-nmck-fallback",
+                    "latency_ms": None,
+                    "doc_coverage": 1.0,
+                    "confidence": 0.99,
+                    "parser_version": PARSER_VERSION,
+                    "warnings": ["provider_timeout_fallback"],
+                    "sources": [str(tender_id)],
+                    "estimated_cost": None,
+                    "chars_sent": len(merged_text),
+                },
+            )
+        else:
+            # Best-effort persist of extraction error without schema changes.
+            analysis_err = await db.scalar(
+                select(TenderAnalysis).where(
+                    TenderAnalysis.company_id == company_id,
+                    TenderAnalysis.tender_id == tender_id,
                 )
-            except Exception:
-                pass
-        raise
+            )
+            if analysis_err and analysis_err.status != "approved":
+                req_err = dict(analysis_err.requirements or {})
+                req_err["extract_error_v1"] = {
+                    "status": "failed",
+                    "error": "provider_error",
+                }
+                analysis_err.requirements = req_err
+                analysis_err.updated_by = user_id
+                await db.commit()
+            if settings.feature_agent_actions and _action_record is not None:
+                try:
+                    await fail_action(
+                        db, _action_record.action_id, result={"error": "provider_error"}
+                    )
+                except Exception:
+                    pass
+            raise
 
     extracted = provider_result.extracted
     risk_flags = compute_risk_flags(extracted, tender)
