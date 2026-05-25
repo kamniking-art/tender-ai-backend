@@ -12,7 +12,13 @@ from app.ai_extraction.client import PARSER_VERSION, get_extractor_provider
 from app.ai_extraction.interfaces import ExtractionProviderError
 from app.ai_extraction.model import AICostLog
 from app.ai_extraction.schemas import ExtractedTenderV1
-from app.ai_extraction.text_extract import NoExtractableTextError, build_normalized_text
+from app.ai_extraction.text_extract import (
+    MAX_SEMANTIC_CHUNK_CHARS,
+    NoExtractableTextError,
+    build_normalized_text,
+    build_semantic_chunks,
+    extract_nmck_from_file,
+)
 from app.core.config import settings
 from app.risk.service import compute_risk_flags, compute_risk_score_v1
 from app.tender_analysis.model import TenderAnalysis
@@ -185,6 +191,24 @@ async def run_extraction(
                 "Failed to create action record for extraction tender_id=%s", tender_id
             )
 
+    semantic_chunks = build_semantic_chunks(
+        documents=documents,
+        storage_root=settings.storage_root,
+        max_chars_per_chunk=min(
+            MAX_SEMANTIC_CHUNK_CHARS,
+            max(2000, int(settings.ai_max_input_chars or settings.ai_extractor_max_chars)),
+        ),
+        max_files=settings.ai_max_files,
+        max_pages=settings.ai_max_pages,
+    )
+    if semantic_chunks:
+        logger.info(
+            "Extraction semantic chunks: tender_id=%s domains=%s chunk_sizes=%s",
+            tender_id,
+            list(semantic_chunks.keys()),
+            {domain: len(chunk) for domain, chunk in semantic_chunks.items()},
+        )
+
     merged_text = build_normalized_text(
         documents=documents,
         storage_root=settings.storage_root,
@@ -193,18 +217,13 @@ async def run_extraction(
         max_pages=settings.ai_max_pages,
     )
 
-    # Deterministic NMCK extraction — before AI
-    from app.ai_extraction.text_extract import extract_nmck_from_xlsx
-    from pathlib import Path
-    from decimal import Decimal
-
     _det_nmck: Decimal | None = None
     for _doc in documents:
         _fname = (_doc.file_name or "").lower()
         if _fname.endswith(".xlsx") or _fname.endswith(".xlsx.zip"):
             _fpath = Path(settings.storage_root) / _doc.storage_path
             if _fpath.exists():
-                _det_nmck = extract_nmck_from_xlsx(_fpath)
+                _det_nmck = extract_nmck_from_file(_fpath)
                 if _det_nmck is not None:
                     break
 
@@ -229,6 +248,7 @@ async def run_extraction(
                 "submission_deadline": getattr(tender, "submission_deadline", None).isoformat() if getattr(tender, "submission_deadline", None) else None,
             },
             text=merged_text,
+            chunks=semantic_chunks or None,
         )
     except ExtractionProviderError:
         # Best-effort persist of extraction error without schema changes.
@@ -268,6 +288,10 @@ async def run_extraction(
     extract_meta = dict(provider_result.extract_meta or {}) if isinstance(provider_result.extract_meta, dict) else {}
     if "parser_version" not in extract_meta:
         extract_meta["parser_version"] = PARSER_VERSION
+    if semantic_chunks:
+        extract_meta["chunking_version"] = "1.0"
+        extract_meta["domains_extracted"] = list(semantic_chunks.keys())
+        extract_meta["chunk_sizes"] = {domain: len(chunk) for domain, chunk in semantic_chunks.items()}
 
     if analysis is None:
         analysis = TenderAnalysis(

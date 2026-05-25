@@ -20,6 +20,11 @@ class ExtractedTenderV1(BaseModel):
     contract_security_required: bool | None = None
     contract_security_amount: Decimal | None = None
     contract_security_pct: Decimal | None = None
+    sro_required: bool | None = None
+    licenses: list[str] = Field(default_factory=list)
+    experience_required: str | None = None
+    bank_guarantee_required: bool | None = None
+    execution_days: int | None = None
     qualification_requirements: list[str] = Field(default_factory=list)
     tech_parameters: list[str] = Field(default_factory=list)
     penalties: list[str] = Field(default_factory=list)
@@ -44,7 +49,8 @@ class ExtractedReadResponse(BaseModel):
 
 class RemoteExtractorPayload(BaseModel):
     tender_id: UUID
-    text: str
+    text: str = ""
+    chunks: dict[str, str] | None = None
     lang: Literal["ru"] = "ru"
     schema_version: Literal["v1"] = "v1"
 

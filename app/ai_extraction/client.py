@@ -209,9 +209,11 @@ class MockExtractorProvider(ExtractionProvider):
         company_id: UUID,
         tender_context: dict,
         text: str,
+        chunks: dict[str, str] | None = None,
     ) -> ExtractionProviderResult:
         started = time.perf_counter()
-        extracted = _mock_extract(text)
+        source_text = text or "\n\n".join((chunks or {}).values())
+        extracted = _mock_extract(source_text)
         latency_ms = int((time.perf_counter() - started) * 1000)
         return ExtractionProviderResult(
             extracted=extracted,
@@ -236,11 +238,12 @@ class RemoteExtractorProvider(ExtractionProvider):
         company_id: UUID,
         tender_context: dict,
         text: str,
+        chunks: dict[str, str] | None = None,
     ) -> ExtractionProviderResult:
         if not settings.ai_extractor_base_url:
             raise ExtractionProviderError("PROVIDER_ERROR", "AI extractor base URL is not configured")
 
-        payload = RemoteExtractorPayload(tender_id=tender_id, text=text)
+        payload = RemoteExtractorPayload(tender_id=tender_id, text=text, chunks=chunks or None)
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if settings.ai_extractor_api_key:
             headers["Authorization"] = f"Bearer {settings.ai_extractor_api_key}"
@@ -277,24 +280,34 @@ class RemoteExtractorProvider(ExtractionProvider):
                 if isinstance(raw_json, dict) and "extracted" in raw_json:
                     parsed = RemoteExtractorResult.model_validate(raw_json)
                     extracted = parsed.extracted
-                    meta = raw_json.get("extract_meta") if isinstance(raw_json.get("extract_meta"), dict) else {}
+                    raw_meta = raw_json.get("extract_meta") if isinstance(raw_json.get("extract_meta"), dict) else {}
                 else:
                     extracted = ExtractedTenderV1.model_validate(raw_json)
-                    meta = {}
+                    raw_meta = {}
             except Exception as exc:
                 raise ExtractionProviderError("VALIDATION_ERROR", "AI extractor JSON does not match schema") from exc
 
             latency_ms = int((time.perf_counter() - started) * 1000)
             meta = {
-                "provider": meta.get("provider", "remote"),
-                "model": meta.get("model", "unknown"),
-                "latency_ms": meta.get("latency_ms", latency_ms),
-                "doc_coverage": meta.get("doc_coverage", 1.0),
-                "confidence": meta.get("confidence", extracted.confidence.get("overall", 0.0)),
-                "parser_version": meta.get("parser_version", PARSER_VERSION),
-                "warnings": meta.get("warnings", []),
-                "sources": meta.get("sources", [str(tender_id)]),
+                "provider": raw_meta.get("provider", "remote"),
+                "model": raw_meta.get("model", "unknown"),
+                "latency_ms": raw_meta.get("latency_ms", latency_ms),
+                "doc_coverage": raw_meta.get("doc_coverage", 1.0),
+                "confidence": raw_meta.get("confidence", extracted.confidence.get("overall", 0.0)),
+                "parser_version": raw_meta.get("parser_version", PARSER_VERSION),
+                "warnings": raw_meta.get("warnings", []),
+                "sources": raw_meta.get("sources", [str(tender_id)]),
             }
+            for extra_key in (
+                "chunking_version",
+                "domains_extracted",
+                "chunk_sizes",
+                "domain_status",
+                "request_count",
+                "estimated_cost",
+            ):
+                if extra_key in raw_meta:
+                    meta[extra_key] = raw_meta[extra_key]
             return ExtractionProviderResult(extracted=extracted, extract_meta=meta)
 
         raise ExtractionProviderError("PROVIDER_ERROR", "AI extractor service unavailable")
@@ -308,6 +321,7 @@ class ClaudeExtractorProvider(ExtractionProvider):
         company_id: UUID,
         tender_context: dict,
         text: str,
+        chunks: dict[str, str] | None = None,
     ) -> ExtractionProviderResult:
         if not settings.ai_extractor_api_key:
             raise ExtractionProviderError("PROVIDER_ERROR", "Claude API key is not configured")
@@ -461,5 +475,6 @@ class AIExtractorClient:
             company_id=UUID("00000000-0000-0000-0000-000000000000"),
             tender_context={},
             text=text,
+            chunks=None,
         )
         return result.extracted

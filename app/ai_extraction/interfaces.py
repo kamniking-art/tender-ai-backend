@@ -35,4 +35,5 @@ class ExtractionProvider(Protocol):
         company_id: UUID,
         tender_context: dict,
         text: str,
+        chunks: dict[str, str] | None = None,
     ) -> ExtractionProviderResult: ...

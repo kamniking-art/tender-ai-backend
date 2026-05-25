@@ -15,6 +15,54 @@ from pypdf import PdfReader
 
 logger = logging.getLogger(__name__)
 
+MAX_SEMANTIC_CHUNK_CHARS = 20_000
+
+_DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "financial": (
+        "нмцк",
+        "нмцд",
+        "начальная цена",
+        "начальная (максимальная) цена",
+        "обеспечение заявки",
+        "обеспечение исполнения",
+        "обеспечение контракта",
+        "банковская гарантия",
+        "%",
+    ),
+    "deadlines": (
+        "срок подачи",
+        "дата окончания",
+        "окончание подачи",
+        "окончания подачи",
+        "подачи заявок",
+        "срок выполнения",
+        "срок исполнения",
+        "исполнение",
+        "календарн",
+        "рабочих дней",
+    ),
+    "compliance": (
+        "сро",
+        "лиценз",
+        "опыт",
+        "допуск",
+        "банковская гарантия",
+        "мчс",
+        "саморегулируем",
+        "квалификац",
+    ),
+    "execution": (
+        "техническ",
+        "характерист",
+        "параметр",
+        "неустойк",
+        "штраф",
+        "пеня",
+        "квалификац",
+        "требования к участникам",
+    ),
+}
+
 # ── NMCK keyword list (case-insensitive search) ────────────────────────────────
 
 _NMCK_KEYWORDS = [
@@ -248,6 +296,27 @@ def _extract_zip_text(path: Path) -> str:
     return "\n".join(chunks)
 
 
+def _extract_xlsx_from_zip(path: Path) -> Path | None:
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            with ZipFile(path) as zf:
+                for name in zf.namelist():
+                    if Path(name).suffix.lower() != ".xlsx":
+                        continue
+                    extracted = tmp_path / Path(name).name
+                    extracted.write_bytes(zf.read(name))
+                    persisted = path.with_suffix("")
+                    persisted_tmp = persisted.parent / f".tmp_{persisted.name}"
+                    persisted_tmp.write_bytes(extracted.read_bytes())
+                    return persisted_tmp
+    except BadZipFile:
+        logger.warning("Not a valid zip file for nmck extraction: %s", path)
+    except Exception as exc:
+        logger.warning("xlsx.zip nmck extraction error for %s: %s", path, exc)
+    return None
+
+
 # ── NMCK semantic extraction ───────────────────────────────────────────────────
 
 
@@ -365,6 +434,110 @@ def extract_nmck_from_xlsx(path: Path) -> Decimal | None:
     return None
 
 
+def extract_nmck_from_file(path: Path) -> Decimal | None:
+    suffix = path.suffix.lower()
+    if suffix == ".xlsx":
+        return extract_nmck_from_xlsx(path)
+    if suffix == ".zip" and path.name.lower().endswith(".xlsx.zip"):
+        extracted = _extract_xlsx_from_zip(path)
+        if extracted is None:
+            return None
+        try:
+            return extract_nmck_from_xlsx(extracted)
+        finally:
+            try:
+                extracted.unlink(missing_ok=True)
+            except Exception:
+                pass
+    return None
+
+
+def _document_prefix_for_nmck(file_path: Path) -> str:
+    fname_lower = file_path.name.lower()
+    if not (fname_lower.endswith(".xlsx") or fname_lower.endswith(".xlsx.zip")):
+        return ""
+    try:
+        nmck = extract_nmck_from_file(file_path)
+    except Exception:
+        return ""
+    return f"НМЦК: {nmck} руб.\n" if nmck is not None else ""
+
+
+def _iter_text_blocks(text: str) -> list[str]:
+    normalized = (text or "").replace("\r\n", "\n").strip()
+    if not normalized:
+        return []
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n+", normalized) if part.strip()]
+    if len(paragraphs) >= 3:
+        return paragraphs
+    return [line.strip() for line in normalized.splitlines() if line.strip()]
+
+
+def _block_matches_domain(block: str, domain: str) -> bool:
+    block_lower = block.lower()
+    return any(keyword in block_lower for keyword in _DOMAIN_KEYWORDS.get(domain, ()))
+
+
+def _truncate_chunk(text: str, *, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rstrip() + "\n...TRUNCATED"
+
+
+def build_semantic_chunks(
+    *,
+    documents: Iterable,
+    storage_root: str,
+    max_chars_per_chunk: int = MAX_SEMANTIC_CHUNK_CHARS,
+    max_files: int | None = None,
+    max_pages: int | None = None,
+) -> dict[str, str]:
+    domain_sections: dict[str, list[str]] = {domain: [] for domain in _DOMAIN_KEYWORDS}
+
+    for idx, doc in enumerate(documents):
+        if max_files is not None and idx >= max(1, max_files):
+            break
+        file_path = Path(storage_root) / doc.storage_path
+        if not file_path.exists() or not file_path.is_file():
+            continue
+
+        text = extract_text_for_file(file_path, max_pages=max_pages).strip()
+        if not text:
+            continue
+
+        prefix = _document_prefix_for_nmck(file_path)
+        blocks = _iter_text_blocks(text)
+        if not blocks:
+            continue
+
+        matched_indices: dict[str, set[int]] = {domain: set() for domain in _DOMAIN_KEYWORDS}
+        for i, block in enumerate(blocks):
+            for domain in _DOMAIN_KEYWORDS:
+                if _block_matches_domain(block, domain):
+                    for neighbor in (i - 1, i, i + 1):
+                        if 0 <= neighbor < len(blocks):
+                            matched_indices[domain].add(neighbor)
+
+        for domain, indices in matched_indices.items():
+            if not indices:
+                continue
+            selected = [blocks[i] for i in sorted(indices)]
+            section_text = "\n\n".join(selected).strip()
+            if not section_text:
+                continue
+            domain_sections[domain].append(f"=== {doc.file_name} ===\n{prefix}{section_text}\n")
+
+    chunks: dict[str, str] = {}
+    for domain, sections in domain_sections.items():
+        if not sections:
+            continue
+        merged = "\n".join(sections).strip()
+        if len(merged) < 100:
+            continue
+        chunks[domain] = _truncate_chunk(merged, max_chars=max_chars_per_chunk)
+    return chunks
+
+
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 
@@ -406,17 +579,7 @@ def build_normalized_text(
         if not text:
             continue
 
-        # For xlsx files try deterministic NMCK extraction and prepend it
-        # Also handles .xlsx.zip (outer zip containing xlsx)
-        prefix = ""
-        _fname_lower = file_path.name.lower()
-        if _fname_lower.endswith(".xlsx") or _fname_lower.endswith(".xlsx.zip"):
-            try:
-                nmck = extract_nmck_from_xlsx(file_path)
-                if nmck is not None:
-                    prefix = f"НМЦК: {nmck} руб.\n"
-            except Exception:
-                pass
+        prefix = _document_prefix_for_nmck(file_path)
 
         chunks.append(f"=== {doc.file_name} ===\n{prefix}{text}\n")
 
