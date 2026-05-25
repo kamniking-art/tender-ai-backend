@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     auth_disabled_company_email: str = "admin@demo.ru"
     ingestion_run_once_cooldown_minutes: int = 10
 
+    # Feature flags
+    feature_agent_actions: bool = True
+
     @property
     def auth_disabled_enabled(self) -> bool:
         return str(self.auth_disabled).strip().lower() in {"1", "true", "yes", "on"}

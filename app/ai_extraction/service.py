@@ -21,6 +21,14 @@ from app.tender_documents.model import TenderDocument
 from app.tenders.nmck import get_sane_nmck
 from app.tenders.service import get_tender_by_id_scoped
 
+if settings.feature_agent_actions:
+    from app.agent_actions.service import (  # noqa: F401
+        SYSTEM_AGENT_ID,
+        complete_action,
+        create_action,
+        fail_action,
+    )
+
 logger = logging.getLogger(__name__)
 
 
@@ -162,20 +170,20 @@ async def run_extraction(
 
     # Create action record for this extraction run (best-effort — never blocks extraction).
     _action_record = None
-    try:
-        from app.agent_actions.service import SYSTEM_AGENT_ID, create_action
-        _action_record = await create_action(
-            db,
-            company_id=company_id,
-            agent_id=SYSTEM_AGENT_ID,
-            action_type="extract_documents",
-            target=str(tender_id),
-            payload={"doc_count": len(documents)},
-        )
-    except Exception:
-        logger.exception(
-            "Failed to create action record for extraction tender_id=%s", tender_id
-        )
+    if settings.feature_agent_actions:
+        try:
+            _action_record = await create_action(
+                db,
+                company_id=company_id,
+                agent_id=SYSTEM_AGENT_ID,
+                action_type="extract_documents",
+                target=str(tender_id),
+                payload={"doc_count": len(documents)},
+            )
+        except Exception:
+            logger.exception(
+                "Failed to create action record for extraction tender_id=%s", tender_id
+            )
 
     merged_text = build_normalized_text(
         documents=documents,
@@ -239,9 +247,8 @@ async def run_extraction(
             analysis_err.requirements = req_err
             analysis_err.updated_by = user_id
             await db.commit()
-        if _action_record is not None:
+        if settings.feature_agent_actions and _action_record is not None:
             try:
-                from app.agent_actions.service import fail_action
                 await fail_action(
                     db, _action_record.action_id, result={"error": "provider_error"}
                 )
@@ -352,9 +359,8 @@ async def run_extraction(
         )
 
     # Mark the extraction action as completed (best-effort).
-    if _action_record is not None:
+    if settings.feature_agent_actions and _action_record is not None:
         try:
-            from app.agent_actions.service import complete_action
             await complete_action(
                 db, _action_record.action_id, result={"status": "ok"}
             )

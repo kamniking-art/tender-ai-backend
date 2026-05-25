@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai_extraction.schemas import ExtractedTenderV1
+from app.core.config import settings
 from app.relevance.service import compute_relevance_v1
 from app.tender_analysis.model import TenderAnalysis
 from app.tender_decisions.model import TenderDecision
@@ -20,6 +21,7 @@ from app.tender_finance.model import TenderFinance
 from app.tenders.model import Tender
 from app.tenders.nmck import get_sane_nmck
 from app.tenders.service import get_tender_by_id_scoped
+
 
 MIN_MARGIN_PCT = Decimal("10")
 RISK_GO_MAX = 40
@@ -752,24 +754,25 @@ async def recompute_decision_engine_v1(
     await db.refresh(decision)
 
     # Persist reasoning trace (best-effort — never breaks decision engine).
-    try:
-        from app.reasoning.service import create_trace
-        from app.agent_actions.service import SYSTEM_AGENT_ID
-        await create_trace(
-            db,
-            company_id=company_id,
-            tender_id=tender_id,
-            recommendation=final_recommendation,
-            factors=engine.get("explain") or [],
-            rules_fired=engine.get("rules_fired") or [],
-            evidence_used=engine.get("evidence_used") or [],
-            confidence=engine.get("decision_score"),
-            agent_id=SYSTEM_AGENT_ID,
-        )
-    except Exception:
-        logger.exception(
-            "Failed to create reasoning trace for tender_id=%s", tender_id
-        )
+    if settings.feature_agent_actions:
+        try:
+            from app.reasoning.service import create_trace
+            from app.agent_actions.service import SYSTEM_AGENT_ID  # already guarded by flag
+            await create_trace(
+                db,
+                company_id=company_id,
+                tender_id=tender_id,
+                recommendation=final_recommendation,
+                factors=engine.get("explain") or [],
+                rules_fired=engine.get("rules_fired") or [],
+                evidence_used=engine.get("evidence_used") or [],
+                confidence=engine.get("decision_score"),
+                agent_id=SYSTEM_AGENT_ID,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to create reasoning trace for tender_id=%s", tender_id
+            )
 
     return decision, engine
 
