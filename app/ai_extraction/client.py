@@ -15,6 +15,9 @@ from app.ai_extraction.schemas import ExtractedTenderV1, RemoteExtractorPayload,
 from app.core.config import settings
 
 
+PARSER_VERSION = "1.0"
+
+
 class AIServiceUnavailableError(RuntimeError):
     pass
 
@@ -218,6 +221,7 @@ class MockExtractorProvider(ExtractionProvider):
                 "latency_ms": latency_ms,
                 "doc_coverage": 1.0,
                 "confidence": extracted.confidence.get("overall", 0.0),
+                "parser_version": PARSER_VERSION,
                 "warnings": [],
                 "sources": [str(tender_id)],
             },
@@ -287,6 +291,7 @@ class RemoteExtractorProvider(ExtractionProvider):
                 "latency_ms": meta.get("latency_ms", latency_ms),
                 "doc_coverage": meta.get("doc_coverage", 1.0),
                 "confidence": meta.get("confidence", extracted.confidence.get("overall", 0.0)),
+                "parser_version": meta.get("parser_version", PARSER_VERSION),
                 "warnings": meta.get("warnings", []),
                 "sources": meta.get("sources", [str(tender_id)]),
             }
@@ -430,6 +435,7 @@ class ClaudeExtractorProvider(ExtractionProvider):
                 "chars_sent": chars_sent,
                 "request_count": request_count,
                 "estimated_cost": estimated_cost,
+                "parser_version": PARSER_VERSION,
                 "warnings": [],
                 "sources": [str(tender_id)],
             },
