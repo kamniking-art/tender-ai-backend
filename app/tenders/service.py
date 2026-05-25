@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
 
@@ -21,8 +21,20 @@ def _apply_filters(
     deadline_from: datetime | None = None,
     deadline_to: datetime | None = None,
     q: str | None = None,
+    hide_expired: bool = True,
 ) -> Select:
     stmt = stmt.where(Tender.company_id == company_id)
+
+    # Скрываем тендеры с истёкшим дедлайном по умолчанию.
+    # Не применяем если deadline_to задан явно (исторический запрос) или hide_expired=False.
+    if hide_expired and deadline_to is None:
+        now = datetime.now(tz=timezone.utc)
+        stmt = stmt.where(
+            or_(
+                Tender.submission_deadline.is_(None),
+                Tender.submission_deadline >= now,
+            )
+        )
 
     if status is not None:
         stmt = stmt.where(Tender.status == status.value)
