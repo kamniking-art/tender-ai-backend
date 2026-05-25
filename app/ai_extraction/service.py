@@ -176,6 +176,28 @@ async def run_extraction(
         max_pages=settings.ai_max_pages,
     )
 
+    # Deterministic NMCK extraction — before AI
+    from app.ai_extraction.text_extract import extract_nmck_from_xlsx
+    from pathlib import Path
+    from decimal import Decimal
+
+    _det_nmck: Decimal | None = None
+    for _doc in documents:
+        _fname = (_doc.file_name or "").lower()
+        if _fname.endswith(".xlsx") or _fname.endswith(".xlsx.zip"):
+            _fpath = Path(settings.storage_root) / _doc.storage_path
+            if _fpath.exists():
+                _det_nmck = extract_nmck_from_xlsx(_fpath)
+                if _det_nmck is not None:
+                    break
+
+    if _det_nmck is not None and (tender.nmck is None or tender.nmck == 0):
+        tender.nmck = _det_nmck
+        tender.nmck_source = "deterministic"
+        tender.nmck_confidence = Decimal("0.99")
+        await db.commit()
+        logger.info("deterministic nmck before AI: tender_id=%s nmck=%s", tender_id, _det_nmck)
+
     provider = get_extractor_provider()
     try:
         provider_result = await provider.extract(
