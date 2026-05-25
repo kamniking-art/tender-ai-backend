@@ -11,7 +11,7 @@ from sqlalchemy import select, func
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.tenders.model import Tender
-from app.ai_extraction.text_extract import extract_nmck_from_xlsx
+from app.ai_extraction.text_extract import extract_nmck_from_file
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -122,7 +122,7 @@ class NmckEnrichmentScheduler:
                             file_path = Path(settings.storage_root) / doc.storage_path
                             if not file_path.exists():
                                 continue
-                            nmck = extract_nmck_from_xlsx(file_path)
+                            nmck = extract_nmck_from_file(file_path)
                             if nmck is not None:
                                 tender.nmck = nmck
                                 tender.nmck_source = "deterministic_enrichment"
