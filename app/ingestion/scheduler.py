@@ -125,6 +125,7 @@ class IngestionScheduler:
                 "updated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             }
         except Exception:
+            await db.rollback()
             logger.exception("ingestion company run failed: source=eis_public company_id=%s", company.id)
 
     async def _run_eis_opendata_if_due(self, db, company: Company, now_ts: float) -> None:
@@ -274,6 +275,7 @@ class IngestionScheduler:
                 "updated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             }
         except Exception:
+            await db.rollback()
             logger.exception("EIS_OPENDATA error: company_id=%s reason=job_failed", company.id)
             self._last_run_stats[("eis_opendata", company.id)] = {
                 "status": "error",

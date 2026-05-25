@@ -59,8 +59,10 @@ class TelegramNotifyScheduler:
                                 stats.sent_items,
                             )
                     except TelegramSendError as exc:
+                        await db.rollback()
                         logger.warning("telegram notify failed: company_id=%s reason=%s", company.id, str(exc))
                     except Exception:
+                        await db.rollback()
                         logger.exception("telegram notify company iteration failed: company_id=%s", company.id)
         finally:
             await client.close()

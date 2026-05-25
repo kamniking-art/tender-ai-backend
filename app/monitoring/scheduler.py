@@ -70,8 +70,8 @@ class MonitoringScheduler:
                         result.notifications_sent,
                     )
                 except Exception:
+                    await db.rollback()
                     logger.exception("monitoring run failed: company_id=%s", company.id)
 
 
 scheduler = MonitoringScheduler()
-
