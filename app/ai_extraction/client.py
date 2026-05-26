@@ -249,7 +249,7 @@ class RemoteExtractorProvider(ExtractionProvider):
             headers["Authorization"] = f"Bearer {settings.ai_extractor_api_key}"
 
         url = settings.ai_extractor_base_url.rstrip("/") + "/extract"
-        delays = [0.0, 0.5, 1.5]
+        delays = [0.0]
         started = time.perf_counter()
 
         for attempt, delay in enumerate(delays):
@@ -338,7 +338,7 @@ class ClaudeExtractorProvider(ExtractionProvider):
             raise ExtractionProviderError("VALIDATION_ERROR", "No text chunks for AI extraction")
         chunks = chunks[: max(1, int(settings.ai_max_files or 10))]
 
-        delays = [0.0, 0.8, 1.8]
+        delays = [0.0]
         started = time.perf_counter()
         chars_sent = 0
         aggregated: dict[str, dict[str, object]] = {k: {"value": None, "confidence": 0.0, "evidence": ""} for k in _CLAUDE_FACT_FIELDS}

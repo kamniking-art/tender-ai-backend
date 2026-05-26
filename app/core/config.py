@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     ai_extractor_base_url: str | None = None
     ai_extractor_model: str = "claude-3-5-sonnet-20241022"
     ai_extractor_api_key: str | None = None
-    ai_extractor_timeout_sec: int = 60
+    ai_extractor_timeout_sec: int = 90
     ai_extractor_max_chars: int = 120000
     ai_max_input_chars: int = 120000
     ai_max_pages: int = 80
