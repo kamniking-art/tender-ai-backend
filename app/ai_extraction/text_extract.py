@@ -26,7 +26,6 @@ _DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
         "обеспечение заявки",
         "обеспечение исполнения",
         "обеспечение контракта",
-        "банковская гарантия",
         "%",
     ),
     "deadlines": (
@@ -55,12 +54,24 @@ _DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
         "техническ",
         "характерист",
         "параметр",
+        "материал",
+        "оборудован",
+        "спецификац",
+        "объем работ",
+        "объём работ",
+        "единиц измерения",
+        "количество",
         "неустойк",
         "штраф",
         "пеня",
-        "квалификац",
-        "требования к участникам",
     ),
+}
+
+_DOMAIN_PRIORITY: dict[str, int] = {
+    "financial": 0,
+    "deadlines": 1,
+    "compliance": 2,
+    "execution": 3,
 }
 
 # ── NMCK keyword list (case-insensitive search) ────────────────────────────────
@@ -478,6 +489,78 @@ def _block_matches_domain(block: str, domain: str) -> bool:
     return any(keyword in block_lower for keyword in _DOMAIN_KEYWORDS.get(domain, ()))
 
 
+def _score_block_domains(block: str) -> dict[str, int]:
+    block_lower = block.lower()
+    scores: dict[str, int] = {}
+    for domain, keywords in _DOMAIN_KEYWORDS.items():
+        score = sum(block_lower.count(keyword) for keyword in keywords if keyword in block_lower)
+        if score > 0:
+            scores[domain] = score
+    return scores
+
+
+def _document_domain_bonus(file_name: str, domain: str) -> int:
+    name_lower = (file_name or "").lower()
+    bonus = 0
+
+    if "нмцк" in name_lower or "обоснован" in name_lower:
+        if domain == "financial":
+            bonus += 6
+        else:
+            bonus -= 3
+
+    if "требован" in name_lower or "заявк" in name_lower:
+        if domain == "compliance":
+            bonus += 5
+        elif domain == "execution":
+            bonus += 1
+
+    if "описани" in name_lower or "тз" in name_lower:
+        if domain == "execution":
+            bonus += 5
+        elif domain == "compliance":
+            bonus += 1
+
+    if "договор" in name_lower or "контракт" in name_lower:
+        if domain == "deadlines":
+            bonus += 4
+        elif domain == "financial":
+            bonus += 2
+
+    if name_lower.endswith(".xlsx") or name_lower.endswith(".xlsx.zip"):
+        if domain == "financial":
+            bonus += 2
+        elif domain in {"deadlines", "compliance", "execution"}:
+            bonus -= 2
+
+    return bonus
+
+
+def _best_domain_for_block(block: str, *, file_name: str) -> str | None:
+    scores = _score_block_domains(block)
+    if not scores:
+        return None
+    for domain in list(scores):
+        scores[domain] += _document_domain_bonus(file_name, domain)
+        if scores[domain] <= 0:
+            del scores[domain]
+    if not scores:
+        return None
+    return min(
+        scores,
+        key=lambda domain: (-scores[domain], _DOMAIN_PRIORITY.get(domain, 999), domain),
+    )
+
+
+def _neighbor_offsets_for_file(file_name: str) -> tuple[int, ...]:
+    name_lower = (file_name or "").lower()
+    if name_lower.endswith(".xlsx") or name_lower.endswith(".xlsx.zip"):
+        return (0,)
+    if name_lower.endswith(".docx") or name_lower.endswith(".docx.zip"):
+        return (-1, 0, 1)
+    return (0,)
+
+
 def _truncate_chunk(text: str, *, max_chars: int) -> str:
     if len(text) <= max_chars:
         return text
@@ -511,12 +594,15 @@ def build_semantic_chunks(
             continue
 
         matched_indices: dict[str, set[int]] = {domain: set() for domain in _DOMAIN_KEYWORDS}
+        neighbor_offsets = _neighbor_offsets_for_file(doc.file_name or file_path.name)
         for i, block in enumerate(blocks):
-            for domain in _DOMAIN_KEYWORDS:
-                if _block_matches_domain(block, domain):
-                    for neighbor in (i - 1, i, i + 1):
-                        if 0 <= neighbor < len(blocks):
-                            matched_indices[domain].add(neighbor)
+            domain = _best_domain_for_block(block, file_name=doc.file_name or file_path.name)
+            if domain is None:
+                continue
+            for offset in neighbor_offsets:
+                neighbor = i + offset
+                if 0 <= neighbor < len(blocks):
+                    matched_indices[domain].add(neighbor)
 
         for domain, indices in matched_indices.items():
             if not indices:
