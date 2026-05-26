@@ -15,7 +15,7 @@ from pypdf import PdfReader
 
 logger = logging.getLogger(__name__)
 
-MAX_SEMANTIC_CHUNK_CHARS = 20_000
+MAX_SEMANTIC_CHUNK_CHARS = 10_000
 
 _DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
     "financial": (
