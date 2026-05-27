@@ -17,60 +17,84 @@ logger = logging.getLogger(__name__)
 
 MAX_SEMANTIC_CHUNK_CHARS = 10_000
 
-_DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "financial": (
-        "нмцк",
-        "нмцд",
-        "начальная цена",
-        "начальная (максимальная) цена",
-        "обеспечение заявки",
-        "обеспечение исполнения",
-        "обеспечение контракта",
-        "%",
-    ),
-    "deadlines": (
-        "срок подачи заявок",
-        "дата окончания подачи заявок",
-        "дата и время окончания подачи заявок",
-        "окончание подачи заявок",
-        "окончания подачи заявок",
-        "дата подачи заявок",
-        "прием заявок до",
-        "приём заявок до",
-    ),
-    "compliance": (
-        "сро",
-        "лиценз",
-        "опыт",
-        "допуск",
-        "банковская гарантия",
-        "мчс",
-        "саморегулируем",
-        "квалификац",
-    ),
-    "execution": (
-        "техническ",
-        "характерист",
-        "параметр",
-        "материал",
-        "оборудован",
-        "спецификац",
-        "объем работ",
-        "объём работ",
-        "единиц измерения",
-        "количество",
-        "неустойк",
-        "штраф",
-        "пеня",
-    ),
+# ── Routing registry ──────────────────────────────────────────────────────────
+# Single source of truth for domain routing: keywords, sort priority, and
+# filename-based scoring rules are all declared here and nowhere else.
+
+_DOMAIN_REGISTRY: dict[str, dict] = {
+    "financial": {
+        "priority": 0,
+        "keywords": (
+            "нмцк",
+            "нмцд",
+            "начальная цена",
+            "начальная (максимальная) цена",
+            "обеспечение заявки",
+            "обеспечение исполнения",
+            "обеспечение контракта",
+            "%",
+        ),
+    },
+    "deadlines": {
+        "priority": 1,
+        "keywords": (
+            "срок подачи заявок",
+            "дата окончания подачи заявок",
+            "дата и время окончания подачи заявок",
+            "окончание подачи заявок",
+            "окончания подачи заявок",
+            "дата подачи заявок",
+            "прием заявок до",
+            "приём заявок до",
+        ),
+    },
+    "compliance": {
+        "priority": 2,
+        "keywords": (
+            "сро",
+            "лиценз",
+            "опыт",
+            "допуск",
+            "банковская гарантия",
+            "мчс",
+            "саморегулируем",
+            "квалификац",
+        ),
+    },
+    "execution": {
+        "priority": 3,
+        "keywords": (
+            "техническ",
+            "характерист",
+            "параметр",
+            "материал",
+            "оборудован",
+            "спецификац",
+            "объем работ",
+            "объём работ",
+            "единиц измерения",
+            "количество",
+            "неустойк",
+            "штраф",
+            "пеня",
+        ),
+    },
 }
 
-_DOMAIN_PRIORITY: dict[str, int] = {
-    "financial": 0,
-    "deadlines": 1,
-    "compliance": 2,
-    "execution": 3,
-}
+# Filename-based domain scoring rules.
+# Each entry: (filename_substrings_any_of, {domain: delta}).
+# "*" key means "every domain not explicitly listed in the dict".
+_FILENAME_BONUS_RULES: list[tuple[tuple[str, ...], dict[str, int]]] = [
+    (("нмцк", "обоснован"),   {"financial": +6, "*": -3}),
+    (("требован", "заявк"),   {"compliance": +5, "execution": +1, "deadlines": -4}),
+    (("описани", "тз"),       {"execution": +5, "compliance": +1}),
+    (("договор", "контракт"), {"execution": +4, "compliance": +2, "financial": +2, "deadlines": -3}),
+    ((".xlsx", ".xlsx.zip"),  {"financial": +2, "*": -2}),
+]
+
+# Convenience aliases derived from the registry (read-only — do not modify).
+_DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {d: cfg["keywords"] for d, cfg in _DOMAIN_REGISTRY.items()}
+_DOMAIN_PRIORITY: dict[str, int] = {d: cfg["priority"] for d, cfg in _DOMAIN_REGISTRY.items()}
 
 # ── NMCK keyword list (case-insensitive search) ────────────────────────────────
 
@@ -498,46 +522,16 @@ def _score_block_domains(block: str) -> dict[str, int]:
 
 
 def _document_domain_bonus(file_name: str, domain: str) -> int:
+    """Return score delta for *domain* based on the document filename.
+
+    Rules are declared in _FILENAME_BONUS_RULES; this function is a pure
+    interpreter — add/tweak rules there, not here.
+    """
     name_lower = (file_name or "").lower()
     bonus = 0
-
-    if "нмцк" in name_lower or "обоснован" in name_lower:
-        if domain == "financial":
-            bonus += 6
-        else:
-            bonus -= 3
-
-    if "требован" in name_lower or "заявк" in name_lower:
-        if domain == "compliance":
-            bonus += 5
-        elif domain == "execution":
-            bonus += 1
-        elif domain == "deadlines":
-            bonus -= 4
-
-    if "описани" in name_lower or "тз" in name_lower:
-        if domain == "execution":
-            bonus += 5
-        elif domain == "compliance":
-            bonus += 1
-
-    if "договор" in name_lower or "контракт" in name_lower:
-        # Contract docs → execution/compliance, not deadlines
-        if domain == "execution":
-            bonus += 4
-        elif domain == "compliance":
-            bonus += 2
-        elif domain == "financial":
-            bonus += 2
-        elif domain == "deadlines":
-            bonus -= 3  # договор/контракт unlikely to be the deadlines chunk
-
-    if name_lower.endswith(".xlsx") or name_lower.endswith(".xlsx.zip"):
-        if domain == "financial":
-            bonus += 2
-        elif domain in {"deadlines", "compliance", "execution"}:
-            bonus -= 2
-
+    for patterns, domain_map in _FILENAME_BONUS_RULES:
+        if any(p in name_lower for p in patterns):
+            bonus += domain_map.get(domain, domain_map.get("*", 0))
     return bonus
 
 
