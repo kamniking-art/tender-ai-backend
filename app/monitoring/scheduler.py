@@ -59,19 +59,23 @@ class MonitoringScheduler:
                 if last is not None and now_ts - last < max(30, interval_minutes * 60):
                     continue
                 self._last_run_by_company[key] = now_ts
+                company_id = company.id  # сохраняем до try — после исключения company.id может быть недоступен
                 try:
                     result = await run_monitoring_cycle(db, company=company, actor_user_id=None)
                     logger.info(
                         "monitoring run: company_id=%s imported=%s new=%s relevant=%s notifications=%s",
-                        company.id,
+                        company_id,
                         result.imported_total,
                         result.new_tenders,
                         result.relevant_found,
                         result.notifications_sent,
                     )
                 except Exception:
-                    await db.rollback()
-                    logger.exception("monitoring run failed: company_id=%s", company.id)
+                    try:
+                        await db.rollback()
+                    except Exception:
+                        logger.exception("monitoring rollback failed: company_id=%s", company_id)
+                    logger.exception("monitoring run failed: company_id=%s", company_id)
 
 
 scheduler = MonitoringScheduler()
