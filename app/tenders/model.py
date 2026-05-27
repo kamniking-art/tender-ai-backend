@@ -37,5 +37,8 @@ class Tender(Base):
     nmck_confidence: Mapped[Decimal | None] = mapped_column(Numeric(4, 2), nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     submission_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    deadline_source: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    deadline_confidence: Mapped[Decimal | None] = mapped_column(Numeric(4, 3), nullable=True)
+    deadline_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="new", server_default="new", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
