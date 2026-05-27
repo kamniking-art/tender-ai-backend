@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai_extraction.client import PARSER_VERSION, get_extractor_provider
 from app.ai_extraction.interfaces import ExtractionProviderError, ExtractionProviderResult
-from app.ai_extraction.model import AICostLog
+from app.ai_extraction.model import AICostLog, ExtractionEvidence
 from app.ai_extraction.schemas import ExtractedTenderV1
 from app.ai_extraction.text_extract import (
     MAX_SEMANTIC_CHUNK_CHARS,
@@ -108,6 +108,84 @@ async def _resolve_documents(
         raise ScopedNotFoundError("One or more documents not found in this tender")
 
     return docs
+
+
+async def _upsert_extraction_evidence(
+    db: AsyncSession,
+    *,
+    company_id: UUID,
+    tender_id: UUID,
+    extracted: ExtractedTenderV1,
+    extract_meta: dict,
+) -> None:
+    """Upsert one row per extracted field into extraction_evidence.
+
+    Uses PostgreSQL INSERT … ON CONFLICT DO UPDATE so that re-running
+    extraction always reflects the latest values without creating duplicates.
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from datetime import datetime, timezone
+
+    provider = str(extract_meta.get("provider") or "unknown")
+    parser_version = str(extract_meta.get("parser_version") or PARSER_VERSION)
+    now = datetime.now(timezone.utc)
+
+    confidence_map: dict[str, float] = extracted.confidence or {}
+    evidence_map: dict[str, str | None] = extracted.evidence or {}
+
+    # Fields with scalar values to track individually
+    field_values: dict[str, object] = {
+        "nmck": extracted.nmck,
+        "subject": extracted.subject,
+        "submission_deadline_at": extracted.submission_deadline_at,
+        "bid_security_required": extracted.bid_security_required,
+        "bid_security_amount": extracted.bid_security_amount,
+        "bid_security_pct": extracted.bid_security_pct,
+        "contract_security_required": extracted.contract_security_required,
+        "contract_security_amount": extracted.contract_security_amount,
+        "contract_security_pct": extracted.contract_security_pct,
+        "sro_required": extracted.sro_required,
+        "licenses": extracted.licenses,
+        "experience_required": extracted.experience_required,
+        "bank_guarantee_required": extracted.bank_guarantee_required,
+        "execution_days": extracted.execution_days,
+    }
+
+    for field_name, raw_value in field_values.items():
+        # Serialise value to JSON-compatible form
+        if raw_value is None:
+            value_json = None
+        elif isinstance(raw_value, list):
+            value_json = raw_value
+        else:
+            try:
+                value_json = {"v": str(raw_value)}
+            except Exception:
+                value_json = None
+
+        insert_stmt = pg_insert(ExtractionEvidence).values(
+            company_id=company_id,
+            tender_id=tender_id,
+            field_name=field_name,
+            value=value_json,
+            confidence=confidence_map.get(field_name),
+            evidence=evidence_map.get(field_name),
+            provider=provider,
+            parser_version=parser_version,
+            extracted_at=now,
+        )
+        upsert_stmt = insert_stmt.on_conflict_do_update(
+            constraint="uq_extraction_evidence_company_tender_field",
+            set_={
+                "value": insert_stmt.excluded.value,
+                "confidence": insert_stmt.excluded.confidence,
+                "evidence": insert_stmt.excluded.evidence,
+                "provider": insert_stmt.excluded.provider,
+                "parser_version": insert_stmt.excluded.parser_version,
+                "extracted_at": insert_stmt.excluded.extracted_at,
+            },
+        )
+        await db.execute(upsert_stmt)
 
 
 async def run_extraction(
@@ -330,6 +408,16 @@ async def run_extraction(
         extract_meta["chunking_version"] = "1.0"
         extract_meta["domains_extracted"] = list(semantic_chunks.keys())
         extract_meta["chunk_sizes"] = {domain: len(chunk) for domain, chunk in semantic_chunks.items()}
+
+    # Upsert per-field evidence rows. ON CONFLICT DO UPDATE ensures re-extraction
+    # overwrites stale rows rather than inserting duplicates.
+    await _upsert_extraction_evidence(
+        db,
+        company_id=company_id,
+        tender_id=tender_id,
+        extracted=extracted,
+        extract_meta=extract_meta,
+    )
 
     if analysis is None:
         analysis = TenderAnalysis(
