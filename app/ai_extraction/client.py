@@ -286,21 +286,36 @@ class RemoteExtractorProvider(ExtractionProvider):
             except httpx.NetworkError as exc:
                 retry_idx = attempt - 1
                 if retry_idx < len(_RETRY_NETWORK):
-                    await asyncio.sleep(_RETRY_NETWORK[retry_idx])
+                    delay = _RETRY_NETWORK[retry_idx]
+                    logger.warning(
+                        "retry: provider=remote error=NetworkError attempt=%d delay=%.1fs",
+                        attempt, delay,
+                    )
+                    await asyncio.sleep(delay)
                     continue
                 raise ExtractionProviderError("PROVIDER_TIMEOUT", "AI extractor service unreachable") from exc
 
             if response.status_code == 429:
                 retry_idx = attempt - 1
                 if retry_idx < len(_RETRY_RATE_LIMIT):
-                    await asyncio.sleep(_RETRY_RATE_LIMIT[retry_idx])
+                    delay = _RETRY_RATE_LIMIT[retry_idx]
+                    logger.warning(
+                        "retry: provider=remote error=RateLimit attempt=%d delay=%.1fs",
+                        attempt, delay,
+                    )
+                    await asyncio.sleep(delay)
                     continue
                 raise ExtractionProviderError("PROVIDER_ERROR", "AI extractor rate limit exceeded")
 
             if response.status_code >= 500:
                 retry_idx = attempt - 1
                 if retry_idx < len(_RETRY_SERVER_ERROR):
-                    await asyncio.sleep(_RETRY_SERVER_ERROR[retry_idx])
+                    delay = _RETRY_SERVER_ERROR[retry_idx]
+                    logger.warning(
+                        "retry: provider=remote error=ServerError(%d) attempt=%d delay=%.1fs",
+                        response.status_code, attempt, delay,
+                    )
+                    await asyncio.sleep(delay)
                     continue
                 raise ExtractionProviderError("PROVIDER_ERROR", f"upstream status {response.status_code}")
 
@@ -407,21 +422,36 @@ class ClaudeExtractorProvider(ExtractionProvider):
                 except httpx.NetworkError as exc:
                     retry_idx = attempt - 1
                     if retry_idx < len(_RETRY_NETWORK):
-                        await asyncio.sleep(_RETRY_NETWORK[retry_idx])
+                        delay = _RETRY_NETWORK[retry_idx]
+                        logger.warning(
+                            "retry: provider=claude error=NetworkError attempt=%d delay=%.1fs",
+                            attempt, delay,
+                        )
+                        await asyncio.sleep(delay)
                         continue
                     raise ExtractionProviderError("PROVIDER_TIMEOUT", "Claude unreachable") from exc
 
                 if response.status_code == 429:
                     retry_idx = attempt - 1
                     if retry_idx < len(_RETRY_RATE_LIMIT):
-                        await asyncio.sleep(_RETRY_RATE_LIMIT[retry_idx])
+                        delay = _RETRY_RATE_LIMIT[retry_idx]
+                        logger.warning(
+                            "retry: provider=claude error=RateLimit attempt=%d delay=%.1fs",
+                            attempt, delay,
+                        )
+                        await asyncio.sleep(delay)
                         continue
                     raise ExtractionProviderError("PROVIDER_ERROR", "Claude rate limit exceeded")
 
                 if response.status_code >= 500:
                     retry_idx = attempt - 1
                     if retry_idx < len(_RETRY_SERVER_ERROR):
-                        await asyncio.sleep(_RETRY_SERVER_ERROR[retry_idx])
+                        delay = _RETRY_SERVER_ERROR[retry_idx]
+                        logger.warning(
+                            "retry: provider=claude error=ServerError(%d) attempt=%d delay=%.1fs",
+                            response.status_code, attempt, delay,
+                        )
+                        await asyncio.sleep(delay)
                         continue
                     raise ExtractionProviderError("PROVIDER_ERROR", f"claude upstream status {response.status_code}")
 
