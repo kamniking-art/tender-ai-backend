@@ -267,7 +267,18 @@ async def run_extraction(
                         analysis.requirements = cached_requirements
                         await db.commit()
                     logger.info("Extraction cache hit: tender_id=%s", tender_id)
-                    return analysis, ExtractedTenderV1.model_validate(cached_extracted)
+                    cached_extracted_obj = ExtractedTenderV1.model_validate(cached_extracted)
+                    try:
+                        await _upsert_extraction_evidence(
+                            db,
+                            company_id=company_id,
+                            tender_id=tender_id,
+                            extracted=cached_extracted_obj,
+                            extract_meta=cached_meta,
+                        )
+                    except Exception:
+                        logger.exception("Failed to upsert evidence on cache hit: tender_id=%s", tender_id)
+                    return analysis, cached_extracted_obj
             except Exception:
                 logger.exception("Failed to sync cached parser_version for tender_id=%s", tender_id)
 
