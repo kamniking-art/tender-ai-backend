@@ -383,8 +383,14 @@ def get_monitoring_notifications(company: Company, limit: int = 20) -> list[dict
     notifications = state.get("notifications", [])
     if not isinstance(notifications, list):
         return []
+    now_iso = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    # Скрываем уведомления с истёкшим дедлайном
+    filtered = [
+        item for item in notifications
+        if not isinstance(item, dict) or item.get("deadline") is None or item["deadline"] >= now_iso
+    ]
     ordered = sorted(
-        notifications,
+        filtered,
         key=lambda item: (
             int(item.get("priority_score", -1)) if isinstance(item, dict) and item.get("priority_score") is not None else -1,
             str(item.get("sent_at", "")) if isinstance(item, dict) else "",

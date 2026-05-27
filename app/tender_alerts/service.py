@@ -16,7 +16,11 @@ from app.tenders.model import Tender
 
 
 def _base_tender_condition(company_id: UUID, since: datetime | None) -> list:
-    conditions = [Tender.company_id == company_id]
+    now = datetime.now(UTC)
+    conditions = [
+        Tender.company_id == company_id,
+        or_(Tender.submission_deadline.is_(None), Tender.submission_deadline >= now),
+    ]
     if since is not None:
         conditions.append(Tender.created_at >= since)
     return conditions
