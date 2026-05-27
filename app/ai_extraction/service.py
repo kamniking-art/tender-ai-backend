@@ -153,12 +153,17 @@ async def _upsert_extraction_evidence(
 
     for field_name, value_json in field_values.items():
         # value_json is already JSON-native (None / bool / int / float / str / list)
+        # Use provider confidence if available; fall back to synthetic:
+        # non-null value → 0.8 (field was extracted), null → 0.0 (not found).
+        conf = confidence_map.get(field_name)
+        if conf is None:
+            conf = 0.8 if value_json is not None else 0.0
         insert_stmt = pg_insert(ExtractionEvidence).values(
             company_id=company_id,
             tender_id=tender_id,
             field_name=field_name,
             value=value_json,
-            confidence=confidence_map.get(field_name),
+            confidence=conf,
             evidence=evidence_map.get(field_name),
             provider=provider,
             parser_version=parser_version,
