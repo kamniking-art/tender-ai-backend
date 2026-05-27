@@ -211,26 +211,29 @@ async def run_monitoring_cycle(
     relevant_tenders: list[tuple[Tender, dict, int | None]] = []
 
     for tender in new_tenders:
+        tender_id = tender.id
         if actor_id is not None:
             try:
                 await recompute_decision_engine_v1(
                     db,
                     company_id=company.id,
-                    tender_id=tender.id,
+                    tender_id=tender_id,
                     user_id=actor_id,
                     force=True,
                 )
             except DecisionEngineBadRequestError:
-                logger.warning("monitoring recompute skipped: company_id=%s tender_id=%s", company.id, tender.id)
+                await db.rollback()
+                logger.warning("monitoring recompute skipped: company_id=%s tender_id=%s", company.id, tender_id)
             except Exception:
-                logger.exception("monitoring recompute failed: company_id=%s tender_id=%s", company.id, tender.id)
+                await db.rollback()
+                logger.exception("monitoring recompute failed: company_id=%s tender_id=%s", company.id, tender_id)
 
-        score, is_relevant, payload = await _extract_relevance_payload(db, company.id, tender.id)
+        score, is_relevant, payload = await _extract_relevance_payload(db, company.id, tender_id)
         relevance_checked += 1
         if score is None:
             continue
         if is_relevant and score >= monitoring.relevance_min:
-            risk_score = await _extract_risk_score(db, company.id, tender.id)
+            risk_score = await _extract_risk_score(db, company.id, tender_id)
             relevant_tenders.append((tender, payload, risk_score))
 
     state = _state(profile)

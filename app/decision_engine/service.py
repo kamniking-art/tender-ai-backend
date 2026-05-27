@@ -758,6 +758,11 @@ async def recompute_decision_engine_v1(
         try:
             from app.reasoning.service import create_trace
             from app.agent_actions.service import SYSTEM_AGENT_ID  # already guarded by flag
+            raw_decision_score = engine.get("decision_score")
+            normalized_confidence = None
+            if isinstance(raw_decision_score, (int, float)):
+                normalized_confidence = max(0.0, min(float(raw_decision_score) / 100.0, 1.0))
+
             await create_trace(
                 db,
                 company_id=company_id,
@@ -766,7 +771,7 @@ async def recompute_decision_engine_v1(
                 factors=engine.get("explain") or [],
                 rules_fired=engine.get("rules_fired") or [],
                 evidence_used=engine.get("evidence_used") or [],
-                confidence=engine.get("decision_score"),
+                confidence=normalized_confidence,
                 agent_id=SYSTEM_AGENT_ID,
             )
         except Exception:
