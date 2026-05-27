@@ -522,10 +522,15 @@ def _document_domain_bonus(file_name: str, domain: str) -> int:
             bonus += 1
 
     if "договор" in name_lower or "контракт" in name_lower:
-        if domain == "deadlines":
+        # Contract docs → execution/compliance, not deadlines
+        if domain == "execution":
             bonus += 4
+        elif domain == "compliance":
+            bonus += 2
         elif domain == "financial":
             bonus += 2
+        elif domain == "deadlines":
+            bonus -= 3  # договор/контракт unlikely to be the deadlines chunk
 
     if name_lower.endswith(".xlsx") or name_lower.endswith(".xlsx.zip"):
         if domain == "financial":
