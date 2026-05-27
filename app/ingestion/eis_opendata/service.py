@@ -291,6 +291,9 @@ async def _process_downloaded_file(
                     nmck=candidate.nmck,
                     published_at=candidate.published_at,
                     submission_deadline=candidate.submission_deadline,
+                    deadline_source="eis_ingestion" if candidate.submission_deadline is not None else None,
+                    deadline_confidence=0.99 if candidate.submission_deadline is not None else None,
+                    deadline_updated_at=datetime.now(UTC) if candidate.submission_deadline is not None else None,
                     status="new",
                 )
             )
@@ -339,6 +342,10 @@ def _merge_candidate(tender: Tender, candidate: OpenDataCandidate) -> bool:
         value = getattr(candidate, field)
         if value is not None and getattr(tender, field) != value:
             setattr(tender, field, value)
+            if field == "submission_deadline":
+                tender.deadline_source = "eis_ingestion"
+                tender.deadline_confidence = 0.99
+                tender.deadline_updated_at = datetime.now(UTC)
             changed = True
     return changed
 

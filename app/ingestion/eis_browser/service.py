@@ -157,6 +157,9 @@ async def _upsert_tender(db: AsyncSession, company_id: UUID, candidate: EISSiteC
                 nmck=_normalize_decimal(candidate.nmck),
                 published_at=candidate.published_at,
                 submission_deadline=candidate.submission_deadline,
+                deadline_source="eis_ingestion" if candidate.submission_deadline is not None else None,
+                deadline_confidence=0.99 if candidate.submission_deadline is not None else None,
+                deadline_updated_at=datetime.now(UTC) if candidate.submission_deadline is not None else None,
                 status="new",
             )
         )
@@ -167,6 +170,10 @@ async def _upsert_tender(db: AsyncSession, company_id: UUID, candidate: EISSiteC
         value = getattr(candidate, field if field != "source_url" else "url")
         if value is not None and getattr(existing, field) != value:
             setattr(existing, field, value)
+            if field == "submission_deadline":
+                existing.deadline_source = "eis_ingestion"
+                existing.deadline_confidence = 0.99
+                existing.deadline_updated_at = datetime.now(UTC)
             changed = True
     nmck = _normalize_decimal(candidate.nmck)
     if nmck is not None and existing.nmck != nmck:

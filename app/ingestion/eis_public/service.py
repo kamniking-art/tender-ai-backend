@@ -1,6 +1,6 @@
 import logging
 import time
-from datetime import UTC
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -51,6 +51,10 @@ def _merge_candidate(tender: Tender, candidate: EISCandidate) -> bool:
         value = getattr(candidate, field)
         if value is not None and getattr(tender, field) != value:
             setattr(tender, field, value)
+            if field == "submission_deadline":
+                tender.deadline_source = "eis_ingestion"
+                tender.deadline_confidence = 0.99
+                tender.deadline_updated_at = datetime.now(UTC)
             changed = True
     return changed
 
@@ -85,6 +89,9 @@ async def upsert_tenders(company_id: UUID, candidates: list[EISCandidate], db: A
                 nmck=cand.nmck,
                 published_at=cand.published_at,
                 submission_deadline=cand.submission_deadline,
+                deadline_source="eis_ingestion" if cand.submission_deadline is not None else None,
+                deadline_confidence=0.99 if cand.submission_deadline is not None else None,
+                deadline_updated_at=datetime.now(UTC) if cand.submission_deadline is not None else None,
                 status="new",
             )
             db.add(tender)
