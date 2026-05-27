@@ -15,12 +15,16 @@ from app.tender_tasks.model import TenderTask
 from app.tenders.model import Tender
 
 
-def _base_tender_condition(company_id: UUID, since: datetime | None) -> list:
-    now = datetime.now(UTC)
-    conditions = [
-        Tender.company_id == company_id,
-        or_(Tender.submission_deadline.is_(None), Tender.submission_deadline >= now),
-    ]
+def _base_tender_condition(
+    company_id: UUID,
+    since: datetime | None,
+    *,
+    hide_expired: bool = True,
+) -> list:
+    conditions = [Tender.company_id == company_id]
+    if hide_expired:
+        now = datetime.now(UTC)
+        conditions.append(or_(Tender.submission_deadline.is_(None), Tender.submission_deadline >= now))
     if since is not None:
         conditions.append(Tender.created_at >= since)
     return conditions
@@ -138,7 +142,7 @@ def _alerts_union(company_id: UUID, user_id: UUID, since: datetime | None, inclu
                 TenderTask.status == "overdue",
             )
         )
-        where = [*_base_tender_condition(company_id, since), overdue_exists]
+        where = [*_base_tender_condition(company_id, since, hide_expired=False), overdue_exists]
         if not include_acknowledged:
             where.append(_ack_filter(company_id, user_id, AlertCategory.OVERDUE_TASK.value))
         queries.append(
