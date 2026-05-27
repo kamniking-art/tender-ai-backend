@@ -137,7 +137,7 @@ async def _upsert_extraction_evidence(
     confidence_map: dict[str, float] = extracted_dict.get("confidence") or {}
     evidence_map: dict[str, str | None] = extracted_dict.get("evidence") or {}
 
-    logger.info(
+    logger.warning(
         "evidence_upsert debug: tender_id=%s provider=%s "
         "confidence_keys=%s evidence_keys=%s nmck=%s nmck_conf=%s",
         tender_id,
