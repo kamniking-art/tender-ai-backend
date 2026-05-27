@@ -118,6 +118,7 @@ async def _upsert_extraction_evidence(
     extracted: ExtractedTenderV1,
     extract_meta: dict,
 ) -> None:
+    print("EVIDENCE_REACHED", flush=True)  # TODO: remove after debug
     """Upsert one row per extracted field into extraction_evidence.
 
     Uses PostgreSQL INSERT … ON CONFLICT DO UPDATE so that re-running
