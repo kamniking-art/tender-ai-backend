@@ -594,14 +594,34 @@ def build_semantic_chunks(
 
         matched_indices: dict[str, set[int]] = {domain: set() for domain in _DOMAIN_KEYWORDS}
         neighbor_offsets = _neighbor_offsets_for_file(doc.file_name or file_path.name)
+        block_domain_hits: dict[str, int] = {}  # domain → number of directly matched blocks
         for i, block in enumerate(blocks):
             domain = _best_domain_for_block(block, file_name=doc.file_name or file_path.name)
             if domain is None:
                 continue
+            block_domain_hits[domain] = block_domain_hits.get(domain, 0) + 1
             for offset in neighbor_offsets:
                 neighbor = i + offset
                 if 0 <= neighbor < len(blocks):
                     matched_indices[domain].add(neighbor)
+
+        # Routing observability: log per-document routing decision.
+        _fname = doc.file_name or file_path.name
+        _matched_rules = [
+            patterns
+            for patterns, domain_map in _FILENAME_BONUS_RULES
+            if any(p in _fname.lower() for p in patterns)
+        ]
+        _selected_domains = [d for d, idx in matched_indices.items() if idx]
+        logger.debug(
+            "routing: file=%s total_blocks=%d domain_hits=%s "
+            "matched_filename_rules=%s selected_domains=%s",
+            _fname,
+            len(blocks),
+            block_domain_hits,
+            _matched_rules,
+            _selected_domains,
+        )
 
         for domain, indices in matched_indices.items():
             if not indices:
@@ -620,6 +640,12 @@ def build_semantic_chunks(
         if len(merged) < 100:
             continue
         chunks[domain] = _truncate_chunk(merged, max_chars=max_chars_per_chunk)
+
+    logger.debug(
+        "routing summary: chunks_built=%s chunk_sizes=%s",
+        list(chunks.keys()),
+        {d: len(t) for d, t in chunks.items()},
+    )
     return chunks
 
 
