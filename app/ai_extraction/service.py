@@ -118,7 +118,6 @@ async def _upsert_extraction_evidence(
     extracted: ExtractedTenderV1,
     extract_meta: dict,
 ) -> None:
-    print("EVIDENCE_REACHED", flush=True)  # TODO: remove after debug
     """Upsert one row per extracted field into extraction_evidence.
 
     Uses PostgreSQL INSERT … ON CONFLICT DO UPDATE so that re-running
@@ -137,15 +136,6 @@ async def _upsert_extraction_evidence(
     extracted_dict = extracted.model_dump(mode="json")
     confidence_map: dict[str, float] = extracted_dict.get("confidence") or {}
     evidence_map: dict[str, str | None] = extracted_dict.get("evidence") or {}
-
-    print(
-        f"[EVIDENCE_DEBUG] tender_id={tender_id} provider={provider}"
-        f" confidence_keys={sorted(confidence_map.keys())}"
-        f" evidence_keys={sorted(k for k, v in evidence_map.items() if v)}"
-        f" nmck={extracted_dict.get('nmck')}"
-        f" nmck_conf={confidence_map.get('nmck')}",
-        flush=True,
-    )
 
     # All content fields except schema meta and the maps themselves
     _SKIP = {"schema_version", "confidence", "evidence"}
