@@ -8,7 +8,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai_extraction.client import PARSER_VERSION, get_extractor_provider
+from app.ai_extraction.client import PARSER_VERSION, CHUNKING_VERSION, pipeline_versions, get_extractor_provider
 from app.ai_extraction.interfaces import ExtractionProviderError, ExtractionProviderResult
 from app.ai_extraction.model import AICostLog, ExtractionEvidence
 from app.ai_extraction.schemas import ExtractedTenderV1
@@ -401,9 +401,11 @@ async def run_extraction(
     if "parser_version" not in extract_meta:
         extract_meta["parser_version"] = PARSER_VERSION
     if semantic_chunks:
-        extract_meta["chunking_version"] = "1.0"
+        extract_meta["chunking_version"] = CHUNKING_VERSION
         extract_meta["domains_extracted"] = list(semantic_chunks.keys())
         extract_meta["chunk_sizes"] = {domain: len(chunk) for domain, chunk in semantic_chunks.items()}
+    # Unified pipeline version snapshot — all components in one place.
+    extract_meta["pipeline_versions"] = pipeline_versions()
 
     # Upsert per-field evidence rows. ON CONFLICT DO UPDATE ensures re-extraction
     # overwrites stale rows rather than inserting duplicates.

@@ -16,6 +16,20 @@ from app.core.config import settings
 
 
 PARSER_VERSION = "1.0"
+CHUNKING_VERSION = "1.0"   # build_semantic_chunks domain routing
+ROUTING_VERSION = "1.0"    # _DOMAIN_REGISTRY + _FILENAME_BONUS_RULES
+NORMALIZER_VERSION = "1.0" # build_normalized_text / text preprocessing
+
+
+def pipeline_versions() -> dict[str, str]:
+    """Return a snapshot of all pipeline component versions."""
+    return {
+        "parser": PARSER_VERSION,
+        "chunking": CHUNKING_VERSION,
+        "routing": ROUTING_VERSION,
+        "normalizer": NORMALIZER_VERSION,
+    }
+
 
 # Retry policy per error class.
 # TimeoutException  → no retry  (already timed out, immediate retry won't help)
