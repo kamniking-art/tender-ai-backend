@@ -137,6 +137,17 @@ async def _upsert_extraction_evidence(
     confidence_map: dict[str, float] = extracted_dict.get("confidence") or {}
     evidence_map: dict[str, str | None] = extracted_dict.get("evidence") or {}
 
+    logger.debug(
+        "evidence_upsert debug: tender_id=%s provider=%s "
+        "confidence_keys=%s evidence_keys=%s nmck=%s nmck_conf=%s",
+        tender_id,
+        provider,
+        sorted(confidence_map.keys()),
+        sorted(k for k, v in evidence_map.items() if v),
+        extracted_dict.get("nmck"),
+        confidence_map.get("nmck"),
+    )
+
     # All content fields except schema meta and the maps themselves
     _SKIP = {"schema_version", "confidence", "evidence"}
     field_values = {k: v for k, v in extracted_dict.items() if k not in _SKIP}
