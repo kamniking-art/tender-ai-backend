@@ -130,39 +130,19 @@ async def _upsert_extraction_evidence(
     parser_version = str(extract_meta.get("parser_version") or PARSER_VERSION)
     now = datetime.now(timezone.utc)
 
-    confidence_map: dict[str, float] = extracted.confidence or {}
-    evidence_map: dict[str, str | None] = extracted.evidence or {}
+    # model_dump(mode="json") converts Decimal→float, datetime→ISO string, etc.
+    # Confidence/evidence keys match schema field names exactly (same dict used
+    # when storing extracted_v1 in requirements JSONB).
+    extracted_dict = extracted.model_dump(mode="json")
+    confidence_map: dict[str, float] = extracted_dict.get("confidence") or {}
+    evidence_map: dict[str, str | None] = extracted_dict.get("evidence") or {}
 
-    # Fields with scalar values to track individually
-    field_values: dict[str, object] = {
-        "nmck": extracted.nmck,
-        "subject": extracted.subject,
-        "submission_deadline_at": extracted.submission_deadline_at,
-        "bid_security_required": extracted.bid_security_required,
-        "bid_security_amount": extracted.bid_security_amount,
-        "bid_security_pct": extracted.bid_security_pct,
-        "contract_security_required": extracted.contract_security_required,
-        "contract_security_amount": extracted.contract_security_amount,
-        "contract_security_pct": extracted.contract_security_pct,
-        "sro_required": extracted.sro_required,
-        "licenses": extracted.licenses,
-        "experience_required": extracted.experience_required,
-        "bank_guarantee_required": extracted.bank_guarantee_required,
-        "execution_days": extracted.execution_days,
-    }
+    # All content fields except schema meta and the maps themselves
+    _SKIP = {"schema_version", "confidence", "evidence"}
+    field_values = {k: v for k, v in extracted_dict.items() if k not in _SKIP}
 
-    for field_name, raw_value in field_values.items():
-        # Serialise value to JSON-compatible form
-        if raw_value is None:
-            value_json = None
-        elif isinstance(raw_value, list):
-            value_json = raw_value
-        else:
-            try:
-                value_json = {"v": str(raw_value)}
-            except Exception:
-                value_json = None
-
+    for field_name, value_json in field_values.items():
+        # value_json is already JSON-native (None / bool / int / float / str / list)
         insert_stmt = pg_insert(ExtractionEvidence).values(
             company_id=company_id,
             tender_id=tender_id,
