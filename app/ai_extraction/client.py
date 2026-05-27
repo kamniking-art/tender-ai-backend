@@ -17,6 +17,17 @@ from app.core.config import settings
 
 PARSER_VERSION = "1.0"
 
+# Retry policy per error class.
+# TimeoutException  → no retry  (already timed out, immediate retry won't help)
+# NetworkError      → retry once after 1 s  (transient connection reset)
+# HTTP 429          → exponential backoff, up to 2 retries
+# HTTP 5xx          → exponential backoff, up to 2 retries
+# HTTP 4xx (non-429)→ fail immediately  (our payload is wrong)
+# Invalid JSON      → fail immediately
+_RETRY_NETWORK: list[float] = [1.0]
+_RETRY_RATE_LIMIT: list[float] = [2.0, 5.0]
+_RETRY_SERVER_ERROR: list[float] = [1.0, 3.0]
+
 
 class AIServiceUnavailableError(RuntimeError):
     pass
@@ -249,22 +260,33 @@ class RemoteExtractorProvider(ExtractionProvider):
             headers["Authorization"] = f"Bearer {settings.ai_extractor_api_key}"
 
         url = settings.ai_extractor_base_url.rstrip("/") + "/extract"
-        delays = [0.0]
         started = time.perf_counter()
-
-        for attempt, delay in enumerate(delays):
-            if delay:
-                await asyncio.sleep(delay)
+        attempt = 0
+        while True:
+            attempt += 1
             try:
                 async with httpx.AsyncClient(timeout=settings.ai_extractor_timeout_sec) as client:
                     response = await client.post(url, headers=headers, json=payload.model_dump(mode="json"))
-            except (httpx.TimeoutException, httpx.NetworkError) as exc:
-                if attempt < len(delays) - 1:
+            except httpx.TimeoutException as exc:
+                raise ExtractionProviderError("PROVIDER_TIMEOUT", "AI extractor service timeout") from exc
+            except httpx.NetworkError as exc:
+                retry_idx = attempt - 1
+                if retry_idx < len(_RETRY_NETWORK):
+                    await asyncio.sleep(_RETRY_NETWORK[retry_idx])
                     continue
-                raise ExtractionProviderError("PROVIDER_TIMEOUT", "AI extractor service timeout/unreachable") from exc
+                raise ExtractionProviderError("PROVIDER_TIMEOUT", "AI extractor service unreachable") from exc
+
+            if response.status_code == 429:
+                retry_idx = attempt - 1
+                if retry_idx < len(_RETRY_RATE_LIMIT):
+                    await asyncio.sleep(_RETRY_RATE_LIMIT[retry_idx])
+                    continue
+                raise ExtractionProviderError("PROVIDER_ERROR", "AI extractor rate limit exceeded")
 
             if response.status_code >= 500:
-                if attempt < len(delays) - 1:
+                retry_idx = attempt - 1
+                if retry_idx < len(_RETRY_SERVER_ERROR):
+                    await asyncio.sleep(_RETRY_SERVER_ERROR[retry_idx])
                     continue
                 raise ExtractionProviderError("PROVIDER_ERROR", f"upstream status {response.status_code}")
 
@@ -338,7 +360,6 @@ class ClaudeExtractorProvider(ExtractionProvider):
             raise ExtractionProviderError("VALIDATION_ERROR", "No text chunks for AI extraction")
         chunks = chunks[: max(1, int(settings.ai_max_files or 10))]
 
-        delays = [0.0]
         started = time.perf_counter()
         chars_sent = 0
         aggregated: dict[str, dict[str, object]] = {k: {"value": None, "confidence": 0.0, "evidence": ""} for k in _CLAUDE_FACT_FIELDS}
@@ -361,21 +382,35 @@ class ClaudeExtractorProvider(ExtractionProvider):
             }
 
             raw_json: dict | None = None
-            for attempt, delay in enumerate(delays):
-                if delay:
-                    await asyncio.sleep(delay)
+            attempt = 0
+            while True:
+                attempt += 1
                 try:
                     async with httpx.AsyncClient(timeout=settings.ai_extractor_timeout_sec) as client:
                         response = await client.post(url, headers=headers, json=payload)
-                except (httpx.TimeoutException, httpx.NetworkError) as exc:
-                    if attempt < len(delays) - 1:
+                except httpx.TimeoutException as exc:
+                    raise ExtractionProviderError("PROVIDER_TIMEOUT", "Claude timeout") from exc
+                except httpx.NetworkError as exc:
+                    retry_idx = attempt - 1
+                    if retry_idx < len(_RETRY_NETWORK):
+                        await asyncio.sleep(_RETRY_NETWORK[retry_idx])
                         continue
-                    raise ExtractionProviderError("PROVIDER_TIMEOUT", "Claude timeout/unreachable") from exc
+                    raise ExtractionProviderError("PROVIDER_TIMEOUT", "Claude unreachable") from exc
+
+                if response.status_code == 429:
+                    retry_idx = attempt - 1
+                    if retry_idx < len(_RETRY_RATE_LIMIT):
+                        await asyncio.sleep(_RETRY_RATE_LIMIT[retry_idx])
+                        continue
+                    raise ExtractionProviderError("PROVIDER_ERROR", "Claude rate limit exceeded")
 
                 if response.status_code >= 500:
-                    if attempt < len(delays) - 1:
+                    retry_idx = attempt - 1
+                    if retry_idx < len(_RETRY_SERVER_ERROR):
+                        await asyncio.sleep(_RETRY_SERVER_ERROR[retry_idx])
                         continue
                     raise ExtractionProviderError("PROVIDER_ERROR", f"claude upstream status {response.status_code}")
+
                 if response.status_code >= 400:
                     raise ExtractionProviderError("PROVIDER_ERROR", f"claude status {response.status_code}")
 
