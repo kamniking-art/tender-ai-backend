@@ -215,13 +215,17 @@ async def run_extraction(
                 "Failed to create action record for extraction tender_id=%s", tender_id
             )
 
-    merged_text = build_normalized_text(
-        documents=documents,
-        storage_root=settings.storage_root,
-        max_chars=settings.ai_max_input_chars or settings.ai_extractor_max_chars,
-        max_files=settings.ai_max_files,
-        max_pages=settings.ai_max_pages,
-    )
+    # Use pre-built semantic chunks if available — avoids double document read
+    if semantic_chunks:
+        merged_text = "\n\n".join(semantic_chunks.values())
+    else:
+        merged_text = build_normalized_text(
+            documents=documents,
+            storage_root=settings.storage_root,
+            max_chars=settings.ai_max_input_chars or settings.ai_extractor_max_chars,
+            max_files=settings.ai_max_files,
+            max_pages=settings.ai_max_pages,
+        )
 
     _det_nmck: Decimal | None = None
     for _doc in documents:
