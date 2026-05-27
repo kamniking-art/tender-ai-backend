@@ -45,23 +45,32 @@ class MonitoringScheduler:
             await asyncio.sleep(60)
 
     async def _run_iteration(self) -> None:
+        # Короткая сессия только для получения списка компаний
         async with AsyncSessionLocal() as db:
             companies = list((await db.scalars(select(Company))).all())
-            now_ts = time.time()
-            for company in companies:
-                profile = company.profile if isinstance(company.profile, dict) else {}
-                monitoring = MonitoringSettings.from_profile(profile)
-                if not monitoring.enabled:
-                    continue
-                interval_minutes = monitoring.interval_minutes or settings.monitoring_interval_minutes
-                key = str(company.id)
-                last = self._last_run_by_company.get(key)
-                if last is not None and now_ts - last < max(30, interval_minutes * 60):
-                    continue
-                self._last_run_by_company[key] = now_ts
-                company_id = company.id  # сохраняем до try — после исключения company.id может быть недоступен
+
+        now_ts = time.time()
+        for company in companies:
+            profile = company.profile if isinstance(company.profile, dict) else {}
+            monitoring = MonitoringSettings.from_profile(profile)
+            if not monitoring.enabled:
+                continue
+            interval_minutes = monitoring.interval_minutes or settings.monitoring_interval_minutes
+            key = str(company.id)
+            last = self._last_run_by_company.get(key)
+            if last is not None and now_ts - last < max(30, interval_minutes * 60):
+                continue
+            self._last_run_by_company[key] = now_ts
+            company_id = company.id
+            # Отдельная сессия на каждую компанию — сбой одной не влияет на остальные.
+            # AsyncSessionLocal как контекстный менеджер сам делает rollback/close при исключении.
+            async with AsyncSessionLocal() as db:
                 try:
-                    result = await run_monitoring_cycle(db, company=company, actor_user_id=None)
+                    # Перечитываем компанию в свежей сессии чтобы получить актуальный profile
+                    fresh_company = await db.get(Company, company_id)
+                    if fresh_company is None:
+                        continue
+                    result = await run_monitoring_cycle(db, company=fresh_company, actor_user_id=None)
                     logger.info(
                         "monitoring run: company_id=%s imported=%s new=%s relevant=%s notifications=%s",
                         company_id,
@@ -71,10 +80,6 @@ class MonitoringScheduler:
                         result.notifications_sent,
                     )
                 except Exception:
-                    try:
-                        await db.rollback()
-                    except Exception:
-                        logger.exception("monitoring rollback failed: company_id=%s", company_id)
                     logger.exception("monitoring run failed: company_id=%s", company_id)
 
 
