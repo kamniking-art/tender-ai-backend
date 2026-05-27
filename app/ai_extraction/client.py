@@ -450,8 +450,22 @@ class ClaudeExtractorProvider(ExtractionProvider):
             else None
         )
 
-        confidence = {k: float(v.get("confidence", 0.0) or 0.0) for k, v in aggregated.items()}
-        evidence = {k: str(v.get("evidence") or "") for k, v in aggregated.items()}
+        # Map Claude aggregation keys → ExtractedTenderV1 schema field names
+        # so that extraction_evidence rows use consistent keys.
+        _AGG_TO_SCHEMA: dict[str, str] = {
+            "security_amount": "bid_security_amount",
+            "deadline_days":   "execution_days",
+            "bank_guarantee":  "bank_guarantee_required",
+            # sro_required, licenses, experience_required — same in both
+        }
+        confidence = {
+            _AGG_TO_SCHEMA.get(k, k): float(v.get("confidence", 0.0) or 0.0)
+            for k, v in aggregated.items()
+        }
+        evidence = {
+            _AGG_TO_SCHEMA.get(k, k): str(v.get("evidence") or "")
+            for k, v in aggregated.items()
+        }
 
         extracted = ExtractedTenderV1(
             schema_version="v1",
