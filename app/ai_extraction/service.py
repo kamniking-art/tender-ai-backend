@@ -137,15 +137,13 @@ async def _upsert_extraction_evidence(
     confidence_map: dict[str, float] = extracted_dict.get("confidence") or {}
     evidence_map: dict[str, str | None] = extracted_dict.get("evidence") or {}
 
-    logger.warning(
-        "evidence_upsert debug: tender_id=%s provider=%s "
-        "confidence_keys=%s evidence_keys=%s nmck=%s nmck_conf=%s",
-        tender_id,
-        provider,
-        sorted(confidence_map.keys()),
-        sorted(k for k, v in evidence_map.items() if v),
-        extracted_dict.get("nmck"),
-        confidence_map.get("nmck"),
+    print(
+        f"[EVIDENCE_DEBUG] tender_id={tender_id} provider={provider}"
+        f" confidence_keys={sorted(confidence_map.keys())}"
+        f" evidence_keys={sorted(k for k, v in evidence_map.items() if v)}"
+        f" nmck={extracted_dict.get('nmck')}"
+        f" nmck_conf={confidence_map.get('nmck')}",
+        flush=True,
     )
 
     # All content fields except schema meta and the maps themselves
