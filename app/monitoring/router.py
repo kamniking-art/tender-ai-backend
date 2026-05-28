@@ -86,9 +86,15 @@ async def get_operational_stats(
     except Exception:
         health_per_tenant = []
 
+    try:
+        queue_backlog = await _query_view(db, "v_queue_backlog")
+    except Exception:
+        queue_backlog = []
+
     return {
         "cost_by_tenant": cost_by_tenant,
         "provider_errors": provider_errors,
         "health_per_tenant": health_per_tenant,
+        "queue_backlog": queue_backlog,
     }
 
