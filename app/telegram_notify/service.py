@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent_actions.service import AgentAction, SYSTEM_AGENT_ID
 from app.core.config import settings
 from app.models import Company
 from app.tender_alerts.schemas import AlertCategory, AlertTenderItem
@@ -384,6 +385,12 @@ async def process_company_notifications(db: AsyncSession, company: Company, clie
     flags_map = await _get_risk_flags_map(db, company.id, all_ids)
 
     category_order = ["new", "deadline_24h", "risky"]
+    # Collect action records for all successful sends; committed once at the end.
+    # We create AgentAction directly (bypassing create_action dedup) because
+    # notifications are recurring events, not idempotent pipeline steps — using
+    # create_action would silently return the first completed record on every run.
+    _action_log: list[AgentAction] = []
+
     for category in category_order:
         items = pending[category]
         if not items:
@@ -401,7 +408,24 @@ async def process_company_notifications(db: AsyncSession, company: Company, clie
         stats.sent_messages += 1
         stats.sent_items += len(items)
 
+        _action_log.append(
+            AgentAction(
+                action_id=uuid4(),
+                company_id=company.id,
+                agent_id=SYSTEM_AGENT_ID,
+                action_type="send_notification",
+                target=f"telegram:{category}",
+                payload={"category": category, "items_count": len(items), "chat_id": cfg.chat_id},
+                status="completed",
+                result={"sent_at": _iso(now), "items_count": len(items)},
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
     if stats.sent_messages > 0:
+        for _action in _action_log:
+            db.add(_action)
         company.profile = profile
         await db.commit()
 
