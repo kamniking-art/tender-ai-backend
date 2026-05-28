@@ -1,10 +1,36 @@
 {% extends "base.html" %}
-{% block title %}Ops Dashboard | Tender AI{% endblock %}
+{% block title %}Ops | Tender AI{% endblock %}
 {% block content %}
 <h1>Ops Dashboard</h1>
 <p class="subtitle">Операционные метрики в реальном времени.</p>
 
-<!-- ── Health per tenant ─────────────────────────────────────────────────── -->
+{% set col_ru = {
+  "calls_24h":          "Вызовов за 24ч",
+  "success_rate":       "Успешных, %",
+  "last_call":          "Последний вызов",
+  "last_run":           "Последний запуск",
+  "error_count":        "Ошибок",
+  "total_calls":        "Всего вызовов",
+  "cost_day":           "За день",
+  "cost_week":          "За неделю",
+  "cost_month":         "За месяц",
+  "total_cost":         "Всего расходов",
+  "chars_sent":         "Символов отправлено",
+  "estimated_cost":     "Ориентировочно, $",
+  "pending_tasks":      "Задач в очереди",
+  "overdue_tasks":      "Просроченных задач",
+  "pending_actions":    "Действий в очереди",
+  "running_actions":    "Действий в работе",
+  "provider":           "Провайдер",
+  "error_code":         "Код ошибки",
+  "error_count_24h":    "Ошибок за 24ч",
+  "last_error":         "Последняя ошибка",
+  "model":              "Модель",
+  "operation_type":     "Тип операции",
+  "status":             "Статус"
+} %}
+
+<!-- ── Состояние по компаниям ──────────────────────────────────────────── -->
 <section class="card">
   <h2>Состояние по компаниям</h2>
   {% if health_per_tenant %}
@@ -14,7 +40,7 @@
         <tr>
           <th>Компания</th>
           {% for col in health_per_tenant[0].keys() if col != 'company_name' and col != 'company_id' %}
-          <th>{{ col }}</th>
+          <th>{{ col_ru.get(col, col) }}</th>
           {% endfor %}
         </tr>
       </thead>
@@ -35,7 +61,7 @@
   {% endif %}
 </section>
 
-<!-- ── Cost by tenant ────────────────────────────────────────────────────── -->
+<!-- ── Расходы по компаниям ───────────────────────────────────────────── -->
 <section class="card">
   <h2>Расходы по компаниям</h2>
   {% if cost_by_tenant %}
@@ -45,7 +71,7 @@
         <tr>
           <th>Компания</th>
           {% for col in cost_by_tenant[0].keys() if col != 'company_name' and col != 'company_id' %}
-          <th>{{ col }}</th>
+          <th>{{ col_ru.get(col, col) }}</th>
           {% endfor %}
         </tr>
       </thead>
@@ -66,7 +92,7 @@
   {% endif %}
 </section>
 
-<!-- ── Queue backlog ─────────────────────────────────────────────────────── -->
+<!-- ── Очередь задач ──────────────────────────────────────────────────── -->
 <section class="card">
   <h2>Очередь задач</h2>
   {% if queue_backlog %}
@@ -75,10 +101,10 @@
       <thead>
         <tr>
           <th>Компания</th>
-          <th>pending tasks</th>
-          <th>overdue tasks</th>
-          <th>pending actions</th>
-          <th>running actions</th>
+          <th>Задач в очереди</th>
+          <th>Просроченных</th>
+          <th>Действий в очереди</th>
+          <th>Действий в работе</th>
         </tr>
       </thead>
       <tbody>
