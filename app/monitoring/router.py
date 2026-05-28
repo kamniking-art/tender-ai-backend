@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from typing import Any
+
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -50,4 +52,43 @@ async def run_monitoring_once(
 ) -> MonitoringRunResponse:
     company = await _get_company(db, current_user.company_id)
     return await run_monitoring_cycle(db, company=company, actor_user_id=current_user.id)
+
+
+async def _query_view(db: AsyncSession, view_name: str) -> list[dict[str, Any]]:
+    """Execute SELECT * FROM <view> and return rows as plain dicts."""
+    result = await db.execute(text(f"SELECT * FROM {view_name}"))  # noqa: S608
+    keys = list(result.keys())
+    return [dict(zip(keys, row)) for row in result.fetchall()]
+
+
+@router.get("/operational")
+async def get_operational_stats(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Return aggregated operational metrics from the three monitoring views.
+
+    Reads v_cost_by_tenant, v_provider_errors, v_health_per_tenant and
+    returns them as JSON arrays. Requires a valid auth token.
+    """
+    try:
+        cost_by_tenant = await _query_view(db, "v_cost_by_tenant")
+    except Exception:
+        cost_by_tenant = []
+
+    try:
+        provider_errors = await _query_view(db, "v_provider_errors")
+    except Exception:
+        provider_errors = []
+
+    try:
+        health_per_tenant = await _query_view(db, "v_health_per_tenant")
+    except Exception:
+        health_per_tenant = []
+
+    return {
+        "cost_by_tenant": cost_by_tenant,
+        "provider_errors": provider_errors,
+        "health_per_tenant": health_per_tenant,
+    }
 
