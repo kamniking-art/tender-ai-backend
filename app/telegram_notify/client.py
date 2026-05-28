@@ -86,7 +86,7 @@ class TelegramClient:
                     raise TelegramSendError(_tg_err)
                 return data.get("message_id")
             except (httpx.TimeoutException, httpx.TransportError) as exc:
-                last_error = str(exc)
+                last_error = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
                 continue
             except httpx.HTTPStatusError as exc:
                 logger.warning(
