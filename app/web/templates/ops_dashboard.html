@@ -1,33 +1,42 @@
 {% extends "base.html" %}
-{% block title %}Ops | Tender AI{% endblock %}
+{% block title %}Мониторинг | Tender AI{% endblock %}
 {% block content %}
-<h1>Ops Dashboard</h1>
+<h1>Мониторинг</h1>
 <p class="subtitle">Операционные метрики в реальном времени.</p>
 
 {% set col_ru = {
-  "calls_24h":          "Вызовов за 24ч",
-  "success_rate":       "Успешных, %",
-  "last_call":          "Последний вызов",
-  "last_run":           "Последний запуск",
-  "error_count":        "Ошибок",
-  "total_calls":        "Всего вызовов",
-  "cost_day":           "За день",
-  "cost_week":          "За неделю",
-  "cost_month":         "За месяц",
-  "total_cost":         "Всего расходов",
-  "chars_sent":         "Символов отправлено",
-  "estimated_cost":     "Ориентировочно, $",
-  "pending_tasks":      "Задач в очереди",
-  "overdue_tasks":      "Просроченных задач",
-  "pending_actions":    "Действий в очереди",
-  "running_actions":    "Действий в работе",
-  "provider":           "Провайдер",
-  "error_code":         "Код ошибки",
-  "error_count_24h":    "Ошибок за 24ч",
-  "last_error":         "Последняя ошибка",
-  "model":              "Модель",
-  "operation_type":     "Тип операции",
-  "status":             "Статус"
+  "calls_24h":              "Вызовов за 24ч",
+  "success_calls_24h":      "Успешных за 24ч",
+  "failed_calls_24h":       "Ошибок за 24ч",
+  "success_rate_24h_pct":   "Успешных, %",
+  "success_rate":           "Успешных, %",
+  "providers_seen_24h":     "Провайдеров за 24ч",
+  "last_call_at":           "Последний вызов",
+  "last_call":              "Последний вызов",
+  "last_run":               "Последний запуск",
+  "error_count":            "Ошибок",
+  "error_count_24h":        "Ошибок за 24ч",
+  "last_error":             "Последняя ошибка",
+  "period":                 "Период",
+  "calls":                  "Вызовов",
+  "total_calls":            "Всего вызовов",
+  "total_chars_sent":       "Символов отправлено",
+  "chars_sent":             "Символов отправлено",
+  "total_estimated_cost":   "Расходы, $",
+  "estimated_cost":         "Расходы, $",
+  "cost_day":               "За день",
+  "cost_week":              "За неделю",
+  "cost_month":             "За месяц",
+  "total_cost":             "Всего расходов",
+  "pending_tasks":          "Задач в очереди",
+  "overdue_tasks":          "Просроченных задач",
+  "pending_actions":        "Действий в очереди",
+  "running_actions":        "Действий в работе",
+  "provider":               "Провайдер",
+  "error_code":             "Код ошибки",
+  "model":                  "Модель",
+  "operation_type":         "Тип операции",
+  "status":                 "Статус"
 } %}
 
 <!-- ── Состояние по компаниям ──────────────────────────────────────────── -->

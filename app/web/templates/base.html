@@ -16,7 +16,7 @@
         <a href="/web/company/profile">Профиль компании</a>
         <a href="/web/policies">Правила</a>
         {% if current_user.role == 'admin' %}
-        <a href="/web/ops">Ops</a>
+        <a href="/web/ops">Мониторинг</a>
         {% endif %}
         <form action="/web/logout" method="post" class="inline-form">
           <button type="submit" class="link-button">Выход</button>
