@@ -359,8 +359,8 @@ class RemoteExtractorProvider(ExtractionProvider):
             ):
                 if extra_key in raw_meta:
                     meta[extra_key] = raw_meta[extra_key]
-            # Fallback: Warsaw didn't return estimated_cost — approximate locally.
-            if "estimated_cost" not in meta:
+            # Fallback: Warsaw omitted cost or returned null — approximate locally.
+            if not meta.get("estimated_cost"):
                 meta["estimated_cost"] = round((len(text) / 1000.0) * 0.0008, 8)
             return ExtractionProviderResult(extracted=extracted, extract_meta=meta)
 
