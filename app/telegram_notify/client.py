@@ -76,12 +76,25 @@ class TelegramClient:
                 response.raise_for_status()
                 data = response.json()
                 if not data.get("ok"):
-                    raise TelegramSendError(data.get("error") or "telegram send failed")
+                    _tg_err = data.get("error") or "telegram send failed"
+                    logger.warning(
+                        "telegram send failed: provider=telegram attempt=%d error=%s response=%s",
+                        attempt,
+                        _tg_err,
+                        data,
+                    )
+                    raise TelegramSendError(_tg_err)
                 return data.get("message_id")
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 last_error = str(exc)
                 continue
             except httpx.HTTPStatusError as exc:
+                logger.warning(
+                    "telegram send failed: provider=telegram attempt=%d status=%d body=%.200s",
+                    attempt,
+                    exc.response.status_code,
+                    exc.response.text,
+                )
                 raise TelegramSendError(f"proxy http {exc.response.status_code}") from exc
 
         logger.warning(
