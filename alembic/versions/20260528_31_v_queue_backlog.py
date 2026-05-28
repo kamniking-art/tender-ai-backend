@@ -23,8 +23,8 @@ SELECT
     c.name                                                      AS company_name,
     COUNT(t.id) FILTER (WHERE t.status = 'pending')             AS pending_tasks,
     COUNT(t.id) FILTER (WHERE t.status = 'overdue')             AS overdue_tasks,
-    COUNT(a.id) FILTER (WHERE a.status = 'pending')             AS pending_actions,
-    COUNT(a.id) FILTER (WHERE a.status = 'running')             AS running_actions
+    COUNT(a.action_id) FILTER (WHERE a.status = 'pending')       AS pending_actions,
+    COUNT(a.action_id) FILTER (WHERE a.status = 'running')       AS running_actions
 FROM companies c
 LEFT JOIN tender_tasks t ON t.company_id = c.id
 LEFT JOIN actions      a ON a.company_id = c.id
