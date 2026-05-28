@@ -1,0 +1,534 @@
+{% extends "base.html" %}
+{% block title %}Настройка компании | Tender AI{% endblock %}
+{% block content %}
+<h1>Настройка компании</h1>
+<p class="subtitle">Заполните данные один раз — система начнёт работать автоматически.</p>
+
+<div id="toast" class="toast hidden"></div>
+
+<!-- Progress stepper -->
+<div class="stepper">
+  <div class="step active" data-step="1"><span class="step-num">1</span><span class="step-label">Компания</span></div>
+  <div class="step-line"></div>
+  <div class="step" data-step="2"><span class="step-num">2</span><span class="step-label">Лицензии</span></div>
+  <div class="step-line"></div>
+  <div class="step" data-step="3"><span class="step-num">3</span><span class="step-label">Telegram</span></div>
+  <div class="step-line"></div>
+  <div class="step" data-step="4"><span class="step-num">4</span><span class="step-label">Мониторинг</span></div>
+  <div class="step-line"></div>
+  <div class="step" data-step="5"><span class="step-num">5</span><span class="step-label">Политики</span></div>
+</div>
+
+<form id="onboarding-form">
+
+  <!-- ── Шаг 1: Профиль компании ─────────────────────────────────────────── -->
+  <section class="card step-section" data-step="1">
+    <h2>1. Профиль компании</h2>
+    <div class="grid-form">
+      <label>Название компании
+        <input type="text" id="f-name" placeholder="ООО Строй-Инвест" />
+      </label>
+      <label>ИНН <span class="hint">(10 или 12 цифр)</span>
+        <input type="text" id="f-inn" inputmode="numeric" placeholder="7701234567" />
+        <span class="field-error" id="err-inn"></span>
+      </label>
+      <label>ОГРН <span class="hint">(13 или 15 цифр)</span>
+        <input type="text" id="f-ogrn" inputmode="numeric" placeholder="1027700132819" />
+        <span class="field-error" id="err-ogrn"></span>
+      </label>
+      <label>Юридический адрес
+        <input type="text" id="f-legal-address" placeholder="г. Москва, ул. Примерная, д. 1" />
+      </label>
+    </div>
+    <h3 style="margin-top:18px">ОКВЭД <span class="required">*</span></h3>
+    <div class="grid-form">
+      <label>Основной ОКВЭД <span class="required">*</span>
+        <input type="text" id="f-okved-main" placeholder="41.20" />
+        <span class="field-error" id="err-okved"></span>
+      </label>
+    </div>
+    <label style="margin-top:10px;display:block;font-size:13px;font-weight:600;color:var(--muted)">Дополнительные ОКВЭДы</label>
+    <div id="okved-list" class="tag-list"></div>
+    <div class="row-add">
+      <input type="text" id="okved-input" placeholder="Добавить ОКВЭД, напр. 43.11" />
+      <button type="button" class="btn-secondary" onclick="addOkved()">+ Добавить</button>
+    </div>
+  </section>
+
+  <!-- ── Шаг 2: Лицензии и СРО ──────────────────────────────────────────── -->
+  <section class="card step-section hidden" data-step="2">
+    <h2>2. Лицензии и СРО</h2>
+
+    <div class="subsection">
+      <h3>СРО</h3>
+      <label class="checkbox-label">
+        <input type="checkbox" id="f-has-sro" onchange="toggleSro()" />
+        Компания состоит в СРО
+      </label>
+      <div id="sro-fields" class="grid-form" style="display:none;margin-top:12px">
+        <label>Название СРО
+          <input type="text" id="f-sro-name" />
+        </label>
+        <label>Номер свидетельства
+          <input type="text" id="f-sro-number" />
+        </label>
+        <label>Срок действия
+          <input type="date" id="f-sro-expiry" />
+        </label>
+      </div>
+    </div>
+
+    <div class="subsection">
+      <h3>Лицензии</h3>
+      <div id="licenses-list"></div>
+      <button type="button" class="btn-secondary" onclick="addLicense()">+ Добавить лицензию</button>
+    </div>
+  </section>
+
+  <!-- ── Шаг 3: Telegram ────────────────────────────────────────────────── -->
+  <section class="card step-section hidden" data-step="3">
+    <h2>3. Telegram-уведомления</h2>
+    <p class="hint-block">Получайте уведомления о новых тендерах прямо в Telegram. Создайте бота через <a href="https://t.me/BotFather" target="_blank">@BotFather</a>.</p>
+    <label class="checkbox-label" style="margin-bottom:16px">
+      <input type="checkbox" id="f-tg-enabled" onchange="toggleTelegram()" />
+      Включить Telegram-уведомления
+    </label>
+    <div id="tg-fields" class="grid-form" style="display:none">
+      <label>Bot Token <span class="required">*</span>
+        <input type="text" id="f-tg-token" placeholder="1234567890:ABC..." autocomplete="off" />
+        <span class="field-error" id="err-tg-token"></span>
+      </label>
+      <label>Chat ID <span class="required">*</span>
+        <input type="text" id="f-tg-chat" placeholder="-100123456789 или @username" />
+        <span class="field-error" id="err-tg-chat"></span>
+      </label>
+    </div>
+  </section>
+
+  <!-- ── Шаг 4: Мониторинг ──────────────────────────────────────────────── -->
+  <section class="card step-section hidden" data-step="4">
+    <h2>4. Мониторинг тендеров</h2>
+    <label class="checkbox-label" style="margin-bottom:16px">
+      <input type="checkbox" id="f-mon-enabled" checked />
+      Автоматический мониторинг включён
+    </label>
+    <div class="grid-form">
+      <label>Интервал проверки (минуты) <span class="hint">30–1440</span>
+        <input type="number" id="f-mon-interval" value="360" min="30" max="1440" step="30" />
+        <span class="field-error" id="err-mon-interval"></span>
+      </label>
+    </div>
+    <label style="margin-top:16px;display:block;font-size:13px;font-weight:600;color:var(--muted)">
+      Ключевые слова для поиска
+    </label>
+    <div id="queries-list" class="tag-list"></div>
+    <div class="row-add">
+      <input type="text" id="query-input" placeholder="Добавить ключевое слово или фразу" />
+      <button type="button" class="btn-secondary" onclick="addQuery()">+ Добавить</button>
+    </div>
+    <p class="hint-block" style="margin-top:8px">Если список пуст — используются ключевые слова из профиля компании по умолчанию.</p>
+  </section>
+
+  <!-- ── Шаг 5: Базовые политики ───────────────────────────────────────── -->
+  <section class="card step-section hidden" data-step="5">
+    <h2>5. Базовые политики</h2>
+    <div class="grid-form">
+      <label>Минимальная НМЦК (руб.)
+        <input type="number" id="f-min-nmck" min="0" step="10000" placeholder="100000" />
+      </label>
+    </div>
+    <label style="margin-top:16px;display:block;font-size:13px;font-weight:600;color:var(--muted)">
+      Регионы мониторинга
+    </label>
+    <div id="mon-regions-list" class="tag-list"></div>
+    <div class="row-add">
+      <input type="text" id="mon-region-input" placeholder="Добавить регион, напр. Москва" />
+      <button type="button" class="btn-secondary" onclick="addMonRegion()">+ Добавить</button>
+    </div>
+    <p class="hint-block" style="margin-top:8px">Если регионы не указаны — мониторинг ведётся по всей России.</p>
+  </section>
+
+  <!-- Кнопки навигации -->
+  <div class="nav-bar">
+    <button type="button" class="btn-secondary" id="btn-back" onclick="prevStep()" style="display:none">← Назад</button>
+    <div class="step-indicator" id="step-indicator">Шаг 1 из 5</div>
+    <button type="button" class="btn-primary" id="btn-next" onclick="nextStep()">Далее →</button>
+    <button type="submit" class="btn-primary" id="btn-save" style="display:none">Сохранить и начать работу ✓</button>
+  </div>
+
+</form>
+
+<style>
+  .subtitle { color: var(--muted); margin-bottom: 24px; font-size: 14px; }
+  .required { color: var(--danger); }
+
+  /* Stepper */
+  .stepper { display: flex; align-items: center; margin-bottom: 28px; flex-wrap: wrap; gap: 4px; }
+  .step { display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: default; }
+  .step-num { width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--line); background: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: var(--muted); transition: all .2s; }
+  .step-label { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .step.active .step-num { border-color: var(--accent); background: var(--accent); color: #fff; }
+  .step.active .step-label { color: var(--accent); font-weight: 600; }
+  .step.done .step-num { border-color: #10b981; background: #10b981; color: #fff; }
+  .step.done .step-label { color: #10b981; }
+  .step-line { flex: 1; height: 2px; background: var(--line); min-width: 20px; margin: 0 4px; margin-bottom: 20px; }
+
+  /* Sections */
+  .step-section.hidden { display: none; }
+  h2 { font-size: 16px; margin-bottom: 16px; color: var(--accent); }
+  h3 { font-size: 14px; font-weight: 600; margin-bottom: 10px; color: var(--muted); }
+  .subsection { margin-bottom: 20px; }
+  .subsection:last-child { margin-bottom: 0; }
+
+  /* Form grid */
+  .grid-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  .grid-form label { display: flex; flex-direction: column; font-size: 13px; font-weight: 600; color: var(--muted); gap: 4px; }
+  .grid-form input { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 14px; background: #fff; outline: none; }
+  .grid-form input:focus { border-color: var(--accent); }
+
+  .checkbox-label { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+  .checkbox-label input { width: 16px; height: 16px; accent-color: var(--accent); }
+
+  /* Tags */
+  .tag-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; min-height: 30px; }
+  .tag { display: flex; align-items: center; gap: 4px; background: var(--accent-soft); color: var(--accent); border: 1px solid #bdd5f5; border-radius: 20px; padding: 3px 10px; font-size: 13px; }
+  .tag button { background: none; border: none; cursor: pointer; color: var(--muted); font-size: 14px; line-height: 1; padding: 0 2px; }
+  .tag button:hover { color: var(--danger); }
+  .row-add { display: flex; gap: 8px; align-items: center; }
+  .row-add input { flex: 1; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 14px; }
+
+  /* Hints */
+  .hint { font-weight: 400; font-size: 11px; color: #aaa; }
+  .hint-block { font-size: 13px; color: var(--muted); margin-bottom: 12px; line-height: 1.5; }
+  .hint-block a { color: var(--accent); }
+
+  /* Licenses */
+  .license-row { display: grid; grid-template-columns: 1fr 1fr 140px 80px 32px; gap: 8px; align-items: center; padding: 8px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; }
+  .license-row.expired { border-color: #f4b8b8; background: #fff5f5; }
+  .license-row input[type=text], .license-row input[type=date] { padding: 6px 8px; border: 1px solid var(--line); border-radius: 5px; font-size: 13px; width: 100%; }
+  .license-row .expired-badge { font-size: 11px; color: var(--danger); font-weight: 600; }
+  .license-row label { display: flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap; }
+  .btn-remove { background: none; border: none; cursor: pointer; color: var(--muted); font-size: 18px; line-height: 1; }
+  .btn-remove:hover { color: var(--danger); }
+
+  /* Buttons */
+  .btn-primary { background: var(--accent); color: #fff; border: none; padding: 10px 28px; border-radius: 7px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  .btn-primary:hover { background: #0856a8; }
+  .btn-secondary { background: #fff; color: var(--accent); border: 1px solid var(--accent); padding: 7px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .btn-secondary:hover { background: var(--accent-soft); }
+
+  /* Nav bar */
+  .nav-bar { display: flex; align-items: center; justify-content: space-between; padding: 16px 0 24px; }
+  .step-indicator { font-size: 13px; color: var(--muted); }
+
+  /* Errors */
+  .field-error { font-size: 11px; color: var(--danger); min-height: 14px; }
+  input.invalid { border-color: var(--danger) !important; }
+
+  /* Toast */
+  .toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: 600; z-index: 9999; box-shadow: 0 4px 16px rgba(0,0,0,.15); transition: opacity .3s; }
+  .toast.success { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+  .toast.error   { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+  .toast.hidden  { display: none; }
+</style>
+
+<script>
+  const API_LOAD = "/web/api/onboarding/profile";
+  const API_SAVE = "/web/api/onboarding/complete";
+  const TOTAL_STEPS = 5;
+  let currentStep = 1;
+
+  // ── State ─────────────────────────────────────────────────────────────────
+  let okvedAdditional = [];
+  let licenses = [];
+  let queries = [];
+  let monRegions = [];
+
+  // ── Step navigation ───────────────────────────────────────────────────────
+  function showStep(n) {
+    currentStep = n;
+    document.querySelectorAll(".step-section").forEach(s => s.classList.add("hidden"));
+    document.querySelector(`.step-section[data-step="${n}"]`).classList.remove("hidden");
+    document.querySelectorAll(".step").forEach(s => {
+      const sn = parseInt(s.dataset.step);
+      s.classList.remove("active", "done");
+      if (sn === n) s.classList.add("active");
+      else if (sn < n) s.classList.add("done");
+    });
+    document.getElementById("btn-back").style.display   = n > 1 ? "" : "none";
+    document.getElementById("btn-next").style.display   = n < TOTAL_STEPS ? "" : "none";
+    document.getElementById("btn-save").style.display   = n === TOTAL_STEPS ? "" : "none";
+    document.getElementById("step-indicator").textContent = `Шаг ${n} из ${TOTAL_STEPS}`;
+    window.scrollTo(0, 0);
+  }
+
+  function prevStep() { if (currentStep > 1) showStep(currentStep - 1); }
+
+  function nextStep() {
+    if (!validateStep(currentStep)) return;
+    if (currentStep < TOTAL_STEPS) showStep(currentStep + 1);
+  }
+
+  // ── Validation ────────────────────────────────────────────────────────────
+  function setError(id, msg) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = msg;
+  }
+  function markField(id, invalid) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.toggle("invalid", invalid);
+  }
+  function clearErrors() {
+    document.querySelectorAll(".field-error").forEach(e => e.textContent = "");
+    document.querySelectorAll(".invalid").forEach(e => e.classList.remove("invalid"));
+  }
+
+  function validateStep(step) {
+    clearErrors();
+    let ok = true;
+
+    if (step === 1) {
+      const inn = document.getElementById("f-inn").value.trim();
+      if (inn && !/^\d{10}$|^\d{12}$/.test(inn)) {
+        setError("err-inn", "ИНН должен содержать 10 или 12 цифр");
+        markField("f-inn", true); ok = false;
+      }
+      const ogrn = document.getElementById("f-ogrn").value.trim();
+      if (ogrn && !/^\d{13}$|^\d{15}$/.test(ogrn)) {
+        setError("err-ogrn", "ОГРН должен содержать 13 или 15 цифр");
+        markField("f-ogrn", true); ok = false;
+      }
+      const okved = document.getElementById("f-okved-main").value.trim();
+      if (!okved && okvedAdditional.length === 0) {
+        setError("err-okved", "Укажите хотя бы один ОКВЭД");
+        markField("f-okved-main", true); ok = false;
+      }
+    }
+
+    if (step === 3) {
+      const enabled = document.getElementById("f-tg-enabled").checked;
+      if (enabled) {
+        const token = document.getElementById("f-tg-token").value.trim();
+        const chat  = document.getElementById("f-tg-chat").value.trim();
+        if (!token) { setError("err-tg-token", "Bot Token обязателен"); markField("f-tg-token", true); ok = false; }
+        if (!chat)  { setError("err-tg-chat",  "Chat ID обязателен");   markField("f-tg-chat", true);  ok = false; }
+      }
+    }
+
+    if (step === 4) {
+      const interval = parseInt(document.getElementById("f-mon-interval").value);
+      if (isNaN(interval) || interval < 30 || interval > 1440) {
+        setError("err-mon-interval", "Интервал должен быть от 30 до 1440 минут");
+        markField("f-mon-interval", true); ok = false;
+      }
+    }
+
+    return ok;
+  }
+
+  // ── ОКВЭД ─────────────────────────────────────────────────────────────────
+  function renderOkveds() {
+    document.getElementById("okved-list").innerHTML = okvedAdditional.map((v, i) =>
+      `<span class="tag">${esc(v)}<button type="button" onclick="removeOkved(${i})" title="Удалить">×</button></span>`
+    ).join("");
+  }
+  function addOkved() {
+    const inp = document.getElementById("okved-input");
+    const val = inp.value.trim();
+    if (val && !okvedAdditional.includes(val)) { okvedAdditional.push(val); renderOkveds(); }
+    inp.value = "";
+  }
+  function removeOkved(i) { okvedAdditional.splice(i, 1); renderOkveds(); }
+  document.getElementById("okved-input").addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); addOkved(); }
+  });
+
+  // ── СРО ───────────────────────────────────────────────────────────────────
+  function toggleSro() {
+    document.getElementById("sro-fields").style.display =
+      document.getElementById("f-has-sro").checked ? "grid" : "none";
+  }
+
+  // ── Лицензии ──────────────────────────────────────────────────────────────
+  function isExpired(expiry) { return expiry && new Date(expiry) < new Date(); }
+  function renderLicenses() {
+    document.getElementById("licenses-list").innerHTML = licenses.map((lic, i) => {
+      const exp = isExpired(lic.expiry);
+      return `<div class="license-row${exp ? " expired" : ""}">
+        <input type="text" placeholder="Тип (напр. МЧС)" value="${esc(lic.type||"")}" oninput="licenses[${i}].type=this.value" />
+        <input type="text" placeholder="Номер" value="${esc(lic.number||"")}" oninput="licenses[${i}].number=this.value" />
+        <input type="date" value="${lic.expiry||""}" oninput="licenses[${i}].expiry=this.value;renderLicenses()" />
+        <label><input type="checkbox" ${lic.active?"checked":""} onchange="licenses[${i}].active=this.checked" /> Активна</label>
+        ${exp ? '<span class="expired-badge">Истекла</span>' : '<span></span>'}
+        <button type="button" class="btn-remove" onclick="removeLicense(${i})" title="Удалить">×</button>
+      </div>`;
+    }).join("");
+  }
+  function addLicense() { licenses.push({ type: "", number: "", expiry: "", active: true }); renderLicenses(); }
+  function removeLicense(i) { licenses.splice(i, 1); renderLicenses(); }
+
+  // ── Telegram ──────────────────────────────────────────────────────────────
+  function toggleTelegram() {
+    document.getElementById("tg-fields").style.display =
+      document.getElementById("f-tg-enabled").checked ? "grid" : "none";
+  }
+
+  // ── Мониторинг: запросы ───────────────────────────────────────────────────
+  function renderQueries() {
+    document.getElementById("queries-list").innerHTML = queries.map((v, i) =>
+      `<span class="tag">${esc(v)}<button type="button" onclick="removeQuery(${i})" title="Удалить">×</button></span>`
+    ).join("");
+  }
+  function addQuery() {
+    const inp = document.getElementById("query-input");
+    const val = inp.value.trim();
+    if (val && !queries.includes(val)) { queries.push(val); renderQueries(); }
+    inp.value = "";
+  }
+  function removeQuery(i) { queries.splice(i, 1); renderQueries(); }
+  document.getElementById("query-input").addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); addQuery(); }
+  });
+
+  // ── Регионы мониторинга ───────────────────────────────────────────────────
+  function renderMonRegions() {
+    document.getElementById("mon-regions-list").innerHTML = monRegions.map((v, i) =>
+      `<span class="tag">${esc(v)}<button type="button" onclick="removeMonRegion(${i})" title="Удалить">×</button></span>`
+    ).join("");
+  }
+  function addMonRegion() {
+    const inp = document.getElementById("mon-region-input");
+    const val = inp.value.trim();
+    if (val && !monRegions.includes(val)) { monRegions.push(val); renderMonRegions(); }
+    inp.value = "";
+  }
+  function removeMonRegion(i) { monRegions.splice(i, 1); renderMonRegions(); }
+  document.getElementById("mon-region-input").addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); addMonRegion(); }
+  });
+
+  // ── Load existing data ────────────────────────────────────────────────────
+  async function loadProfile() {
+    try {
+      const res = await fetch(API_LOAD);
+      if (!res.ok) return;
+      const d = await res.json();
+
+      document.getElementById("f-name").value         = d.name || "";
+      document.getElementById("f-inn").value          = d.inn || "";
+      document.getElementById("f-ogrn").value         = d.ogrn || "";
+      document.getElementById("f-legal-address").value = d.legal_address || "";
+      document.getElementById("f-okved-main").value   = d.okved_main || "";
+      okvedAdditional = d.okved_additional || [];
+      renderOkveds();
+
+      const sro = d.sro || {};
+      document.getElementById("f-has-sro").checked   = !!sro.has_sro;
+      document.getElementById("f-sro-name").value    = sro.sro_name || "";
+      document.getElementById("f-sro-number").value  = sro.sro_number || "";
+      document.getElementById("f-sro-expiry").value  = sro.sro_expiry || "";
+      toggleSro();
+      licenses = d.licenses || [];
+      renderLicenses();
+
+      const tg = d.telegram || {};
+      document.getElementById("f-tg-enabled").checked = !!tg.enabled;
+      document.getElementById("f-tg-token").value     = tg.bot_token || "";
+      document.getElementById("f-tg-chat").value      = tg.chat_id || "";
+      toggleTelegram();
+
+      const mon = d.monitoring || {};
+      document.getElementById("f-mon-enabled").checked  = mon.enabled !== false;
+      document.getElementById("f-mon-interval").value   = mon.interval_minutes || 360;
+      queries = mon.queries || [];
+      renderQueries();
+
+      const pol = d.policies || {};
+      document.getElementById("f-min-nmck").value = pol.min_nmck ?? "";
+      monRegions = pol.monitoring_regions || [];
+      renderMonRegions();
+    } catch (e) {
+      // Non-fatal: form stays empty
+    }
+  }
+
+  // ── Save ──────────────────────────────────────────────────────────────────
+  document.getElementById("onboarding-form").addEventListener("submit", async e => {
+    e.preventDefault();
+    if (!validateStep(currentStep)) return;
+
+    const btn = document.getElementById("btn-save");
+    btn.disabled = true;
+    btn.textContent = "Сохраняю...";
+
+    const payload = {
+      name:          document.getElementById("f-name").value.trim() || null,
+      inn:           document.getElementById("f-inn").value.trim() || null,
+      ogrn:          document.getElementById("f-ogrn").value.trim() || null,
+      legal_address: document.getElementById("f-legal-address").value.trim() || null,
+      okved_main:       document.getElementById("f-okved-main").value.trim() || null,
+      okved_additional: okvedAdditional,
+      sro: {
+        has_sro:    document.getElementById("f-has-sro").checked,
+        sro_name:   document.getElementById("f-sro-name").value.trim(),
+        sro_number: document.getElementById("f-sro-number").value.trim(),
+        sro_expiry: document.getElementById("f-sro-expiry").value || null,
+      },
+      licenses,
+      telegram: {
+        enabled:   document.getElementById("f-tg-enabled").checked,
+        bot_token: document.getElementById("f-tg-token").value.trim() || null,
+        chat_id:   document.getElementById("f-tg-chat").value.trim() || null,
+      },
+      monitoring: {
+        enabled:          document.getElementById("f-mon-enabled").checked,
+        interval_minutes: parseInt(document.getElementById("f-mon-interval").value) || 360,
+        queries,
+      },
+      policies: {
+        min_nmck:           numOrNull("f-min-nmck"),
+        monitoring_regions: monRegions,
+      },
+    };
+
+    try {
+      const res = await fetch(API_SAVE, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "HTTP " + res.status);
+      }
+      showToast("Настройка завершена ✓ Перенаправляю...", "success");
+      setTimeout(() => { window.location.href = "/web"; }, 1200);
+    } catch (ex) {
+      showToast("Ошибка: " + ex.message, "error");
+      btn.disabled = false;
+      btn.textContent = "Сохранить и начать работу ✓";
+    }
+  });
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  function numOrNull(id) {
+    const v = document.getElementById(id).value;
+    return v === "" ? null : Number(v);
+  }
+  function esc(s) {
+    return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+  function showToast(msg, type) {
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.className = "toast " + type;
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => { t.className = "toast hidden"; }, 4000);
+  }
+
+  showStep(1);
+  loadProfile();
+</script>
+{% endblock %}

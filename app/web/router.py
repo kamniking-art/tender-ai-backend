@@ -7,7 +7,7 @@ from typing import Any
 from uuid import UUID
 from urllib.parse import urlencode
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator, model_validator
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
@@ -2369,3 +2369,201 @@ async def web_patch_company_profile(
     await db.commit()
     await db.refresh(company)
     return _build_company_full_response(company)
+
+
+# ── Onboarding ────────────────────────────────────────────────────────────────
+
+@router.get("/onboarding")
+async def onboarding_page(
+    request: Request,
+    current_user: User = Depends(get_current_user_from_cookie),
+):
+    return templates.TemplateResponse(
+        "onboarding.html",
+        _template_context(request, current_user),
+    )
+
+
+class _OnboardingTelegram(BaseModel):
+    enabled: bool = False
+    bot_token: str | None = None
+    chat_id: str | None = None
+
+
+class _OnboardingMonitoring(BaseModel):
+    enabled: bool = True
+    interval_minutes: int = 360
+    queries: list[str] = []
+
+    @field_validator("interval_minutes")
+    @classmethod
+    def check_interval(cls, v: int) -> int:
+        if not (30 <= v <= 1440):
+            raise ValueError("interval_minutes must be between 30 and 1440")
+        return v
+
+
+class _OnboardingPolicies(BaseModel):
+    min_nmck: int | None = None
+    monitoring_regions: list[str] = []
+
+
+class _OnboardingPayload(BaseModel):
+    # Section 1: company
+    name: str | None = None
+    inn: str | None = None
+    ogrn: str | None = None
+    legal_address: str | None = None
+    okved_main: str | None = None
+    okved_additional: list[str] = []
+    # Section 2: licenses & SRO
+    sro: dict = {}
+    licenses: list[dict] = []
+    # Section 3: telegram
+    telegram: _OnboardingTelegram = _OnboardingTelegram()
+    # Section 4: monitoring
+    monitoring: _OnboardingMonitoring = _OnboardingMonitoring()
+    # Section 5: policies
+    policies: _OnboardingPolicies = _OnboardingPolicies()
+
+    @field_validator("inn")
+    @classmethod
+    def check_inn(cls, v: str | None) -> str | None:
+        if v and not re.match(r"^\d{10}$|^\d{12}$", v):
+            raise ValueError("ИНН должен содержать 10 или 12 цифр")
+        return v
+
+    @field_validator("ogrn")
+    @classmethod
+    def check_ogrn(cls, v: str | None) -> str | None:
+        if v and not re.match(r"^\d{13}$|^\d{15}$", v):
+            raise ValueError("ОГРН должен содержать 13 или 15 цифр")
+        return v
+
+    @model_validator(mode="after")
+    def check_okved(self) -> "_OnboardingPayload":
+        if not self.okved_main and not self.okved_additional:
+            raise ValueError("Укажите хотя бы один ОКВЭД")
+        return self
+
+    @model_validator(mode="after")
+    def check_telegram(self) -> "_OnboardingPayload":
+        tg = self.telegram
+        if tg.enabled:
+            if not tg.bot_token:
+                raise ValueError("telegram.bot_token обязателен при enabled=true")
+            if not tg.chat_id:
+                raise ValueError("telegram.chat_id обязателен при enabled=true")
+        return self
+
+
+class _OnboardingProfileResponse(BaseModel):
+    name: str | None = None
+    inn: str | None = None
+    ogrn: str | None = None
+    legal_address: str | None = None
+    okved_main: str | None = None
+    okved_additional: list[str] = []
+    sro: dict = {}
+    licenses: list[dict] = []
+    telegram: dict = {}
+    monitoring: dict = {}
+    policies: dict = {}
+    onboarding_completed: bool = False
+
+
+@router.get("/api/onboarding/profile", response_model=_OnboardingProfileResponse)
+async def onboarding_get_profile(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_cookie),
+) -> _OnboardingProfileResponse:
+    """Load current company data pre-filling the onboarding form."""
+    company = await db.scalar(select(Company).where(Company.id == current_user.company_id))
+    if company is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    p = company.profile if isinstance(company.profile, dict) else {}
+    mon = p.get("monitoring") or {}
+    tg = p.get("telegram") or {}
+    # Mask bot_token for display (show only last 6 chars)
+    masked_tg = dict(tg)
+    if masked_tg.get("bot_token"):
+        token = str(masked_tg["bot_token"])
+        masked_tg["bot_token"] = ("*" * max(0, len(token) - 6)) + token[-6:]
+    return _OnboardingProfileResponse(
+        name=company.name,
+        inn=company.inn,
+        ogrn=company.ogrn,
+        legal_address=company.legal_address,
+        okved_main=p.get("okved_main"),
+        okved_additional=p.get("okved_additional") or [],
+        sro=p.get("sro") or {},
+        licenses=p.get("licenses") or [],
+        telegram=masked_tg,
+        monitoring={
+            "enabled": mon.get("enabled", True),
+            "interval_minutes": mon.get("interval_minutes", 360),
+            "queries": mon.get("queries") or [],
+        },
+        policies=p.get("policies") or {},
+        onboarding_completed=bool(p.get("onboarding_completed")),
+    )
+
+
+@router.post("/api/onboarding/complete")
+async def onboarding_complete(
+    payload: _OnboardingPayload,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_cookie),
+) -> dict:
+    """Save all onboarding sections and mark setup as complete."""
+    company = await db.scalar(select(Company).where(Company.id == current_user.company_id))
+    if company is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    # Top-level columns
+    if payload.name is not None:
+        company.name = payload.name
+    if payload.inn is not None:
+        company.inn = payload.inn
+    if payload.ogrn is not None:
+        company.ogrn = payload.ogrn
+    if payload.legal_address is not None:
+        company.legal_address = payload.legal_address
+
+    # Merge into company.profile
+    profile = company.profile if isinstance(company.profile, dict) else {}
+    profile["okved_main"] = payload.okved_main
+    profile["okved_additional"] = payload.okved_additional
+    profile["sro"] = payload.sro
+    profile["licenses"] = payload.licenses
+
+    # Telegram — preserve real token if masked placeholder received
+    existing_tg = profile.get("telegram") or {}
+    tg_data = payload.telegram.model_dump()
+    if tg_data.get("bot_token") and "*" in str(tg_data["bot_token"]):
+        tg_data["bot_token"] = existing_tg.get("bot_token")
+    profile["telegram"] = {**existing_tg, **tg_data}
+
+    # Monitoring — patch via MonitoringSettings to keep all existing fields
+    current_mon = MonitoringSettings.from_profile(profile)
+    mon_patch = MonitoringSettingsPatch(
+        enabled=payload.monitoring.enabled,
+        interval_minutes=payload.monitoring.interval_minutes,
+        queries=payload.monitoring.queries or None,
+    )
+    patched = patch_monitoring_settings(company, mon_patch)  # also writes to profile
+    profile = company.profile if isinstance(company.profile, dict) else profile
+
+    # Policies
+    profile["policies"] = payload.policies.model_dump(exclude_none=False)
+
+    # Mark onboarding complete
+    profile["onboarding_completed"] = True
+
+    company.profile = profile
+
+    from sqlalchemy.orm import attributes
+    attributes.flag_modified(company, "profile")
+
+    await db.commit()
+    return {"status": "ok", "onboarding_completed": True}
