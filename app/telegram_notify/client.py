@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 WARSAW_EXTRACTOR_URL: str = os.getenv(
     "WARSAW_EXTRACTOR_URL",
@@ -56,8 +59,14 @@ class TelegramClient:
         delays = [0, 1, 3]
         last_error: str | None = None
 
-        for delay in delays:
+        for attempt, delay in enumerate(delays, start=1):
             if delay:
+                logger.warning(
+                    "retry: provider=telegram error=%s attempt=%d delay=%.1fs",
+                    last_error,
+                    attempt,
+                    float(delay),
+                )
                 await asyncio.sleep(delay)
             try:
                 response = await self._client.post(url, json=payload, headers=headers)
@@ -75,4 +84,9 @@ class TelegramClient:
             except httpx.HTTPStatusError as exc:
                 raise TelegramSendError(f"proxy http {exc.response.status_code}") from exc
 
+        logger.warning(
+            "retry: provider=telegram exhausted attempts=%d last_error=%s",
+            len(delays),
+            last_error,
+        )
         raise TelegramSendError(last_error or "telegram send failed")
