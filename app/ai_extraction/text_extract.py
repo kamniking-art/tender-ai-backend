@@ -614,13 +614,14 @@ def build_semantic_chunks(
         ]
         _selected_domains = [d for d, idx in matched_indices.items() if idx]
         logger.debug(
-            "routing: file=%s total_blocks=%d domain_hits=%s "
-            "matched_filename_rules=%s selected_domains=%s",
-            _fname,
-            len(blocks),
-            block_domain_hits,
-            _matched_rules,
-            _selected_domains,
+            "routing",
+            extra={
+                "file": _fname,
+                "total_blocks": len(blocks),
+                "domain_hits": block_domain_hits,
+                "matched_filename_rules": [list(r) for r in _matched_rules],
+                "selected_domains": _selected_domains,
+            },
         )
 
         for domain, indices in matched_indices.items():
@@ -642,9 +643,11 @@ def build_semantic_chunks(
         chunks[domain] = _truncate_chunk(merged, max_chars=max_chars_per_chunk)
 
     logger.debug(
-        "routing summary: chunks_built=%s chunk_sizes=%s",
-        list(chunks.keys()),
-        {d: len(t) for d, t in chunks.items()},
+        "routing_summary",
+        extra={
+            "chunks_built": list(chunks.keys()),
+            "chunk_sizes": {d: len(t) for d, t in chunks.items()},
+        },
     )
     return chunks
 
