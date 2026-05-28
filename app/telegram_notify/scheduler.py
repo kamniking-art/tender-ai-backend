@@ -44,7 +44,7 @@ class TelegramNotifyScheduler:
             await asyncio.sleep(interval)
 
     async def _run_iteration(self) -> None:
-        client = TelegramClient(timeout_sec=15)
+        client = TelegramClient(timeout_sec=settings.warsaw_timeout_sec)
         try:
             async with AsyncSessionLocal() as db:
                 companies = list((await db.scalars(select(Company))).all())
