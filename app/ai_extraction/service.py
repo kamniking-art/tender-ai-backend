@@ -486,9 +486,13 @@ async def run_extraction(
         company_id=company_id,
         tender_id=tender_id,
         model=str(extract_meta.get("model") or "unknown"),
+        operation_type=str(extract_meta.get("operation_type") or "extraction"),
+        provider=str(extract_meta.get("provider") or "unknown"),
         chars_sent=int(extract_meta.get("chars_sent") or len(merged_text)),
         estimated_cost=_to_decimal_or_none(extract_meta.get("estimated_cost")),
         duration_ms=int(extract_meta.get("latency_ms")) if extract_meta.get("latency_ms") is not None else None,
+        status="ok",
+        error_code=None,
     )
     db.add(cost_log)
 

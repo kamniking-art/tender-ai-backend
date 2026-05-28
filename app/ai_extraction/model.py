@@ -27,9 +27,13 @@ class AICostLog(Base):
         index=True,
     )
     model: Mapped[str] = mapped_column(Text, nullable=False)
+    operation_type: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="extraction | fallback | cache_hit")
+    provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
     chars_sent: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     estimated_cost: Mapped[float | None] = mapped_column(Numeric(18, 8), nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    status: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="ok | error | timeout")
+    error_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
