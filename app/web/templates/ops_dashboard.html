@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Ops Dashboard | Tender AI{% endblock %}
+{% block content %}
+<h1>Ops Dashboard</h1>
+<p class="subtitle">Операционные метрики в реальном времени.</p>
+
+<!-- ── Health per tenant ─────────────────────────────────────────────────── -->
+<section class="card">
+  <h2>Health per tenant</h2>
+  {% if health_per_tenant %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Компания</th>
+          {% for col in health_per_tenant[0].keys() if col != 'company_name' and col != 'company_id' %}
+          <th>{{ col }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in health_per_tenant %}
+        <tr>
+          <td class="name-cell">{{ row.get('company_name') or row.get('company_id', '—') }}</td>
+          {% for col, val in row.items() if col != 'company_name' and col != 'company_id' %}
+          <td>{{ val if val is not none else '—' }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">Нет данных — view v_health_per_tenant пуст или не создан.</p>
+  {% endif %}
+</section>
+
+<!-- ── Cost by tenant ────────────────────────────────────────────────────── -->
+<section class="card">
+  <h2>Cost by tenant</h2>
+  {% if cost_by_tenant %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Компания</th>
+          {% for col in cost_by_tenant[0].keys() if col != 'company_name' and col != 'company_id' %}
+          <th>{{ col }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in cost_by_tenant %}
+        <tr>
+          <td class="name-cell">{{ row.get('company_name') or row.get('company_id', '—') }}</td>
+          {% for col, val in row.items() if col != 'company_name' and col != 'company_id' %}
+          <td>{{ val if val is not none else '—' }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">Нет данных — view v_cost_by_tenant пуст или не создан.</p>
+  {% endif %}
+</section>
+
+<!-- ── Queue backlog ─────────────────────────────────────────────────────── -->
+<section class="card">
+  <h2>Queue backlog</h2>
+  {% if queue_backlog %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Компания</th>
+          <th>pending tasks</th>
+          <th>overdue tasks</th>
+          <th>pending actions</th>
+          <th>running actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in queue_backlog %}
+        <tr>
+          <td class="name-cell">{{ row.get('company_name', '—') }}</td>
+          <td class="{{ 'warn' if row.get('pending_tasks', 0) > 0 else '' }}">{{ row.get('pending_tasks', 0) }}</td>
+          <td class="{{ 'danger' if row.get('overdue_tasks', 0) > 0 else '' }}">{{ row.get('overdue_tasks', 0) }}</td>
+          <td>{{ row.get('pending_actions', 0) }}</td>
+          <td class="{{ 'warn' if row.get('running_actions', 0) > 0 else '' }}">{{ row.get('running_actions', 0) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">Нет данных — view v_queue_backlog пуст или не создан.</p>
+  {% endif %}
+</section>
+
+<style>
+  .subtitle { color: var(--muted); margin-bottom: 24px; font-size: 14px; }
+  h2 { font-size: 16px; margin-bottom: 14px; color: var(--accent); }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th { text-align: left; padding: 8px 12px; background: var(--accent-soft); color: var(--accent); font-weight: 600; border-bottom: 2px solid var(--line); white-space: nowrap; }
+  tbody td { padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover td { background: #f8faff; }
+  .name-cell { font-weight: 600; color: var(--text); }
+  td.warn { color: #b45309; font-weight: 600; }
+  td.danger { color: var(--danger); font-weight: 600; }
+  .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+</style>
+{% endblock %}

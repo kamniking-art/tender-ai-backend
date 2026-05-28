@@ -1308,6 +1308,35 @@ async def policies_page(
     )
 
 
+@router.get("/ops")
+async def ops_dashboard_page(
+    request: Request,
+    current_user: User = Depends(get_current_user_from_cookie),
+    db: AsyncSession = Depends(get_db),
+):
+    async def _view(name: str) -> list[dict]:
+        try:
+            result = await db.execute(text(f"SELECT * FROM {name}"))  # noqa: S608
+            keys = list(result.keys())
+            return [dict(zip(keys, row)) for row in result.fetchall()]
+        except Exception:
+            return []
+
+    health_per_tenant = await _view("v_health_per_tenant")
+    cost_by_tenant    = await _view("v_cost_by_tenant")
+    queue_backlog     = await _view("v_queue_backlog")
+
+    return templates.TemplateResponse(
+        "ops_dashboard.html",
+        _template_context(
+            request, current_user,
+            health_per_tenant=health_per_tenant,
+            cost_by_tenant=cost_by_tenant,
+            queue_backlog=queue_backlog,
+        ),
+    )
+
+
 @router.get("/company/profile")
 async def company_profile_page(
     request: Request,
