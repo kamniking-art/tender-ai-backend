@@ -2545,13 +2545,12 @@ async def onboarding_complete(
     profile["telegram"] = {**existing_tg, **tg_data}
 
     # Monitoring — patch via MonitoringSettings to keep all existing fields
-    current_mon = MonitoringSettings.from_profile(profile)
     mon_patch = MonitoringSettingsPatch(
         enabled=payload.monitoring.enabled,
         interval_minutes=payload.monitoring.interval_minutes,
         queries=payload.monitoring.queries or None,
     )
-    patched = patch_monitoring_settings(company, mon_patch)  # also writes to profile
+    patch_monitoring_settings(company, mon_patch)  # writes monitoring dict into company.profile
     profile = company.profile if isinstance(company.profile, dict) else profile
 
     # Policies

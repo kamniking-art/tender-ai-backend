@@ -501,7 +501,11 @@
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "HTTP " + res.status);
+        // Pydantic 422 returns detail as array of {loc, msg, type}
+        const detail = Array.isArray(err.detail)
+          ? err.detail.map(e => e.msg || JSON.stringify(e)).join("; ")
+          : (err.detail || "HTTP " + res.status);
+        throw new Error(detail);
       }
       showToast("Настройка завершена ✓ Перенаправляю...", "success");
       setTimeout(() => { window.location.href = "/web"; }, 1200);
