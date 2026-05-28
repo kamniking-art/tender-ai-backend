@@ -67,3 +67,37 @@ class ExtractionEvidence(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
+
+class ExtractionSnapshot(Base):
+    """Immutable append-only history of every successful extraction run.
+
+    Never UPDATE — each rerun inserts a new row. Enables re-score and
+    re-debug without repeating the AI call.
+    """
+
+    __tablename__ = "extraction_snapshots"
+    __table_args__ = (
+        Index("idx_extraction_snapshots_company_tender", "company_id", "tender_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    tender_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenders.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    snapshot_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    extracted_v1: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    extract_meta_v1: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    pipeline_versions: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    doc_signature: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+

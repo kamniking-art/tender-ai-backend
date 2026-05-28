@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai_extraction.client import PARSER_VERSION, CHUNKING_VERSION, pipeline_versions, get_extractor_provider
 from app.ai_extraction.interfaces import ExtractionProviderError, ExtractionProviderResult
-from app.ai_extraction.model import AICostLog, ExtractionEvidence
+from app.ai_extraction.model import AICostLog, ExtractionEvidence, ExtractionSnapshot
 from app.ai_extraction.schemas import ExtractedTenderV1
 from app.ai_extraction.text_extract import (
     MAX_SEMANTIC_CHUNK_CHARS,
@@ -171,6 +171,39 @@ async def _upsert_extraction_evidence(
             },
         )
         await db.execute(upsert_stmt)
+
+
+async def _save_extraction_snapshot(
+    db: AsyncSession,
+    *,
+    company_id: UUID,
+    tender_id: UUID,
+    extracted: ExtractedTenderV1,
+    extract_meta: dict,
+    doc_signature: str,
+) -> None:
+    """Append-only snapshot of every successful extraction run.
+
+    Never updates existing rows — each rerun inserts a new row so the
+    full history is preserved for re-score and re-debug without repeating
+    the AI call.
+    """
+    snapshot = ExtractionSnapshot(
+        company_id=company_id,
+        tender_id=tender_id,
+        extracted_v1=extracted.model_dump(mode="json"),
+        extract_meta_v1=extract_meta,
+        pipeline_versions=extract_meta.get("pipeline_versions") or pipeline_versions(),
+        doc_signature=doc_signature,
+        provider=str(extract_meta.get("provider") or "unknown"),
+        model=str(extract_meta.get("model") or "unknown"),
+    )
+    db.add(snapshot)
+    try:
+        await db.commit()
+    except Exception:
+        logger.exception("Failed to save extraction snapshot: tender_id=%s", tender_id)
+        await db.rollback()
 
 
 async def run_extraction(
@@ -461,6 +494,16 @@ async def run_extraction(
 
     await db.commit()
     await db.refresh(analysis)
+
+    # Append immutable snapshot for re-score / re-debug without AI call.
+    await _save_extraction_snapshot(
+        db,
+        company_id=company_id,
+        tender_id=tender_id,
+        extracted=extracted,
+        extract_meta=extract_meta,
+        doc_signature=document_signature,
+    )
 
     # Sync nmck from extraction to tender if tender.nmck is empty
     try:
