@@ -1320,6 +1320,7 @@ async def ops_dashboard_page(
             keys = list(result.keys())
             return [dict(zip(keys, row)) for row in result.fetchall()]
         except Exception:
+            logger.warning("ops_dashboard: view %s unavailable", name, exc_info=True)
             return []
 
     health_per_tenant = await _view("v_health_per_tenant")
