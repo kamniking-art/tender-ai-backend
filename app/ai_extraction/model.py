@@ -59,7 +59,7 @@ class ExtractionEvidence(Base):
     )
     field_name: Mapped[str] = mapped_column(String(100), nullable=False)
     value: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    confidence: Mapped[float | None] = mapped_column(Numeric(4, 3), nullable=True)
+    extraction_completeness: Mapped[float | None] = mapped_column(Numeric(4, 3), nullable=True)
     evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
     provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
     parser_version: Mapped[str | None] = mapped_column(String(20), nullable=True)

@@ -153,7 +153,7 @@ async def _upsert_extraction_evidence(
             tender_id=tender_id,
             field_name=field_name,
             value=value_json,
-            confidence=conf,
+            extraction_completeness=conf,
             evidence=evidence_map.get(field_name),
             provider=provider,
             parser_version=parser_version,
@@ -163,7 +163,7 @@ async def _upsert_extraction_evidence(
             constraint="uq_extraction_evidence_company_tender_field",
             set_={
                 "value": insert_stmt.excluded.value,
-                "confidence": insert_stmt.excluded.confidence,
+                "extraction_completeness": insert_stmt.excluded.extraction_completeness,
                 "evidence": insert_stmt.excluded.evidence,
                 "provider": insert_stmt.excluded.provider,
                 "parser_version": insert_stmt.excluded.parser_version,
