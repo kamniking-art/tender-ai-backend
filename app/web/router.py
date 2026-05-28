@@ -14,7 +14,7 @@ from alembic.script import ScriptDirectory
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import Integer, and_, case, cast, func, or_, select
+from sqlalchemy import Integer, and_, case, cast, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai_extraction.interfaces import ExtractionProviderError
