@@ -301,7 +301,7 @@ def _build_new_message(items: list[AlertTenderItem], nmck_map: dict[UUID, object
 
 
 def _build_deadline_message(items: list[AlertTenderItem]) -> str:
-    lines = [f"Дедлайн <24ч ({len(items)}):"]
+    lines = [f"Дедлайн менее 24ч ({len(items)}):"]
     for idx, item in enumerate(items, start=1):
         lines.extend(
             [
