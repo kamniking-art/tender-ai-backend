@@ -70,6 +70,9 @@ async def telegram_webhook(
 
     cq = body.get("callback_query") or {}
     callback_data: str = cq.get("data") or ""
+    tg_from: dict = cq.get("from") or {}
+    tg_user_id: int | None = tg_from.get("id") if isinstance(tg_from.get("id"), int) else None
+    tg_note: str | None = f"tg:{tg_user_id}" if tg_user_id is not None else None
 
     if not callback_data:
         return Response(status_code=status.HTTP_200_OK)
@@ -103,9 +106,9 @@ async def telegram_webhook(
 
     try:
         if action == "approve":
-            await approve_escalation(db, escalation_id)
+            await approve_escalation(db, escalation_id, override_note=tg_note)
         else:
-            await reject_escalation(db, escalation_id)
+            await reject_escalation(db, escalation_id, override_note=tg_note)
     except EscalationStateError as exc:
         logger.warning("Webhook state error for escalation %s: %s", escalation_id, exc)
 
