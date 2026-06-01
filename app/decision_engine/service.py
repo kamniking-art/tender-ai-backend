@@ -779,6 +779,100 @@ async def recompute_decision_engine_v1(
                 "Failed to create reasoning trace for tender_id=%s", tender_id
             )
 
+    # Trigger escalations (best-effort — never breaks decision engine).
+    # Three triggers: decision_review, high_nmck, deadline_urgent.
+    if settings.feature_agent_actions:
+        try:
+            from app.escalation.service import create_escalation
+            from app.escalation.schema import EscalationType
+            from app.escalation.notifier import send_approval_request
+            from app.agent_actions.service import SYSTEM_AGENT_ID as _SYSAGENT
+            from app.models import Company as _Company
+            from app.telegram_notify.service import _extract_telegram_config
+
+            _HIGH_NMCK = Decimal("5000000")  # 5 млн руб.
+            _DEADLINE_URGENT_HOURS = 48
+
+            # Build list of (type, reason, confidence) for active triggers.
+            _triggers: list[tuple[str, str, float | None]] = []
+
+            # 1. Recommendation requires human review.
+            if final_recommendation == "review":
+                _raw_ds = engine.get("decision_score")
+                _conf = max(0.0, min(float(_raw_ds) / 100.0, 1.0)) if isinstance(_raw_ds, (int, float)) else None
+                _triggers.append((
+                    EscalationType.DECISION_REVIEW,
+                    "Рекомендация 'review': требуется ручное решение",
+                    _conf,
+                ))
+
+            # 2. NMCK above threshold.
+            if tender.nmck is not None and tender.nmck >= _HIGH_NMCK:
+                _triggers.append((
+                    EscalationType.HIGH_NMCK,
+                    f"НМЦК {tender.nmck:,.0f} руб. превышает порог {_HIGH_NMCK:,.0f}",
+                    None,
+                ))
+
+            # 3. Deadline within 48 h.
+            if tender.submission_deadline is not None:
+                _delta = tender.submission_deadline - datetime.now(UTC)
+                if timedelta(0) < _delta <= timedelta(hours=_DEADLINE_URGENT_HOURS):
+                    _triggers.append((
+                        EscalationType.DEADLINE_URGENT,
+                        f"Дедлайн через {int(_delta.total_seconds() / 3600)}ч — требуется срочное решение",
+                        None,
+                    ))
+
+            if _triggers:
+                # Load company profile once for Telegram config.
+                _company = await db.scalar(select(_Company).where(_Company.id == company_id))
+                _tg_cfg = _extract_telegram_config(_company.profile or {}) if _company and isinstance(_company.profile, dict) else None
+
+                for _esc_type, _reason, _conf in _triggers:
+                    _esc = await create_escalation(
+                        db,
+                        company_id=company_id,
+                        escalation_type=_esc_type,
+                        reason=_reason,
+                        agent_id=_SYSAGENT,
+                        tender_id=tender_id,
+                        confidence=_conf,
+                        extra_payload={
+                            "recommendation": final_recommendation,
+                            "nmck": str(tender.nmck) if tender.nmck is not None else None,
+                        },
+                    )
+                    # Send Telegram approval request (best-effort per escalation).
+                    if _tg_cfg and _tg_cfg.enabled and _tg_cfg.bot_token and _tg_cfg.chat_id:
+                        try:
+                            _deadline_str = (
+                                tender.submission_deadline.strftime("%d.%m.%Y %H:%M")
+                                if tender.submission_deadline else None
+                            )
+                            _msg_id = await send_approval_request(
+                                _esc,
+                                tender_data={
+                                    "subject": tender.title or "—",
+                                    "nmck": f"{tender.nmck:,.0f}" if tender.nmck is not None else None,
+                                    "deadline": _deadline_str,
+                                },
+                                bot_token=_tg_cfg.bot_token,
+                                chat_id=_tg_cfg.chat_id,
+                            )
+                            if _msg_id and _esc.telegram_message_id is None:
+                                _esc.telegram_message_id = str(_msg_id)
+                                await db.commit()
+                        except Exception:
+                            logger.exception(
+                                "Failed to send escalation notification: tender_id=%s esc_type=%s",
+                                tender_id, _esc_type,
+                            )
+        except Exception:
+            logger.exception(
+                "Failed to trigger escalations for tender_id=%s", tender_id
+            )
+
     return decision, engine
 
 
