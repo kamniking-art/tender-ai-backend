@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class TenderStatus(StrEnum):
     NEW = "new"
+    NOTIFIED = "notified"   # sent to Telegram; awaiting user action / AI analysis
     ANALYZING = "analyzing"
     APPROVED = "approved"
     REJECTED = "rejected"

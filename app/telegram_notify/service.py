@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent_actions.service import AgentAction, SYSTEM_AGENT_ID
@@ -407,6 +407,14 @@ async def process_company_notifications(db: AsyncSession, company: Company, clie
         mark_items_sent(category, items, state, sent_at=now)
         stats.sent_messages += 1
         stats.sent_items += len(items)
+
+        if category == "new":
+            _new_ids = [item.tender_id for item in items]
+            await db.execute(
+                update(Tender)
+                .where(Tender.id.in_(_new_ids), Tender.status == "new")
+                .values(status="notified")
+            )
 
         _action_log.append(
             AgentAction(
