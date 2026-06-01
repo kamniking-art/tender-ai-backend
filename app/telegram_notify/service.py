@@ -123,8 +123,8 @@ def _extract_telegram_config(profile: dict) -> TelegramConfig | None:
 
     categories_raw = raw.get("categories") if isinstance(raw.get("categories"), dict) else {}
     categories = {
-        "new": bool(categories_raw.get("new", True)),
-        "deadline_24h": bool(categories_raw.get("deadline_24h", True)),
+        "new": bool(categories_raw.get("new_tenders", categories_raw.get("new", True))),
+        "deadline_24h": bool(categories_raw.get("deadlines", categories_raw.get("deadline_24h", True))),
         "risky": bool(categories_raw.get("risky", True)),
     }
 
