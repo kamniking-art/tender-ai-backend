@@ -112,6 +112,25 @@ async def telegram_webhook(
     except EscalationStateError as exc:
         logger.warning("Webhook state error for escalation %s: %s", escalation_id, exc)
 
+    # Answer the callback_query to dismiss the spinner on the button (best-effort).
+    cq_id: str | None = cq.get("id") if isinstance(cq.get("id"), str) else (
+        str(cq["id"]) if cq.get("id") is not None else None
+    )
+    if cq_id:
+        try:
+            from app.models import Company as _Company
+            from app.telegram_notify.client import TelegramClient
+            from app.telegram_notify.service import _extract_telegram_config
+            _company = await db.scalar(select(_Company).where(_Company.id == esc.company_id))
+            _cfg = _extract_telegram_config(_company.profile or {}) if _company and isinstance(_company.profile, dict) else None
+            if _cfg and _cfg.bot_token:
+                import httpx as _httpx
+                _url = f"https://api.telegram.org/bot{_cfg.bot_token}/answerCallbackQuery"  # noqa: E501 — direct call, no Warsaw proxy needed
+                async with _httpx.AsyncClient(timeout=5) as _http:
+                    await _http.post(_url, json={"callback_query_id": cq_id})
+        except Exception:
+            logger.warning("Failed to answer callback_query id=%s", cq_id)
+
     return Response(status_code=status.HTTP_200_OK)
 
 
