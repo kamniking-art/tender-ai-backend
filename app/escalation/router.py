@@ -124,12 +124,22 @@ async def telegram_webhook(
             _company = await db.scalar(select(_Company).where(_Company.id == esc.company_id))
             _cfg = _extract_telegram_config(_company.profile or {}) if _company and isinstance(_company.profile, dict) else None
             if _cfg and _cfg.bot_token:
-                _tg = _TgClient(timeout_sec=5)
+                _toast = "Решение принято ✅" if action == "approve" else "Отклонено ❌"
+                _tg = _TgClient(timeout_sec=10)
                 try:
+                    # 1. Dismiss spinner + show toast notification.
                     await _tg.answer_callback_query(
                         bot_token=_cfg.bot_token,
                         callback_query_id=cq_id,
+                        text=_toast,
                     )
+                    # 2. Remove inline keyboard from the original escalation message.
+                    if esc.telegram_message_id:
+                        await _tg.edit_message_reply_markup(
+                            bot_token=_cfg.bot_token,
+                            chat_id=_cfg.chat_id,
+                            message_id=int(esc.telegram_message_id),
+                        )
                 finally:
                     await _tg.close()
         except Exception:

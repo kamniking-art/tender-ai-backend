@@ -52,6 +52,37 @@ class TelegramClient:
             logger.warning("answer_callback_query failed: %s", exc)
             return False
 
+    async def edit_message_reply_markup(
+        self,
+        *,
+        bot_token: str,
+        chat_id: str | int,
+        message_id: int,
+        reply_markup: dict | None = None,
+    ) -> bool:
+        """Remove or replace the inline keyboard on a sent message via Warsaw proxy.
+
+        Pass reply_markup={} (or None) to remove the keyboard entirely.
+        Returns True on success, False on any error (best-effort helper).
+        """
+        url = f"{WARSAW_EXTRACTOR_URL}/telegram/edit_reply_markup"
+        payload: dict = {
+            "bot_token": bot_token,
+            "chat_id": str(chat_id),
+            "message_id": message_id,
+            "reply_markup": reply_markup if reply_markup is not None else {},
+        }
+        headers: dict[str, str] = {}
+        if WARSAW_API_TOKEN:
+            headers["Authorization"] = f"Bearer {WARSAW_API_TOKEN}"
+        try:
+            response = await self._client.post(url, json=payload, headers=headers)
+            data = response.json()
+            return bool(data.get("ok"))
+        except Exception as exc:
+            logger.warning("edit_message_reply_markup failed: %s", exc)
+            return False
+
     async def send_message(
         self,
         *,
