@@ -524,12 +524,26 @@ async def run_extraction(
     # Build requirements checklist deterministically from extracted data.
     # Lazy import — avoids pulling SQLAlchemy into pure test environments.
     # Wrapped in try/except so a checklist failure never breaks extraction.
+    _checklist_action = None
     try:
         from app.requirements.normalizer import RequirementNormalizer
         from app.requirements.service import upsert_checklist
+        if settings.feature_agent_actions:
+            _checklist_action = await create_action(
+                db,
+                company_id=company_id,
+                agent_id=SYSTEM_AGENT_ID,
+                action_type="build_checklist",
+                target=str(tender_id),
+                payload={},
+            )
         _normalizer = RequirementNormalizer()
         _reqs = _normalizer.normalize(extracted)
         await upsert_checklist(db, tender_id, company_id, _reqs)
+        if settings.feature_agent_actions and _checklist_action is not None:
+            await complete_action(
+                db, _checklist_action.action_id, result={"reqs_count": len(_reqs)}
+            )
     except Exception:
         logger.exception(
             "Failed to build requirements checklist for tender_id=%s", tender_id
@@ -538,16 +552,31 @@ async def run_extraction(
 
     # Calculate company fit score using the same extracted data.
     # Lazy import + try/except — fit score failure never breaks extraction.
+    _fit_action = None
     try:
         from app.fit_score.scorer import FitScorer
         from app.fit_score.service import upsert_fit_score
         from app.models import Company
         from app.requirements.normalizer import RequirementNormalizer
+        if settings.feature_agent_actions:
+            _fit_action = await create_action(
+                db,
+                company_id=company_id,
+                agent_id=SYSTEM_AGENT_ID,
+                action_type="calculate_fit_score",
+                target=str(tender_id),
+                payload={},
+            )
         _company = await db.scalar(select(Company).where(Company.id == company_id))
         _profile: dict = _company.profile if _company and isinstance(_company.profile, dict) else {}
         _checklist = _reqs if _reqs else RequirementNormalizer().normalize(extracted)
         _fit_result = FitScorer().score(_profile, _checklist, extracted)
         await upsert_fit_score(db, tender_id, company_id, _fit_result)
+        if settings.feature_agent_actions and _fit_action is not None:
+            await complete_action(
+                db, _fit_action.action_id,
+                result={"score": float(_fit_result.score) if hasattr(_fit_result, "score") else None},
+            )
     except Exception:
         logger.exception(
             "Failed to calculate fit score for tender_id=%s", tender_id
