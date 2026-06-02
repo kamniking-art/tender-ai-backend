@@ -1,10 +1,10 @@
 """OperationalAlertsScheduler — periodic operational health checks.
 
 Runs every N minutes (default 30) and fires Telegram alerts on:
-  1. overdue_tasks > 0          (v_queue_backlog)
-  2. success_rate_24h < 50%     (v_health_per_tenant)
-  3. provider error spike       (v_provider_errors, error_count_24h > threshold)
-  4. telegram stale             (company.profile: enabled but last_sent_at > 24h)
+  1. overdue_tasks превышает 0          (v_queue_backlog)
+  2. success_rate_24h менее 50%         (v_health_per_tenant)
+  3. provider error spike               (v_provider_errors, error_count_24h превышает threshold)
+  4. telegram stale                     (company.profile: enabled but last_sent_at старше 24h)
 
 Follows the same asyncio-loop pattern as other schedulers in this project.
 """
@@ -109,7 +109,7 @@ def _query_view(db: AsyncSession, view_name: str):
 
 
 async def _check_queue_backlog(db: AsyncSession) -> None:
-    """Alert per company when overdue_tasks > 0."""
+    """Alert per company when overdue_tasks больше 0."""
     try:
         result = await _query_view(db, "v_queue_backlog")
         keys = list(result.keys())
@@ -139,7 +139,7 @@ async def _check_queue_backlog(db: AsyncSession) -> None:
 
 
 async def _check_health_per_tenant(db: AsyncSession) -> None:
-    """Alert per company when success_rate_24h_pct < 50% with enough calls."""
+    """Alert per company when success_rate_24h_pct менее 50% with enough calls."""
     try:
         result = await _query_view(db, "v_health_per_tenant")
         keys = list(result.keys())

@@ -102,11 +102,14 @@ class TelegramClient:
         Returns:
             The ``message_id`` from Telegram's response, or *None* on failure.
         """
+        # Warsaw sends with parse_mode=HTML — escape bare < > & so they render
+        # as literal characters instead of broken HTML tags.
+        safe_text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         url = f"{WARSAW_EXTRACTOR_URL}/telegram/send"
         payload: dict = {
             "bot_token": bot_token,
             "chat_id": str(chat_id),
-            "text": text,
+            "text": safe_text,
             "reply_markup": reply_markup,
         }
         headers: dict[str, str] = {}
