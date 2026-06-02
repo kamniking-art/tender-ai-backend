@@ -15,6 +15,7 @@ class TenderStatus(StrEnum):
     SUBMITTED = "submitted"
     WON = "won"
     LOST = "lost"
+    EXPIRED = "expired"     # submission_deadline passed without a decision
 
 
 class SortField(StrEnum):

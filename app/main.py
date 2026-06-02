@@ -41,6 +41,7 @@ from app.monitoring.router import router as monitoring_router, settings_router a
 from app.monitoring.scheduler import scheduler as monitoring_scheduler
 from app.monitoring.operational_alerts_scheduler import scheduler as operational_alerts_scheduler
 from app.nmck_enrichment.scheduler import scheduler as nmck_enrichment_scheduler
+from app.tenders.lifecycle_scheduler import scheduler as tender_lifecycle_scheduler
 from app.users import router as users_router
 from app.web import router as web_router
 
@@ -157,6 +158,7 @@ async def startup_event() -> None:
     await escalation_timeout_scheduler.start()
     await nmck_enrichment_scheduler.start()
     await operational_alerts_scheduler.start()
+    await tender_lifecycle_scheduler.start()
 
 
 @app.on_event("shutdown")
@@ -168,3 +170,4 @@ async def shutdown_event() -> None:
     await escalation_timeout_scheduler.stop()
     await operational_alerts_scheduler.stop()
     await nmck_enrichment_scheduler.stop()
+    await tender_lifecycle_scheduler.stop()
