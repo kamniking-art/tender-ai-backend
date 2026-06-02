@@ -724,6 +724,78 @@ async def recompute_decision_engine_v1(
     if relevance.get("score") is not None and relevance["score"] < 20 and engine["recommendation_base"] in {"strong_go", "go", "review"}:
         engine["explain"].append("relevance_guard=weak (relevance_score<20)")
 
+    # Apply company policies (best-effort — never breaks decision engine).
+    if settings.feature_agent_actions:
+        try:
+            from app.policy_engine.evaluator import PolicyEvaluator
+            from app.policy_engine.loader import PolicyLoader
+            from app.policy_engine.schema import ActionType as _PolicyActionType
+            from app.agent_actions.service import create_action as _create_action, SYSTEM_AGENT_ID as _SYSAGENT
+            from app.models import Company as _Company
+
+            _policies = await PolicyLoader().load(db, company_id)
+            if _policies:
+                # Build facts from available context — unknown facts skipped by evaluator.
+                _facts: dict[str, Any] = {}
+                if tender.nmck is not None:
+                    _facts["nmck"] = float(tender.nmck)
+                if tender.submission_deadline is not None:
+                    _dl_delta = tender.submission_deadline - datetime.now(UTC)
+                    _facts["deadline_hours_remaining"] = max(0.0, _dl_delta.total_seconds() / 3600)
+                if isinstance(relevance.get("okved_match"), bool):
+                    _facts["okved_match"] = relevance["okved_match"]
+
+                # Company profile facts (sro_ok, license_ok, funds_ok).
+                _co = await db.scalar(select(_Company).where(_Company.id == company_id))
+                if _co and isinstance(_co.profile, dict):
+                    _prof = _co.profile
+                    _sro = _prof.get("sro") or {}
+                    _facts["sro_ok"] = bool(_sro.get("has_sro"))
+                    _lics = [_l for _l in (_prof.get("licenses") or []) if _l.get("active")]
+                    _facts["license_ok"] = len(_lics) > 0
+                    _fin = _prof.get("financial") or {}
+                    _avail = _fin.get("available_funds")
+                    if _avail is not None and tender.nmck is not None:
+                        _facts["funds_ok"] = float(_avail) >= float(tender.nmck)
+
+                _traces = PolicyEvaluator().evaluate(_facts, _policies)
+                engine["policy_traces"] = [_t.model_dump(mode="json") for _t in _traces]
+                engine["policies_applied"] = len([_t for _t in _traces if _t.passed and not _t.skipped])
+
+                # Apply effects of passing policies.
+                for _tr in _traces:
+                    if not _tr.passed or _tr.skipped:
+                        continue
+                    if _tr.action_type == _PolicyActionType.BLOCK_RECOMMENDATION:
+                        final_recommendation = "no_go"
+                        engine["recommendation"] = "no_go"
+                        engine["explain"].append(f"policy_block: {_tr.explanation}")
+                    elif _tr.action_type == _PolicyActionType.ADD_RISK_FLAG:
+                        _flag = f"policy:{_tr.evidence.get('field', 'unknown')}"
+                        _cur_flags = list(decision.risk_flags or [])
+                        if _flag not in _cur_flags:
+                            decision.risk_flags = _cur_flags + [_flag]
+                        engine["explain"].append(f"policy_risk_flag: {_tr.explanation}")
+                    elif _tr.action_type == _PolicyActionType.ADJUST_SCORE and _tr.score_delta is not None:
+                        _cur_ds = engine.get("decision_score") or 0
+                        engine["decision_score"] = max(0, min(100, int(_cur_ds + _tr.score_delta)))
+                        engine["explain"].append(f"policy_score_delta: {_tr.score_delta:+g}")
+
+                # Log EVALUATE_POLICIES action (best-effort, idempotent via create_action dedup).
+                await _create_action(
+                    db,
+                    company_id=company_id,
+                    agent_id=_SYSAGENT,
+                    action_type="evaluate_policies",
+                    target=str(tender_id),
+                    payload={
+                        "policies_count": len(_policies),
+                        "applied": engine.get("policies_applied", 0),
+                    },
+                )
+        except Exception:
+            logger.exception("Failed to apply policies for tender_id=%s", tender_id)
+
     priority = compute_priority_v1(
         recommendation=engine["recommendation"],
         decision_score=engine.get("decision_score"),
