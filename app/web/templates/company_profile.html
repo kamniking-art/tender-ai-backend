@@ -118,6 +118,58 @@
     </div>
   </section>
 
+  <!-- 7. Telegram-уведомления -->
+  <section class="card">
+    <h2>7. Telegram-уведомления</h2>
+    <div class="grid-form" style="margin-bottom:12px">
+      <label class="checkbox-label" style="grid-column:1/-1">
+        <input type="checkbox" id="f-tg-enabled" onchange="toggleTelegram()" />
+        Включить уведомления в Telegram
+      </label>
+    </div>
+    <div id="tg-fields" style="display:none">
+      <div class="grid-form">
+        <label>Bot Token <span class="hint">(из @BotFather)</span>
+          <input type="text" id="f-tg-token" placeholder="123456:ABC-DEF..." autocomplete="off" />
+        </label>
+        <label>Chat ID <span class="hint">(число или @канал)</span>
+          <input type="text" id="f-tg-chat" placeholder="-100123456789" />
+        </label>
+        <label>Отправлять с <span class="hint">(ЧЧ:ММ)</span>
+          <input type="time" id="f-tg-from" value="09:00" />
+        </label>
+        <label>Отправлять до <span class="hint">(ЧЧ:ММ)</span>
+          <input type="time" id="f-tg-to" value="21:00" />
+        </label>
+        <label>Мин. интервал, мин <span class="hint">(между батчами)</span>
+          <input type="number" id="f-tg-interval" min="1" max="1440" value="30" />
+        </label>
+      </div>
+      <h3 style="margin-top:14px">Категории уведомлений</h3>
+      <div style="display:flex;gap:20px;flex-wrap:wrap">
+        <label class="checkbox-label"><input type="checkbox" id="f-tg-cat-new" checked /> Новые тендеры</label>
+        <label class="checkbox-label"><input type="checkbox" id="f-tg-cat-deadline" checked /> Дедлайн менее 24ч</label>
+        <label class="checkbox-label"><input type="checkbox" id="f-tg-cat-risky" checked /> Рискованные</label>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8. Контактные данные -->
+  <section class="card">
+    <h2>8. Контактные данные</h2>
+    <div class="grid-form">
+      <label>Телефон
+        <input type="tel" id="f-contact-phone" placeholder="+7 (999) 000-00-00" />
+      </label>
+      <label>Email
+        <input type="email" id="f-contact-email" placeholder="info@company.ru" />
+      </label>
+      <label>Контактное лицо
+        <input type="text" id="f-contact-person" placeholder="Иванов Иван Иванович" />
+      </label>
+    </div>
+  </section>
+
   <div class="save-bar">
     <button type="submit" class="btn-primary">Сохранить профиль</button>
   </div>
@@ -225,9 +277,33 @@
 
       regions = d.regions || [];
       renderRegions();
+
+      const tg = d.telegram || {};
+      document.getElementById("f-tg-enabled").checked = !!tg.enabled;
+      document.getElementById("f-tg-token").value     = tg.bot_token || "";
+      document.getElementById("f-tg-chat").value      = tg.chat_id || "";
+      const sw = tg.send_window || {};
+      document.getElementById("f-tg-from").value      = sw.from || "09:00";
+      document.getElementById("f-tg-to").value        = sw.to   || "21:00";
+      document.getElementById("f-tg-interval").value  = tg.min_interval_minutes ?? 30;
+      const cats = tg.categories || {};
+      document.getElementById("f-tg-cat-new").checked      = cats.new_tenders      ?? cats.new      ?? true;
+      document.getElementById("f-tg-cat-deadline").checked = cats.deadlines        ?? cats.deadline_24h ?? true;
+      document.getElementById("f-tg-cat-risky").checked    = cats.risky            ?? true;
+      toggleTelegram();
+
+      const ct = d.contacts || {};
+      document.getElementById("f-contact-phone").value  = ct.phone || "";
+      document.getElementById("f-contact-email").value  = ct.email || "";
+      document.getElementById("f-contact-person").value = ct.contact_person || "";
     } catch (e) {
       showToast("Ошибка загрузки данных", "error");
     }
+  }
+
+  function toggleTelegram() {
+    document.getElementById("tg-fields").style.display =
+      document.getElementById("f-tg-enabled").checked ? "block" : "none";
   }
 
   // ── ОКВЭД ─────────────────────────────────────────────────────────────────────
@@ -343,6 +419,26 @@
         monthly_capacity: numOrNull("f-monthly-capacity"),
       },
       regions,
+      telegram: {
+        enabled:              document.getElementById("f-tg-enabled").checked,
+        bot_token:            document.getElementById("f-tg-token").value.trim() || null,
+        chat_id:              document.getElementById("f-tg-chat").value.trim() || null,
+        send_window: {
+          from: document.getElementById("f-tg-from").value || null,
+          to:   document.getElementById("f-tg-to").value   || null,
+        },
+        min_interval_minutes: Number(document.getElementById("f-tg-interval").value) || 30,
+        categories: {
+          new_tenders:  document.getElementById("f-tg-cat-new").checked,
+          deadlines:    document.getElementById("f-tg-cat-deadline").checked,
+          risky:        document.getElementById("f-tg-cat-risky").checked,
+        },
+      },
+      contacts: {
+        phone:          document.getElementById("f-contact-phone").value.trim() || null,
+        email:          document.getElementById("f-contact-email").value.trim() || null,
+        contact_person: document.getElementById("f-contact-person").value.trim() || null,
+      },
     };
 
     try {
