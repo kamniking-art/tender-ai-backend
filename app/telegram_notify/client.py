@@ -26,6 +26,32 @@ class TelegramClient:
     async def close(self) -> None:
         await self._client.aclose()
 
+    async def answer_callback_query(
+        self,
+        *,
+        bot_token: str,
+        callback_query_id: str,
+        text: str | None = None,
+    ) -> bool:
+        """Dismiss the spinner on a Telegram inline button via the Warsaw proxy.
+
+        Returns True on success, False on any error (best-effort helper).
+        """
+        url = f"{WARSAW_EXTRACTOR_URL}/telegram/answer_callback"
+        payload: dict = {"bot_token": bot_token, "callback_query_id": callback_query_id}
+        if text:
+            payload["text"] = text
+        headers: dict[str, str] = {}
+        if WARSAW_API_TOKEN:
+            headers["Authorization"] = f"Bearer {WARSAW_API_TOKEN}"
+        try:
+            response = await self._client.post(url, json=payload, headers=headers)
+            data = response.json()
+            return bool(data.get("ok"))
+        except Exception as exc:
+            logger.warning("answer_callback_query failed: %s", exc)
+            return False
+
     async def send_message(
         self,
         *,

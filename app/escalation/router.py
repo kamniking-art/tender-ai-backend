@@ -119,14 +119,19 @@ async def telegram_webhook(
     if cq_id:
         try:
             from app.models import Company as _Company
+            from app.telegram_notify.client import TelegramClient as _TgClient
             from app.telegram_notify.service import _extract_telegram_config
-            import httpx as _httpx
             _company = await db.scalar(select(_Company).where(_Company.id == esc.company_id))
             _cfg = _extract_telegram_config(_company.profile or {}) if _company and isinstance(_company.profile, dict) else None
             if _cfg and _cfg.bot_token:
-                _url = f"https://api.telegram.org/bot{_cfg.bot_token}/answerCallbackQuery"
-                async with _httpx.AsyncClient(timeout=5) as _http:
-                    await _http.post(_url, json={"callback_query_id": cq_id})
+                _tg = _TgClient(timeout_sec=5)
+                try:
+                    await _tg.answer_callback_query(
+                        bot_token=_cfg.bot_token,
+                        callback_query_id=cq_id,
+                    )
+                finally:
+                    await _tg.close()
         except Exception:
             logger.warning("Failed to answer callback_query id=%s", cq_id, exc_info=True)
 
