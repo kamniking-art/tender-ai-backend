@@ -96,12 +96,11 @@ def _resolve_high_security(extracted: ExtractedTenderV1 | None, tender: Tender) 
             return True
         if extracted.contract_security_pct is not None and extracted.contract_security_pct >= Decimal("10"):
             return True
-
-    if nmck and nmck > 0:
-        if decision.bid_security_amount is not None and (decision.bid_security_amount / nmck) >= Decimal("0.05"):
-            return True
-        if decision.contract_security_amount is not None and (decision.contract_security_amount / nmck) >= Decimal("0.10"):
-            return True
+        if nmck and nmck > 0:
+            if extracted.bid_security_amount is not None and (extracted.bid_security_amount / nmck) >= Decimal("0.05"):
+                return True
+            if extracted.contract_security_amount is not None and (extracted.contract_security_amount / nmck) >= Decimal("0.10"):
+                return True
 
     return False
 
