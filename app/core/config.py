@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     telegram_notify_interval_minutes: int = 5
     monitoring_interval_minutes: int = 360
     warsaw_timeout_sec: int = 30
+    operational_alerts_interval_minutes: int = 30
     escalation_timeout_hours: int = 48
     eis_source_blocked_cooldown_minutes: int = 30
     eis_source_request_delay_sec: float = 2.0
