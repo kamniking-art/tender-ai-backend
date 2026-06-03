@@ -217,6 +217,27 @@ async def _handle_clarification_callback(
         except Exception:
             logger.warning("Failed to edit clarification message for q_id=%s", q_id, exc_info=True)
 
+    # After send: remove keyboard entirely so the button can't be tapped again (best-effort).
+    if action == "clarif_send" and question.telegram_message_id:
+        try:
+            from app.models import Company as _CoSend
+            from app.telegram_notify.client import TelegramClient as _TgSend
+            from app.telegram_notify.service import _extract_telegram_config as _ecfgS
+            _coS = await db.scalar(select(_CoSend).where(_CoSend.id == question.company_id))
+            _cfgS = _ecfgS(_coS.profile or {}) if _coS and isinstance(_coS.profile, dict) else None
+            if _cfgS and _cfgS.bot_token and _cfgS.chat_id:
+                _tgS = _TgSend(timeout_sec=10)
+                try:
+                    await _tgS.edit_message_reply_markup(
+                        bot_token=_cfgS.bot_token,
+                        chat_id=_cfgS.chat_id,
+                        message_id=int(question.telegram_message_id),
+                    )
+                finally:
+                    await _tgS.close()
+        except Exception:
+            logger.warning("Failed to remove keyboard after clarif_send for q_id=%s", q_id, exc_info=True)
+
     # Answer callback to dismiss spinner (best-effort).
     if cq_id is not None:
         try:
