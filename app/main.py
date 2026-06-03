@@ -102,13 +102,47 @@ async def _db_ready() -> tuple[bool, str | None]:
         return False, f"{exc.__class__.__name__}: {exc}"
 
 
+_DEFAULT_SECRET_KEY = "change_me_to_long_random_string"
+
+
+async def _warsaw_ready() -> tuple[bool, str | None]:
+    """Ping Warsaw proxy /health endpoint. Non-fatal — returns (False, reason) on failure."""
+    import httpx
+    from app.telegram_notify.client import WARSAW_EXTRACTOR_URL
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{WARSAW_EXTRACTOR_URL}/health")
+            return (True, None) if resp.status_code == 200 else (False, f"http {resp.status_code}")
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+
+
+async def _get_db_migration_rev() -> str:
+    """Read current alembic revision from DB (alembic_version table)."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(text("SELECT version_num FROM alembic_version LIMIT 1"))
+            row = result.fetchone()
+            return row[0] if row else "none"
+    except Exception:
+        return "unknown"
+
+
 @app.get("/health")
 async def health(response: Response) -> dict[str, object]:
     db_ok, db_error = await _db_ready()
     db_reason = _db_error_reason(db_error)
+    warsaw_ok, warsaw_err = await _warsaw_ready()
     if not db_ok:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-    return {"ok": db_ok, "db_ok": db_ok, "db_error": db_error, "db_reason": db_reason}
+    return {
+        "ok": db_ok,
+        "db_ok": db_ok,
+        "db_error": db_error,
+        "db_reason": db_reason,
+        "warsaw_ok": warsaw_ok,
+        "warsaw_error": warsaw_err,
+    }
 
 
 @app.get("/readiness")
@@ -145,12 +179,41 @@ async def version() -> dict[str, str]:
 
 @app.on_event("startup")
 async def startup_event() -> None:
+    # ── 1. DB connectivity (fatal) ────────────────────────────────────────────
     db_ok, db_error = await _db_ready()
     if not db_ok:
         db_reason = _db_error_reason(db_error)
         logger.error("startup db preflight failed: reason=%s error=%s", db_reason, db_error)
         raise RuntimeError(f"startup db preflight failed: reason={db_reason} error={db_error}")
     logger.info("startup db preflight ok")
+
+    # ── 2. Secret key check (warning) ─────────────────────────────────────────
+    from app.core.config import settings as _s
+    if _s.secret_key == _DEFAULT_SECRET_KEY:
+        logger.warning(
+            "startup: SECRET_KEY is set to the default value — JWT tokens are INSECURE. "
+            "Set a strong random SECRET_KEY in your .env file."
+        )
+
+    # ── 3. Alembic migrations check (warning) ─────────────────────────────────
+    db_rev = await _get_db_migration_rev()
+    code_rev = _get_migrations_head()
+    if db_rev not in ("unknown", "none") and code_rev != "unknown" and db_rev != code_rev:
+        logger.warning(
+            "startup: DB migration rev=%s != code head=%s — run alembic upgrade head",
+            db_rev, code_rev,
+        )
+    else:
+        logger.info("startup: migrations rev=%s head=%s", db_rev, code_rev)
+
+    # ── 4. Warsaw proxy check (warning, non-fatal) ────────────────────────────
+    warsaw_ok, warsaw_err = await _warsaw_ready()
+    if not warsaw_ok:
+        logger.warning(
+            "startup: Warsaw proxy unreachable — Telegram/AI-extraction may fail: %s", warsaw_err
+        )
+    else:
+        logger.info("startup: Warsaw proxy ok")
     await tender_task_scheduler.start()
     await ingestion_scheduler.start()
     await telegram_notify_scheduler.start()
