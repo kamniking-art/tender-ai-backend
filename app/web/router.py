@@ -62,6 +62,7 @@ from app.tender_finance.service import (
     get_finance_scoped,
     upsert_finance,
 )
+from app.clarification.service import ClarificationQuestion, create_question, list_questions
 from app.tender_tasks.service import list_tasks
 from app.tenders.model import Tender
 from app.tenders.schemas import TenderStatus
@@ -1780,6 +1781,8 @@ async def tender_detail_page(
         external_id=tender.external_id,
     )
 
+    clarifications = await list_questions(db, company_id=current_user.company_id, tender_id=tender.id)
+
     return templates.TemplateResponse(
         "tender_detail.html",
         _template_context(
@@ -1841,8 +1844,31 @@ async def tender_detail_page(
                 "message": action_message,
                 "details": action_details,
             },
+            clarifications=clarifications,
         ),
     )
+
+
+@router.post("/tenders/{tender_id}/clarification")
+async def web_add_clarification(
+    tender_id: UUID,
+    question_text: str = Form(...),
+    reason: str = Form(default=""),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_cookie),
+):
+    """Create a clarification question for a tender (draft status)."""
+    try:
+        await create_question(
+            db,
+            company_id=current_user.company_id,
+            tender_id=tender_id,
+            question_text=question_text.strip(),
+            reason=reason.strip() or None,
+        )
+    except Exception:
+        logger.exception("Failed to create clarification question for tender_id=%s", tender_id)
+    return _redirect(f"/web/tenders/{tender_id}", status_code=303)
 
 
 @router.post("/tenders/{tender_id}/extract")

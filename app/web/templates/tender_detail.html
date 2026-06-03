@@ -432,6 +432,52 @@
   {% endif %}
 </section>
 
+<!-- Уточнения -->
+<section class="card">
+  <h2>Уточнения</h2>
+
+  <form method="post" action="/web/tenders/{{ tender.id }}/clarification" style="margin-bottom:16px">
+    <div class="grid-form">
+      <label style="grid-column:1/-1">Текст вопроса
+        <textarea name="question_text" rows="3" placeholder="Опишите вопрос к заказчику..." required style="resize:vertical;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px;font-family:inherit;width:100%;box-sizing:border-box"></textarea>
+      </label>
+      <label>Причина / обоснование
+        <input type="text" name="reason" placeholder="Необязательно" />
+      </label>
+    </div>
+    <div style="margin-top:10px">
+      <button type="submit" class="btn-action">+ Добавить вопрос</button>
+    </div>
+  </form>
+
+  {% if clarifications %}
+  <table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead>
+      <tr>
+        <th style="text-align:left;padding:6px 10px;background:var(--accent-soft);color:var(--accent);border-bottom:2px solid var(--line)">Вопрос</th>
+        <th style="text-align:left;padding:6px 10px;background:var(--accent-soft);color:var(--accent);border-bottom:2px solid var(--line)">Статус</th>
+        <th style="text-align:left;padding:6px 10px;background:var(--accent-soft);color:var(--accent);border-bottom:2px solid var(--line)">Ответ</th>
+        <th style="text-align:left;padding:6px 10px;background:var(--accent-soft);color:var(--accent);border-bottom:2px solid var(--line)">Создан</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for q in clarifications %}
+      <tr>
+        <td style="padding:7px 10px;border-bottom:1px solid var(--line);max-width:360px">{{ q.question_text }}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap">
+          <span class="badge badge-{{ q.status }}">{{ q.status }}</span>
+        </td>
+        <td style="padding:7px 10px;border-bottom:1px solid var(--line);color:var(--muted);max-width:300px">{{ q.answer_text or '—' }}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap;color:var(--muted)">{{ q.created_at | ru_dt }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:var(--muted);font-size:13px">Уточнений пока нет.</p>
+  {% endif %}
+</section>
+
 <script>
   document.querySelectorAll('.action-form').forEach(function(form) {
     form.addEventListener('submit', function() {
