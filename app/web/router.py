@@ -1858,8 +1858,9 @@ async def web_add_clarification(
     current_user: User = Depends(get_current_user_from_cookie),
 ):
     """Create a clarification question for a tender (draft status)."""
+    _question = None
     try:
-        await create_question(
+        _question = await create_question(
             db,
             company_id=current_user.company_id,
             tender_id=tender_id,
@@ -1868,6 +1869,29 @@ async def web_add_clarification(
         )
     except Exception:
         logger.exception("Failed to create clarification question for tender_id=%s", tender_id)
+
+    # Notify via Telegram (best-effort — never blocks redirect).
+    if _question is not None:
+        try:
+            from app.clarification.notifier import send_clarification_request
+            from app.models import Company as _Company
+            from app.telegram_notify.service import _extract_telegram_config
+            _co = await db.scalar(select(_Company).where(_Company.id == current_user.company_id))
+            _cfg = _extract_telegram_config(_co.profile or {}) if _co and isinstance(_co.profile, dict) else None
+            if _cfg and _cfg.enabled and _cfg.bot_token and _cfg.chat_id:
+                _tender = await get_tender_by_id_scoped(db, current_user.company_id, tender_id)
+                await send_clarification_request(
+                    _question,
+                    tender_data={
+                        "subject": _tender.title if _tender else "—",
+                        "customer": _tender.customer_name if _tender else "—",
+                    },
+                    bot_token=_cfg.bot_token,
+                    chat_id=_cfg.chat_id,
+                )
+        except Exception:
+            logger.warning("Failed to send clarification notification: tender_id=%s", tender_id)
+
     return RedirectResponse(url=f"/web/tenders/{tender_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 

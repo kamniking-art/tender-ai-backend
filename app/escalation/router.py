@@ -78,7 +78,16 @@ async def telegram_webhook(
         return Response(status_code=status.HTTP_200_OK)
 
     parts = callback_data.split(":", 1)
-    if len(parts) != 2 or parts[0] not in ("approve", "reject"):
+    if len(parts) != 2:
+        return Response(status_code=status.HTTP_200_OK)
+
+    # ── Clarification callbacks ───────────────────────────────────────────────
+    if parts[0] in ("clarif_approve", "clarif_send"):
+        return await _handle_clarification_callback(
+            db, parts[0], parts[1], cq_id=cq.get("id"), tg_note=tg_note,
+        )
+
+    if parts[0] not in ("approve", "reject"):
         return Response(status_code=status.HTTP_200_OK)
 
     action, escalation_id_str = parts
@@ -144,6 +153,67 @@ async def telegram_webhook(
                     await _tg.close()
         except Exception:
             logger.warning("Failed to answer callback_query id=%s", cq_id, exc_info=True)
+
+    return Response(status_code=status.HTTP_200_OK)
+
+
+async def _handle_clarification_callback(
+    db: AsyncSession,
+    action: str,
+    question_id_str: str,
+    *,
+    cq_id: object,
+    tg_note: str | None,
+) -> Response:
+    """Process clarif_approve / clarif_send callbacks from Telegram inline buttons."""
+    from app.clarification.service import ClarificationQuestion, approve_question, mark_sent
+    from app.clarification.schema import ClarificationStateError as _ClarStateError
+
+    try:
+        q_id = UUID(question_id_str)
+    except ValueError:
+        logger.warning("Webhook: invalid clarification question_id: %s", question_id_str)
+        return Response(status_code=status.HTTP_200_OK)
+
+    question = await db.scalar(
+        select(ClarificationQuestion).where(ClarificationQuestion.id == q_id)
+    )
+    if question is None:
+        logger.warning("Webhook: clarification question %s not found", q_id)
+        return Response(status_code=status.HTTP_200_OK)
+
+    try:
+        if action == "clarif_approve":
+            await approve_question(db, q_id)
+            _toast = "Вопрос одобрен ✅"
+        else:
+            await mark_sent(db, q_id)
+            _toast = "Вопрос отправлен 📤"
+    except _ClarStateError as exc:
+        logger.warning("Webhook clarification state error for %s: %s", q_id, exc)
+        _toast = "Уже обработан"
+
+    # Answer callback to dismiss spinner (best-effort).
+    if cq_id is not None:
+        try:
+            from app.models import Company as _Company
+            from app.telegram_notify.client import TelegramClient as _TgClient
+            from app.telegram_notify.service import _extract_telegram_config
+            import httpx as _httpx
+            _co = await db.scalar(select(_Company).where(_Company.id == question.company_id))
+            _cfg = _extract_telegram_config(_co.profile or {}) if _co and isinstance(_co.profile, dict) else None
+            if _cfg and _cfg.bot_token:
+                _tg = _TgClient(timeout_sec=5)
+                try:
+                    await _tg.answer_callback_query(
+                        bot_token=_cfg.bot_token,
+                        callback_query_id=str(cq_id),
+                        text=_toast,
+                    )
+                finally:
+                    await _tg.close()
+        except Exception:
+            logger.warning("Failed to answer clarification callback id=%s", cq_id, exc_info=True)
 
     return Response(status_code=status.HTTP_200_OK)
 
