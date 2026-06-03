@@ -248,6 +248,7 @@
     <div><strong>Дедлайн:</strong> {{ tender.submission_deadline | ru_dt }}</div>
     <div><strong>НМЦК:</strong> {{ tender.nmck | tender_money_ru("RUB", tender.id, tender.external_id) }}</div>
     <div><strong>Заказчик:</strong> {{ tender.customer_name or '-' }}</div>
+    <div><strong>Email заказчика:</strong> {% if tender.customer_email %}<a href="mailto:{{ tender.customer_email }}">{{ tender.customer_email }}</a>{% else %}—{% endif %}</div>
     <div><strong>Регион:</strong> {{ tender.region or '-' }}</div>
     <div><strong>Место поставки:</strong> {{ tender.place_text or '-' }}</div>
     <div><strong>Тип закупки:</strong> {{ tender.procurement_type or '-' }}</div>

@@ -29,6 +29,7 @@ class Tender(Base):
     source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     customer_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    customer_email: Mapped[str | None] = mapped_column(Text, nullable=True)
     region: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     place_text: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     procurement_type: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
