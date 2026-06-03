@@ -744,6 +744,20 @@ async def recompute_decision_engine_v1(
                 if isinstance(relevance.get("okved_match"), bool):
                     _facts["okved_match"] = relevance["okved_match"]
 
+                # fit_score — from company_fit_score table (computed by FitScorer).
+                try:
+                    from app.fit_score.service import CompanyFitScore as _CFS
+                    _cfs = await db.scalar(
+                        select(_CFS).where(
+                            _CFS.company_id == company_id,
+                            _CFS.tender_id == tender_id,
+                        )
+                    )
+                    if _cfs is not None and _cfs.fit_score is not None:
+                        _facts["fit_score"] = float(_cfs.fit_score)
+                except Exception:
+                    logger.warning("Could not load fit_score for facts: tender_id=%s", tender_id)
+
                 # Company profile facts (sro_ok, license_ok, funds_ok).
                 _co = await db.scalar(select(_Company).where(_Company.id == company_id))
                 if _co and isinstance(_co.profile, dict):
