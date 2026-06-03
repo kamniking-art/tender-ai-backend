@@ -1871,6 +1871,21 @@ async def web_add_clarification(
     return RedirectResponse(url=f"/web/tenders/{tender_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
+@router.post("/tenders/{tender_id}/customer-email")
+async def web_set_customer_email(
+    tender_id: UUID,
+    customer_email: str = Form(default=""),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_cookie),
+):
+    """Update the customer_email field of a tender (manual data entry)."""
+    tender = await get_tender_by_id_scoped(db, current_user.company_id, tender_id)
+    if tender is not None:
+        tender.customer_email = customer_email.strip() or None
+        await db.commit()
+    return RedirectResponse(url=f"/web/tenders/{tender_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
 @router.post("/tenders/{tender_id}/extract")
 async def web_extract_tender(
     tender_id: UUID,

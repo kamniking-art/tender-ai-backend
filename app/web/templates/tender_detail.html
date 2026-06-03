@@ -248,7 +248,14 @@
     <div><strong>Дедлайн:</strong> {{ tender.submission_deadline | ru_dt }}</div>
     <div><strong>НМЦК:</strong> {{ tender.nmck | tender_money_ru("RUB", tender.id, tender.external_id) }}</div>
     <div><strong>Заказчик:</strong> {{ tender.customer_name or '-' }}</div>
-    <div><strong>Email заказчика:</strong> {% if tender.customer_email %}<a href="mailto:{{ tender.customer_email }}">{{ tender.customer_email }}</a>{% else %}—{% endif %}</div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <strong>Email заказчика:</strong>
+      {% if tender.customer_email %}<a href="mailto:{{ tender.customer_email }}" style="font-size:13px">{{ tender.customer_email }}</a>{% endif %}
+      <form method="post" action="/web/tenders/{{ tender.id }}/customer-email" class="action-form" style="display:inline-flex;align-items:center;gap:5px">
+        <input type="email" name="customer_email" value="{{ tender.customer_email or '' }}" placeholder="email@заказчик.ru" style="padding:3px 8px;border:1px solid var(--line);border-radius:5px;font-size:12px;width:200px" />
+        <button type="submit" style="padding:3px 10px;font-size:12px;background:var(--accent);color:#fff;border:none;border-radius:5px;cursor:pointer;white-space:nowrap">Сохранить</button>
+      </form>
+    </div>
     <div><strong>Регион:</strong> {{ tender.region or '-' }}</div>
     <div><strong>Место поставки:</strong> {{ tender.place_text or '-' }}</div>
     <div><strong>Тип закупки:</strong> {{ tender.procurement_type or '-' }}</div>
