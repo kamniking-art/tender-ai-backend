@@ -47,6 +47,7 @@
     <table>
       <thead>
         <tr>
+          <th>Статус</th>
           <th>Компания</th>
           {% for col in health_per_tenant[0].keys() if col != 'company_name' and col != 'company_id' %}
           <th>{{ col_ru.get(col, col) }}</th>
@@ -55,10 +56,29 @@
       </thead>
       <tbody>
         {% for row in health_per_tenant %}
+        {% set rate = (row.get('success_rate_24h_pct') or row.get('success_rate')) | float(-1) %}
+        {% set calls = (row.get('calls_24h') or row.get('calls') or 0) | int %}
+        {% if rate >= 0 and rate < 50 %}
+          {% set sev = 'danger' %}
+        {% elif (rate >= 0 and rate < 80) or calls == 0 %}
+          {% set sev = 'warn' %}
+        {% else %}
+          {% set sev = 'ok' %}
+        {% endif %}
         <tr>
+          <td><span class="sev-badge sev-{{ sev }}">{{ '🔴' if sev == 'danger' else ('🟡' if sev == 'warn' else '🟢') }}</span></td>
           <td class="name-cell">{{ row.get('company_name') or row.get('company_id', '—') }}</td>
           {% for col, val in row.items() if col != 'company_name' and col != 'company_id' %}
-          <td>{{ val if val is not none else '—' }}</td>
+          {% if col in ('success_rate_24h_pct', 'success_rate') and val is not none %}
+            {% set r = val | float(-1) %}
+            <td class="{{ 'danger' if r >= 0 and r < 50 else ('warn' if r >= 0 and r < 80 else '') }}">{{ val }}</td>
+          {% elif col in ('calls_24h', 'calls') and val is not none and val | int == 0 %}
+            <td class="warn">{{ val }}</td>
+          {% elif col in ('failed_calls_24h', 'error_count_24h') and val is not none and val | int > 0 %}
+            <td class="warn">{{ val }}</td>
+          {% else %}
+            <td>{{ val if val is not none else '—' }}</td>
+          {% endif %}
           {% endfor %}
         </tr>
         {% endfor %}
@@ -147,5 +167,9 @@
   td.warn { color: #b45309; font-weight: 600; }
   td.danger { color: var(--danger); font-weight: 600; }
   .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+  .sev-badge { font-size: 16px; line-height: 1; }
+  .sev-ok    { /* green emoji — no extra style needed */ }
+  .sev-warn  { /* yellow emoji */ }
+  .sev-danger { /* red emoji */ }
 </style>
 {% endblock %}
