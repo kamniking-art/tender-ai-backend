@@ -1880,7 +1880,7 @@ async def web_add_clarification(
             _cfg = _extract_telegram_config(_co.profile or {}) if _co and isinstance(_co.profile, dict) else None
             if _cfg and _cfg.enabled and _cfg.bot_token and _cfg.chat_id:
                 _tender = await get_tender_by_id_scoped(db, current_user.company_id, tender_id)
-                await send_clarification_request(
+                _msg_id = await send_clarification_request(
                     _question,
                     tender_data={
                         "subject": _tender.title if _tender else "—",
@@ -1889,6 +1889,9 @@ async def web_add_clarification(
                     bot_token=_cfg.bot_token,
                     chat_id=_cfg.chat_id,
                 )
+                if _msg_id and _question.telegram_message_id is None:
+                    _question.telegram_message_id = str(_msg_id)
+                    await db.commit()
         except Exception:
             logger.warning("Failed to send clarification notification: tender_id=%s", tender_id)
 

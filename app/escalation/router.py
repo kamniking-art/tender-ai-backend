@@ -193,6 +193,30 @@ async def _handle_clarification_callback(
         logger.warning("Webhook clarification state error for %s: %s", q_id, exc)
         _toast = "Уже обработан"
 
+    # After approve: edit message to replace Одобрить with Отправить (best-effort).
+    if action == "clarif_approve" and question.telegram_message_id:
+        try:
+            from app.models import Company as _CompanyForEdit
+            from app.telegram_notify.client import TelegramClient as _TgForEdit
+            from app.telegram_notify.service import _extract_telegram_config as _ecfg
+            _co2 = await db.scalar(select(_CompanyForEdit).where(_CompanyForEdit.id == question.company_id))
+            _cfg2 = _ecfg(_co2.profile or {}) if _co2 and isinstance(_co2.profile, dict) else None
+            if _cfg2 and _cfg2.bot_token and _cfg2.chat_id:
+                _tg2 = _TgForEdit(timeout_sec=10)
+                try:
+                    await _tg2.edit_message_reply_markup(
+                        bot_token=_cfg2.bot_token,
+                        chat_id=_cfg2.chat_id,
+                        message_id=int(question.telegram_message_id),
+                        reply_markup={"inline_keyboard": [[
+                            {"text": "📤 Отправить заказчику", "callback_data": f"clarif_send:{q_id}"},
+                        ]]},
+                    )
+                finally:
+                    await _tg2.close()
+        except Exception:
+            logger.warning("Failed to edit clarification message for q_id=%s", q_id, exc_info=True)
+
     # Answer callback to dismiss spinner (best-effort).
     if cq_id is not None:
         try:

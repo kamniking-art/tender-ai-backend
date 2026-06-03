@@ -60,6 +60,7 @@ class ClarificationQuestion(Base):
     timeout_at: Mapped[datetime | None] = mapped_column(
         sa.DateTime(timezone=True), nullable=True
     )
+    telegram_message_id: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")
     )

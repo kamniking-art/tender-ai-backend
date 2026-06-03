@@ -1,7 +1,8 @@
 """Clarification notifier — sends new questions to Telegram for review.
 
 Follows the same pattern as app/escalation/notifier.py.
-Buttons: ✅ Одобрить (clarif_approve:{id}) | 📤 Отправить (clarif_send:{id})
+Step 1 — new question:  shows [✅ Одобрить] only (clarif_approve:{id})
+Step 2 — after approve: message is edited to show [📤 Отправить] (clarif_send:{id})
 """
 from __future__ import annotations
 
@@ -45,8 +46,7 @@ async def send_clarification_request(
     reply_markup = {
         "inline_keyboard": [
             [
-                {"text": "✅ Одобрить",   "callback_data": f"clarif_approve:{question_id}"},
-                {"text": "📤 Отправить",  "callback_data": f"clarif_send:{question_id}"},
+                {"text": "✅ Одобрить", "callback_data": f"clarif_approve:{question_id}"},
             ]
         ]
     }
