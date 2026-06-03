@@ -1868,7 +1868,7 @@ async def web_add_clarification(
         )
     except Exception:
         logger.exception("Failed to create clarification question for tender_id=%s", tender_id)
-    return _redirect(f"/web/tenders/{tender_id}", status_code=303)
+    return RedirectResponse(url=f"/web/tenders/{tender_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/tenders/{tender_id}/extract")
