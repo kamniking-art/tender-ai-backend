@@ -440,6 +440,48 @@
   {% endif %}
 </section>
 
+<!-- Оценка решения агента -->
+<section class="card">
+  <h2>Оценка решения агента</h2>
+  {% if agent_evaluation %}
+  <div class="kv-grid" style="margin-bottom:14px">
+    <div><strong>Рекомендация агента:</strong> {{ agent_evaluation.agent_recommendation or '—' }}</div>
+    <div><strong>Решение человека:</strong> {{ agent_evaluation.human_decision or '—' }}</div>
+    <div><strong>Фактический результат:</strong> {{ agent_evaluation.actual_result or '—' }}</div>
+    <div><strong>Агент был прав:</strong>
+      {% if agent_evaluation.was_right is not none %}
+        {{ '✅ Да' if agent_evaluation.was_right else '❌ Нет' }}
+      {% else %}—{% endif %}
+    </div>
+    {% if agent_evaluation.notes %}<div style="grid-column:1/-1"><strong>Заметки:</strong> {{ agent_evaluation.notes }}</div>{% endif %}
+  </div>
+  {% endif %}
+  <form method="post" action="/web/tenders/{{ tender.id }}/evaluation" class="grid-form">
+    <label>Решение человека
+      <select name="human_decision" style="padding:7px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px;background:#fff">
+        <option value="">— выберите —</option>
+        {% for opt in [('strong_go','Однозначно участвуем'),('go','Участвуем'),('review','На рассмотрении'),('weak','Слабый интерес'),('no_go','Не участвуем')] %}
+        <option value="{{ opt[0] }}" {{ 'selected' if agent_evaluation and agent_evaluation.human_decision == opt[0] else '' }}>{{ opt[1] }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Фактический результат
+      <select name="actual_result" style="padding:7px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px;background:#fff">
+        <option value="">— выберите —</option>
+        {% for opt in [('won','Победили'),('lost','Проиграли'),('submitted','Заявка подана'),('cancelled','Отменён'),('unknown','Неизвестно')] %}
+        <option value="{{ opt[0] }}" {{ 'selected' if agent_evaluation and agent_evaluation.actual_result == opt[0] else '' }}>{{ opt[1] }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label style="grid-column:1/-1">Заметки
+      <input type="text" name="notes" value="{{ agent_evaluation.notes or '' if agent_evaluation else '' }}" placeholder="Необязательно" />
+    </label>
+    <div style="grid-column:1/-1;margin-top:6px">
+      <button type="submit" class="btn-action">Сохранить оценку</button>
+    </div>
+  </form>
+</section>
+
 <!-- Уточнения -->
 <section class="card">
   <h2>Уточнения</h2>

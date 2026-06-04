@@ -62,6 +62,7 @@ from app.tender_finance.service import (
     get_finance_scoped,
     upsert_finance,
 )
+from app.agent_eval.service import AgentEvaluation, get_evaluation, upsert_evaluation
 from app.clarification.service import ClarificationQuestion, create_question, list_questions
 from app.tender_tasks.service import list_tasks
 from app.tenders.model import Tender
@@ -1811,6 +1812,7 @@ async def tender_detail_page(
     )
 
     clarifications = await list_questions(db, company_id=current_user.company_id, tender_id=tender.id)
+    agent_evaluation = await get_evaluation(db, company_id=current_user.company_id, tender_id=tender.id)
 
     return templates.TemplateResponse(
         "tender_detail.html",
@@ -1874,8 +1876,39 @@ async def tender_detail_page(
                 "details": action_details,
             },
             clarifications=clarifications,
+            agent_evaluation=agent_evaluation,
         ),
     )
+
+
+@router.post("/tenders/{tender_id}/evaluation")
+async def web_upsert_evaluation(
+    tender_id: UUID,
+    human_decision: str = Form(default=""),
+    actual_result: str = Form(default=""),
+    notes: str = Form(default=""),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_cookie),
+):
+    """Save or update human evaluation of agent recommendation for a tender."""
+    try:
+        # Fetch agent recommendation from existing decision if available
+        from app.tender_decisions.model import TenderDecision as _TD
+        _dec = await db.scalar(
+            select(_TD).where(_TD.company_id == current_user.company_id, _TD.tender_id == tender_id)
+        )
+        await upsert_evaluation(
+            db,
+            company_id=current_user.company_id,
+            tender_id=tender_id,
+            agent_recommendation=_dec.recommendation if _dec else None,
+            human_decision=human_decision.strip() or None,
+            actual_result=actual_result.strip() or None,
+            notes=notes.strip() or None,
+        )
+    except Exception:
+        logger.exception("Failed to save evaluation for tender_id=%s", tender_id)
+    return RedirectResponse(url=f"/web/tenders/{tender_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/tenders/{tender_id}/clarification")
