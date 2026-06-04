@@ -121,6 +121,53 @@
   {% endif %}
 </section>
 
+<!-- ── Лимиты AI-расходов ─────────────────────────────────────────────── -->
+<section class="card">
+  <h2>Лимиты AI-расходов (текущий месяц)</h2>
+  {% if cost_limits %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Компания</th>
+          <th>Потрачено, $</th>
+          <th>Лимит, $</th>
+          <th>Использовано, %</th>
+          <th>Статус</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in cost_limits %}
+        {% set pct = row.pct %}
+        {% if pct is not none and pct >= 100 %}{% set lsev = 'danger' %}
+        {% elif pct is not none and pct >= 80 %}{% set lsev = 'warn' %}
+        {% else %}{% set lsev = '' %}{% endif %}
+        <tr>
+          <td class="name-cell">{{ row.company_name }}</td>
+          <td>{{ row.spent_month }}</td>
+          <td>{{ row.limit if row.limit is not none else '—' }}</td>
+          <td class="{{ lsev }}">{{ (pct | string + '%') if pct is not none else '—' }}</td>
+          <td>
+            {% if pct is none %}
+              <span style="color:var(--muted);font-size:12px">нет лимита</span>
+            {% elif pct >= 100 %}
+              <span class="sev-badge">🔴 Превышен</span>
+            {% elif pct >= 80 %}
+              <span class="sev-badge">🟡 Близко</span>
+            {% else %}
+              <span class="sev-badge">🟢 Норма</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">Нет данных по расходам или лимитам не заданы.</p>
+  {% endif %}
+</section>
+
 <!-- ── Очередь задач ──────────────────────────────────────────────────── -->
 <section class="card">
   <h2>Очередь задач</h2>

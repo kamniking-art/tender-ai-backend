@@ -1328,6 +1328,34 @@ async def ops_dashboard_page(
     cost_by_tenant    = await _view("v_cost_by_tenant")
     queue_backlog     = await _view("v_queue_backlog")
 
+    # ── Cost limit utilisation per company ───────────────────────────────────
+    cost_limits: dict[str, dict] = {}
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        from sqlalchemy import func as _func
+        from app.ai_extraction.model import AICostLog as _CostLog
+        _month_start = _dt.now(_tz.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        companies_all = list((await db.scalars(select(Company))).all())
+        for _co in companies_all:
+            _lim = (_co.profile or {}).get("limits", {}).get("monthly_cost_usd") if isinstance(_co.profile, dict) else None
+            _spent_row = await db.scalar(
+                select(_func.coalesce(_func.sum(_CostLog.estimated_cost), 0))
+                .where(
+                    _CostLog.company_id == _co.id,
+                    _CostLog.created_at >= _month_start,
+                    _CostLog.status == "ok",
+                )
+            )
+            _spent = float(_spent_row or 0)
+            cost_limits[str(_co.id)] = {
+                "company_name": _co.name or str(_co.id),
+                "spent_month": round(_spent, 4),
+                "limit": float(_lim) if _lim is not None else None,
+                "pct": round(_spent / float(_lim) * 100, 1) if _lim and float(_lim) > 0 else None,
+            }
+    except Exception:
+        logger.warning("ops_dashboard: cost_limits query failed", exc_info=True)
+
     return templates.TemplateResponse(
         "ops_dashboard.html",
         _template_context(
@@ -1335,6 +1363,7 @@ async def ops_dashboard_page(
             health_per_tenant=health_per_tenant,
             cost_by_tenant=cost_by_tenant,
             queue_backlog=queue_backlog,
+            cost_limits=list(cost_limits.values()),
         ),
     )
 
