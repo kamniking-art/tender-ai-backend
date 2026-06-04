@@ -794,8 +794,9 @@ async def recompute_decision_engine_v1(
                         engine["decision_score"] = max(0, min(100, int(_cur_ds + _tr.score_delta)))
                         engine["explain"].append(f"policy_score_delta: {_tr.score_delta:+g}")
 
-                # Log EVALUATE_POLICIES action (best-effort, idempotent via create_action dedup).
-                await _create_action(
+                # Log EVALUATE_POLICIES action and mark completed immediately.
+                from app.agent_actions.service import complete_action as _complete_action
+                _pol_action = await _create_action(
                     db,
                     company_id=company_id,
                     agent_id=_SYSAGENT,
@@ -806,6 +807,16 @@ async def recompute_decision_engine_v1(
                         "applied": engine.get("policies_applied", 0),
                     },
                 )
+                if _pol_action is not None:
+                    await _complete_action(
+                        db,
+                        _pol_action.action_id,
+                        result={
+                            "policies_count": len(_policies),
+                            "applied": engine.get("policies_applied", 0),
+                            "recommendation": engine.get("recommendation"),
+                        },
+                    )
         except Exception:
             logger.exception("Failed to apply policies for tender_id=%s", tender_id)
 
