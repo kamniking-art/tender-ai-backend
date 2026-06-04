@@ -15,7 +15,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: tender-ai-backend:local
+    image: tender-ai-backend:${IMAGE_TAG:-local}
     restart: unless-stopped
     env_file:
       - .env
