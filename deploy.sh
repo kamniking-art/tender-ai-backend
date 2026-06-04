@@ -8,7 +8,7 @@
 # What it does:
 #   1. Computes IMAGE_TAG = date + git short hash (or explicit arg)
 #   2. Builds docker image with version build args
-#   3. Runs docker compose up -d
+#   3. Restarts ONLY tender_ai_app (DB is never touched — avoids auth drift)
 #   4. Tags the new image as :latest
 #
 # Environment: runs on the deploy host (RU server or local with Docker access).
@@ -39,9 +39,9 @@ docker compose build \
 docker tag "tender-ai-backend:${IMAGE_TAG}" "tender-ai-backend:latest"
 echo "==> Tagged tender-ai-backend:latest"
 
-# ── Deploy ────────────────────────────────────────────────────────────────────
-echo "==> Starting services"
-docker compose up -d
+# ── Deploy (app only — never recreate DB to avoid auth drift) ─────────────────
+echo "==> Restarting tender_ai_app only"
+docker compose up -d --no-deps tender_ai_app
 
 echo "==> Done. Running image: tender-ai-backend:${IMAGE_TAG}"
 docker compose ps tender_ai_app
