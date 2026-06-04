@@ -758,6 +758,22 @@ async def recompute_decision_engine_v1(
                 except Exception:
                     logger.warning("Could not load fit_score for facts: tender_id=%s", tender_id)
 
+                # requirement_status — True if all required checklist items are ok/unknown,
+                # False if any required item has status "missing" or "risk".
+                try:
+                    from app.requirements.service import RequirementsChecklist as _RCL
+                    _missing_count = await db.scalar(
+                        select(func.count()).select_from(_RCL).where(
+                            _RCL.company_id == company_id,
+                            _RCL.tender_id == tender_id,
+                            _RCL.required == True,  # noqa: E712
+                            _RCL.status.in_(["missing", "risk"]),
+                        )
+                    )
+                    _facts["requirement_status"] = (_missing_count == 0)
+                except Exception:
+                    logger.warning("Could not load requirement_status for facts: tender_id=%s", tender_id)
+
                 # Company profile facts (sro_ok, license_ok, funds_ok).
                 _co = await db.scalar(select(_Company).where(_Company.id == company_id))
                 if _co and isinstance(_co.profile, dict):
