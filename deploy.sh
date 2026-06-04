@@ -8,7 +8,7 @@
 # What it does:
 #   1. Computes IMAGE_TAG = date + git short hash (or explicit arg)
 #   2. Builds docker image with version build args
-#   3. Runs docker-compose up -d
+#   3. Runs docker compose up -d
 #   4. Tags the new image as :latest
 #
 # Environment: runs on the deploy host (RU server or local with Docker access).
@@ -28,7 +28,7 @@ export APP_VERSION_IMAGE="${IMAGE_TAG}"
 export APP_BUILT_AT_IMAGE="${APP_BUILT_AT}"
 
 echo "==> Building tender-ai-backend:${IMAGE_TAG}"
-docker-compose build \
+docker compose build \
   --build-arg APP_VERSION="${APP_VERSION}" \
   --build-arg APP_BUILT_AT="${APP_BUILT_AT}" \
   --build-arg APP_VERSION_IMAGE="${APP_VERSION_IMAGE}" \
@@ -41,7 +41,7 @@ echo "==> Tagged tender-ai-backend:latest"
 
 # ── Deploy ────────────────────────────────────────────────────────────────────
 echo "==> Starting services"
-docker-compose up -d
+docker compose up -d
 
 echo "==> Done. Running image: tender-ai-backend:${IMAGE_TAG}"
-docker-compose ps tender_ai_app
+docker compose ps tender_ai_app
