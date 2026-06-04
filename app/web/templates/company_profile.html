@@ -118,9 +118,19 @@
     </div>
   </section>
 
-  <!-- 7. Telegram-уведомления -->
+  <!-- 7. Лимиты (AI-расходы) -->
   <section class="card">
-    <h2>7. Telegram-уведомления</h2>
+    <h2>7. Лимиты AI-расходов</h2>
+    <div class="grid-form">
+      <label>Месячный лимит, $ <span class="hint">(0 или пусто — без лимита)</span>
+        <input type="number" id="f-limit-monthly-cost" min="0" step="0.01" placeholder="напр. 5.00" />
+      </label>
+    </div>
+  </section>
+
+  <!-- 8. Telegram-уведомления -->
+  <section class="card">
+    <h2>8. Telegram-уведомления</h2>
     <div class="grid-form" style="margin-bottom:12px">
       <label class="checkbox-label" style="grid-column:1/-1">
         <input type="checkbox" id="f-tg-enabled" onchange="toggleTelegram()" />
@@ -154,9 +164,9 @@
     </div>
   </section>
 
-  <!-- 8. Контактные данные -->
+  <!-- 9. Контактные данные -->
   <section class="card">
-    <h2>8. Контактные данные</h2>
+    <h2>9. Контактные данные</h2>
     <div class="grid-form">
       <label>Телефон
         <input type="tel" id="f-contact-phone" placeholder="+7 (999) 000-00-00" />
@@ -277,6 +287,9 @@
 
       regions = d.regions || [];
       renderRegions();
+
+      const lim = d.limits || {};
+      document.getElementById("f-limit-monthly-cost").value = lim.monthly_cost_usd ?? "";
 
       const tg = d.telegram || {};
       document.getElementById("f-tg-enabled").checked = !!tg.enabled;
@@ -419,6 +432,10 @@
         monthly_capacity: numOrNull("f-monthly-capacity"),
       },
       regions,
+      limits: {
+        monthly_cost_usd: document.getElementById("f-limit-monthly-cost").value !== ""
+          ? Number(document.getElementById("f-limit-monthly-cost").value) : null,
+      },
       telegram: {
         enabled:              document.getElementById("f-tg-enabled").checked,
         bot_token:            document.getElementById("f-tg-token").value.trim() || null,

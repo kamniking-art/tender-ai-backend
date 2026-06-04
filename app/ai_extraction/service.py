@@ -351,6 +351,39 @@ async def run_extraction(
         await db.commit()
         logger.info("deterministic nmck before AI: tender_id=%s nmck=%s", tender_id, _det_nmck)
 
+    # ── Monthly cost limit guard ──────────────────────────────────────────────
+    # Checked before AI call — reads profile["limits"]["monthly_cost_usd"].
+    # Non-fatal if DB query fails (just logs warning and proceeds).
+    try:
+        from sqlalchemy import func as _func
+        from datetime import timezone as _tz
+        from datetime import datetime as _dt
+        from app.models import Company as _Company
+
+        _co = await db.scalar(select(_Company).where(_Company.id == company_id))
+        if _co and isinstance(_co.profile, dict):
+            _cost_limit = (_co.profile.get("limits") or {}).get("monthly_cost_usd")
+            if _cost_limit is not None:
+                _month_start = _dt.now(_tz.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                _spent = await db.scalar(
+                    select(_func.coalesce(_func.sum(AICostLog.estimated_cost), 0))
+                    .where(
+                        AICostLog.company_id == company_id,
+                        AICostLog.created_at >= _month_start,
+                        AICostLog.status == "ok",
+                    )
+                ) or 0
+                if float(_spent) >= float(_cost_limit):
+                    raise ExtractionProviderError(
+                        "COST_LIMIT_EXCEEDED",
+                        f"Monthly AI cost limit ${float(_cost_limit):.2f} reached "
+                        f"(spent ${float(_spent):.4f} this month)",
+                    )
+    except ExtractionProviderError:
+        raise
+    except Exception:
+        logger.warning("Cost limit check failed for company_id=%s", company_id, exc_info=True)
+
     provider = get_extractor_provider()
     try:
         provider_result = await provider.extract(

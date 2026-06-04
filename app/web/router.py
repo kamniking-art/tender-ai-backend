@@ -2390,6 +2390,7 @@ class _CompanyFullProfileResponse(BaseModel):
     financial: dict = {}
     regions: list[str] = []
     documents: list[dict] = []
+    limits: dict = {}
 
 
 class _CompanyFullProfilePatch(BaseModel):
@@ -2406,6 +2407,7 @@ class _CompanyFullProfilePatch(BaseModel):
     financial: dict | None = None
     regions: list[str] | None = None
     documents: list[dict] | None = None
+    limits: dict | None = None
 
 
 def _build_company_full_response(company: Company) -> _CompanyFullProfileResponse:
@@ -2425,6 +2427,7 @@ def _build_company_full_response(company: Company) -> _CompanyFullProfileRespons
         financial=p.get("financial", {}),
         regions=p.get("regions", []),
         documents=p.get("documents", []),
+        limits=p.get("limits", {}),
     )
 
 
