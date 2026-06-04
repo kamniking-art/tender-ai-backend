@@ -460,7 +460,7 @@
     <label>Решение человека
       <select name="human_decision" style="padding:7px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px;background:#fff">
         <option value="">— выберите —</option>
-        {% for opt in [('strong_go','Однозначно участвуем'),('go','Участвуем'),('review','На рассмотрении'),('weak','Слабый интерес'),('no_go','Не участвуем')] %}
+        {% for opt in [('participate','Участвуем'),('skip','Не участвуем'),('deferred','Отложено')] %}
         <option value="{{ opt[0] }}" {{ 'selected' if agent_evaluation and agent_evaluation.human_decision == opt[0] else '' }}>{{ opt[1] }}</option>
         {% endfor %}
       </select>
@@ -468,7 +468,7 @@
     <label>Фактический результат
       <select name="actual_result" style="padding:7px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px;background:#fff">
         <option value="">— выберите —</option>
-        {% for opt in [('won','Победили'),('lost','Проиграли'),('submitted','Заявка подана'),('cancelled','Отменён'),('unknown','Неизвестно')] %}
+        {% for opt in [('won','Победили'),('lost','Проиграли'),('not_submitted','Заявка не подана'),('cancelled','Отменён')] %}
         <option value="{{ opt[0] }}" {{ 'selected' if agent_evaluation and agent_evaluation.actual_result == opt[0] else '' }}>{{ opt[1] }}</option>
         {% endfor %}
       </select>

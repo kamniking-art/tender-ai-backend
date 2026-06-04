@@ -1897,11 +1897,18 @@ async def web_upsert_evaluation(
         _dec = await db.scalar(
             select(_TD).where(_TD.company_id == current_user.company_id, _TD.tender_id == tender_id)
         )
+        # Map TenderDecision.recommendation → agent_recommendation_enum (go|no_go|needs_review)
+        _rec_map = {
+            "strong_go": "go", "go": "go",
+            "review": "needs_review", "weak": "needs_review", "unsure": "needs_review",
+            "no_go": "no_go",
+        }
+        _agent_rec = _rec_map.get(_dec.recommendation) if _dec and _dec.recommendation else None
         await upsert_evaluation(
             db,
             company_id=current_user.company_id,
             tender_id=tender_id,
-            agent_recommendation=_dec.recommendation if _dec else None,
+            agent_recommendation=_agent_rec,
             human_decision=human_decision.strip() or None,
             actual_result=actual_result.strip() or None,
             notes=notes.strip() or None,
