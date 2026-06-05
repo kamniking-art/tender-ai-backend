@@ -525,6 +525,13 @@ def compute_decision_engine_v1(
     # Prevent keyword-only tenders from reaching strong_go when relevance is weak
     if recommendation == "strong_go" and rel < 50:
         recommendation = "go"
+
+    # ── okved_match=False hard cap ────────────────────────────────────────────
+    # When OKVED explicitly doesn't match, operational bonuses (fresh/docs)
+    # must not override the profile mismatch → cap at review max (45)
+    if okved_match is False and recommendation in ("strong_go", "go"):
+        total_score = min(total_score, 45)
+        recommendation = "review"
     explanation = _build_recommendation_explanation(
         matched_keywords=matched_keywords,
         negative_keywords=negative_keywords,
