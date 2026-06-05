@@ -2791,6 +2791,11 @@ class _CompanyFullProfileResponse(BaseModel):
     regions: list[str] = []
     documents: list[dict] = []
     limits: dict = {}
+    # Business profile v1
+    service_regions: list[str] = []
+    min_nmck: int | None = None
+    max_nmck: int | None = None
+    max_active_projects: int | None = None
 
 
 class _CompanyFullProfilePatch(BaseModel):
@@ -2808,6 +2813,11 @@ class _CompanyFullProfilePatch(BaseModel):
     regions: list[str] | None = None
     documents: list[dict] | None = None
     limits: dict | None = None
+    # Business profile v1
+    service_regions: list[str] | None = None
+    min_nmck: int | None = None
+    max_nmck: int | None = None
+    max_active_projects: int | None = None
 
 
 def _build_company_full_response(company: Company) -> _CompanyFullProfileResponse:
@@ -2828,6 +2838,10 @@ def _build_company_full_response(company: Company) -> _CompanyFullProfileRespons
         regions=p.get("regions", []),
         documents=p.get("documents", []),
         limits=p.get("limits", {}),
+        service_regions=p.get("service_regions", []),
+        min_nmck=p.get("min_nmck"),
+        max_nmck=p.get("max_nmck"),
+        max_active_projects=p.get("max_active_projects"),
     )
 
 

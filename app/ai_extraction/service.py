@@ -603,6 +603,9 @@ async def run_extraction(
         _company = await db.scalar(select(Company).where(Company.id == company_id))
         _profile: dict = _company.profile if _company and isinstance(_company.profile, dict) else {}
         _checklist = _reqs if _reqs else RequirementNormalizer().normalize(extracted)
+        # Inject tender region so FitScorer._region() can match service_regions
+        if tender.region:
+            extracted._tender_region = tender.region
         _fit_result = FitScorer().score(_profile, _checklist, extracted)
         await upsert_fit_score(db, tender_id, company_id, _fit_result)
         if settings.feature_agent_actions and _fit_action is not None:

@@ -5,12 +5,16 @@ Rules:
   • aggregate fit_score = sum(component_score × weight), range 0–100.
   • None component → contributes 50 % of its weight (neutral / unknown).
 
-Component weights:
+Component weights (core):
   okved      25 %
   sro        20 %
   license    20 %
   experience 20 %
   finance    15 %
+
+Business profile v1 (additive penalty only, does not inflate score):
+  region_ok    — if False: -15 pts from final score
+  nmck_range_ok — if False: -15 pts from final score
 """
 from __future__ import annotations
 
@@ -72,6 +76,8 @@ class FitScorer:
         license_ok = self._license(profile, checklist)
         experience = self._experience(profile, checklist)
         finance    = self._finance(profile, extracted)
+        region_ok  = self._region(profile, extracted)
+        nmck_ok    = self._nmck_range(profile, extracted)
 
         fit_score = (
             # okved=None means profile has no okved_main → conservative 20% (not neutral 50%)
@@ -83,6 +89,12 @@ class FitScorer:
             + _component_points(finance,  _WEIGHTS["finance"])
         )
 
+        # Business profile v1 — penalty only, does not inflate score above base
+        if region_ok is False:
+            fit_score = max(0.0, fit_score - 15.0)
+        if nmck_ok is False:
+            fit_score = max(0.0, fit_score - 15.0)
+
         return FitScoreResult(
             components=FitScoreComponents(
                 okved=okved,
@@ -90,6 +102,8 @@ class FitScorer:
                 license=license_ok,
                 experience=experience,
                 finance=finance,
+                region_ok=region_ok,
+                nmck_range_ok=nmck_ok,
             ),
             fit_score=round(fit_score, 2),
         )
@@ -183,5 +197,55 @@ class FitScorer:
 
         try:
             return Decimal(str(available)) >= bid_amount
+        except Exception:
+            return None
+
+    # ── Business profile v1 ───────────────────────────────────────────────────
+
+    def _region(self, profile: dict, extracted: ExtractedTenderV1) -> bool | None:
+        """Return True if tender region is within company service_regions.
+
+        Returns None if service_regions is not configured (no penalty).
+        Returns False if configured and tender region doesn't match any entry.
+        """
+        service_regions: list[str] = profile.get("service_regions") or []
+        if not service_regions:
+            return None  # not configured → neutral
+
+        # ExtractedTenderV1 doesn't carry region — we check via tender.region
+        # which is not available here. Signal is injected by caller when available.
+        # When called without tender context, fall back to None (neutral).
+        tender_region: str | None = getattr(extracted, "_tender_region", None)
+        if not tender_region:
+            return None  # no region data to match
+
+        tender_region_lower = tender_region.lower()
+        for r in service_regions:
+            if r.lower() in tender_region_lower or tender_region_lower in r.lower():
+                return True
+        return False
+
+    def _nmck_range(self, profile: dict, extracted: ExtractedTenderV1) -> bool | None:
+        """Return True if tender NMCK is within company [min_nmck, max_nmck].
+
+        Returns None if neither bound is configured (no penalty).
+        Returns False if configured and NMCK is out of range.
+        """
+        min_nmck = profile.get("min_nmck")
+        max_nmck = profile.get("max_nmck")
+        if min_nmck is None and max_nmck is None:
+            return None  # not configured → neutral
+
+        nmck: Decimal | None = extracted.nmck
+        if nmck is None:
+            return None  # no NMCK to check
+
+        try:
+            nmck_dec = Decimal(str(nmck))
+            if min_nmck is not None and nmck_dec < Decimal(str(min_nmck)):
+                return False
+            if max_nmck is not None and nmck_dec > Decimal(str(max_nmck)):
+                return False
+            return True
         except Exception:
             return None

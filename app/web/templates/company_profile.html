@@ -164,9 +164,37 @@
     </div>
   </section>
 
-  <!-- 9. Контактные данные -->
+  <!-- 9. Операционный профиль (Business Profile v1) -->
   <section class="card">
-    <h2>9. Контактные данные</h2>
+    <h2>9. Операционный профиль</h2>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:14px">Ограничения учитываются при оценке тендеров — несоответствие снижает fit score.</p>
+    <div class="grid-form">
+      <label>Минимальная НМЦК, ₽
+        <input type="number" id="f-min-nmck" placeholder="Например: 100000" min="0" />
+      </label>
+      <label>Максимальная НМЦК, ₽
+        <input type="number" id="f-max-nmck" placeholder="Например: 10000000" min="0" />
+      </label>
+      <label>Максимум одновременных проектов
+        <input type="number" id="f-max-active-projects" placeholder="Например: 5" min="1" />
+      </label>
+    </div>
+    <div style="margin-top:14px">
+      <label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">Рабочие регионы</label>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:8px">Тендеры из других регионов получат штраф. Оставьте пустым = работаем везде.</p>
+      <div id="service-regions-list" class="tag-list"></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <input type="text" id="f-service-region-input" placeholder="Введите регион и нажмите +"
+               style="flex:1;padding:7px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();addServiceRegion()}" />
+        <button type="button" class="btn-secondary" onclick="addServiceRegion()">+ Добавить</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10. Контактные данные -->
+  <section class="card">
+    <h2>10. Контактные данные</h2>
     <div class="grid-form">
       <label>Телефон
         <input type="tel" id="f-contact-phone" placeholder="+7 (999) 000-00-00" />
@@ -243,6 +271,7 @@
   let okvedAdditional = [];
   let licenses = [];
   let regions = [];
+  let serviceRegions = [];
 
   // ── Load data ────────────────────────────────────────────────────────────────
   async function loadProfile() {
@@ -290,6 +319,13 @@
 
       const lim = d.limits || {};
       document.getElementById("f-limit-monthly-cost").value = lim.monthly_cost_usd ?? "";
+
+      // Business profile v1
+      document.getElementById("f-min-nmck").value            = d.min_nmck ?? "";
+      document.getElementById("f-max-nmck").value            = d.max_nmck ?? "";
+      document.getElementById("f-max-active-projects").value = d.max_active_projects ?? "";
+      serviceRegions = d.service_regions || [];
+      renderServiceRegions();
 
       const tg = d.telegram || {};
       document.getElementById("f-tg-enabled").checked = !!tg.enabled;
@@ -381,6 +417,20 @@
   function removeRegion(i) { regions.splice(i, 1); renderRegions(); }
   document.getElementById("region-input").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); addRegion(); } });
 
+  function renderServiceRegions() {
+    const el = document.getElementById("service-regions-list");
+    el.innerHTML = serviceRegions.map((r, i) =>
+      `<span class="tag">${r}<button type="button" onclick="removeServiceRegion(${i})" title="Удалить">×</button></span>`
+    ).join("");
+  }
+  function addServiceRegion() {
+    const inp = document.getElementById("f-service-region-input");
+    const val = inp.value.trim();
+    if (val && !serviceRegions.includes(val)) { serviceRegions.push(val); renderServiceRegions(); }
+    inp.value = "";
+  }
+  function removeServiceRegion(i) { serviceRegions.splice(i, 1); renderServiceRegions(); }
+
   // ── Валидация ─────────────────────────────────────────────────────────────────
   function validateField(id, errId, regex, msg) {
     const val = document.getElementById(id).value.trim();
@@ -432,6 +482,11 @@
         monthly_capacity: numOrNull("f-monthly-capacity"),
       },
       regions,
+      // Business profile v1
+      service_regions: serviceRegions,
+      min_nmck: numOrNull("f-min-nmck"),
+      max_nmck: numOrNull("f-max-nmck"),
+      max_active_projects: numOrNull("f-max-active-projects"),
       limits: {
         monthly_cost_usd: document.getElementById("f-limit-monthly-cost").value !== ""
           ? Number(document.getElementById("f-limit-monthly-cost").value) : null,

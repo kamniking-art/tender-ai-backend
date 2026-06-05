@@ -16,6 +16,9 @@ class FitScoreComponents(BaseModel):
     license: bool | None
     experience: bool | None
     finance: bool | None
+    # Business profile v1 — optional, None = not configured
+    region_ok: bool | None = None   # tender region in company service_regions
+    nmck_range_ok: bool | None = None  # tender nmck within [min_nmck, max_nmck]
 
 
 class FitScoreResult(BaseModel):
