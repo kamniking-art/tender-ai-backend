@@ -712,6 +712,24 @@ async def recompute_decision_engine_v1(
         if _cfs_early is not None:
             _fit_score = float(_cfs_early.fit_score) if _cfs_early.fit_score is not None else None
             _okved_match = _cfs_early.okved_match
+        else:
+            # fit_score record missing — run FitScorer inline (best-effort)
+            try:
+                from app.fit_score.scorer import FitScorer as _FitScorer
+                from app.fit_score.service import upsert_fit_score as _upsert_fs
+                from app.models import Company as _CompanyFS
+                from app.requirements.normalizer import RequirementNormalizer as _RN
+                _company_fs = await db.scalar(select(_CompanyFS).where(_CompanyFS.id == company_id))
+                _profile_fs: dict = _company_fs.profile if _company_fs and isinstance(_company_fs.profile, dict) else {}
+                _extracted_fs = _extract_extracted(analysis)
+                _checklist_fs = _RN().normalize(_extracted_fs) if _extracted_fs else []
+                _fit_result = _FitScorer().score(_profile_fs, _checklist_fs, _extracted_fs or type("_E", (), {"bid_security_amount": None, "subject": None, "qualification_requirements": [], "sro_required": None, "licenses": []})())
+                await _upsert_fs(db, tender_id, company_id, _fit_result)
+                _fit_score = float(_fit_result.fit_score)
+                _okved_match = _fit_result.components.okved
+                logger.info("fit_score recomputed inline: tender_id=%s fit_score=%.1f okved=%s", tender_id, _fit_score, _okved_match)
+            except Exception:
+                logger.warning("Could not recompute fit_score inline: tender_id=%s", tender_id)
     except Exception:
         logger.warning("Could not load fit_score for decision engine: tender_id=%s", tender_id)
 
