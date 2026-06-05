@@ -1986,6 +1986,7 @@ async def eval_label_page(
             Tender.nmck,
             _TDec.recommendation,
             _TED.expected_decision,
+            _TED.reason,
         )
         .join(_TA, (_TA.tender_id == Tender.id) & (_TA.company_id == company_id))
         .outerjoin(_TDec, (_TDec.tender_id == Tender.id) & (_TDec.company_id == company_id))
