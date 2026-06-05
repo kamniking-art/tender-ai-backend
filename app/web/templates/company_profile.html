@@ -108,19 +108,9 @@
     </div>
   </section>
 
-  <!-- 6. Регионы -->
+  <!-- 6. Лимиты (AI-расходы) -->
   <section class="card">
-    <h2>6. Регионы работы</h2>
-    <div id="regions-list" class="tag-list"></div>
-    <div class="row-add">
-      <input type="text" id="region-input" placeholder="Добавить регион, напр. Москва" />
-      <button type="button" class="btn-secondary" onclick="addRegion()">+ Добавить</button>
-    </div>
-  </section>
-
-  <!-- 7. Лимиты (AI-расходы) -->
-  <section class="card">
-    <h2>7. Лимиты AI-расходов</h2>
+    <h2>6. Лимиты AI-расходов</h2>
     <div class="grid-form">
       <label>Месячный лимит, $ <span class="hint">(0 или пусто — без лимита)</span>
         <input type="number" id="f-limit-monthly-cost" min="0" step="0.01" placeholder="напр. 5.00" />
@@ -130,7 +120,7 @@
 
   <!-- 8. Telegram-уведомления -->
   <section class="card">
-    <h2>8. Telegram-уведомления</h2>
+    <h2>7. Telegram-уведомления</h2>
     <div class="grid-form" style="margin-bottom:12px">
       <label class="checkbox-label" style="grid-column:1/-1">
         <input type="checkbox" id="f-tg-enabled" onchange="toggleTelegram()" />
@@ -166,7 +156,7 @@
 
   <!-- 9. Операционный профиль (Business Profile v1) -->
   <section class="card">
-    <h2>9. Операционный профиль</h2>
+    <h2>8. Операционный профиль</h2>
     <p style="font-size:13px;color:var(--muted);margin-bottom:14px">Ограничения учитываются при оценке тендеров — несоответствие снижает fit score.</p>
     <div class="grid-form">
       <label>Минимальная НМЦК, ₽
@@ -205,7 +195,7 @@
 
   <!-- 10. Контактные данные -->
   <section class="card">
-    <h2>10. Контактные данные</h2>
+    <h2>9. Контактные данные</h2>
     <div class="grid-form">
       <label>Телефон
         <input type="tel" id="f-contact-phone" placeholder="+7 (999) 000-00-00" />
