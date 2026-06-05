@@ -1388,6 +1388,60 @@ async def ops_dashboard_page(
     except Exception:
         logger.warning("ops_dashboard: agent_accuracy query failed", exc_info=True)
 
+    # ── Eval dataset FALSE GO / FALSE NO_GO rates per company ─────────────────
+    eval_dataset_metrics: list[dict] = []
+    try:
+        from app.eval_dataset.model import TenderEvalDataset as _TED_ops
+        from app.tender_decisions.model import TenderDecision as _TDec_ops
+        from sqlalchemy import case as _case, func as _func_ops
+
+        if not companies_all:
+            companies_all = list((await db.scalars(select(Company))).all())
+
+        for _co in companies_all:
+            _total = await db.scalar(
+                select(_func_ops.count())
+                .select_from(_TED_ops)
+                .where(_TED_ops.company_id == _co.id)
+            ) or 0
+            if _total == 0:
+                continue
+
+            # false_go: labeled no_go but agent said go/strong_go
+            _false_go = await db.scalar(
+                select(_func_ops.count())
+                .select_from(_TED_ops)
+                .join(_TDec_ops, (_TDec_ops.tender_id == _TED_ops.tender_id) & (_TDec_ops.company_id == _TED_ops.company_id))
+                .where(
+                    _TED_ops.company_id == _co.id,
+                    _TED_ops.expected_decision == "no_go",
+                    _TDec_ops.recommendation.in_(["go", "strong_go"]),
+                )
+            ) or 0
+
+            # false_no_go: labeled go but agent said no_go/weak/unsure
+            _false_no_go = await db.scalar(
+                select(_func_ops.count())
+                .select_from(_TED_ops)
+                .join(_TDec_ops, (_TDec_ops.tender_id == _TED_ops.tender_id) & (_TDec_ops.company_id == _TED_ops.company_id))
+                .where(
+                    _TED_ops.company_id == _co.id,
+                    _TED_ops.expected_decision == "go",
+                    _TDec_ops.recommendation.in_(["no_go", "weak", "unsure"]),
+                )
+            ) or 0
+
+            eval_dataset_metrics.append({
+                "company_name": _co.name or str(_co.id),
+                "total_labeled": _total,
+                "false_go": _false_go,
+                "false_no_go": _false_no_go,
+                "false_go_rate": round(_false_go / _total * 100, 1) if _total else None,
+                "false_no_go_rate": round(_false_no_go / _total * 100, 1) if _total else None,
+            })
+    except Exception:
+        logger.warning("ops_dashboard: eval_dataset_metrics query failed", exc_info=True)
+
     return templates.TemplateResponse(
         "ops_dashboard.html",
         _template_context(
@@ -1397,6 +1451,7 @@ async def ops_dashboard_page(
             queue_backlog=queue_backlog,
             cost_limits=list(cost_limits.values()),
             agent_accuracy=agent_accuracy,
+            eval_dataset_metrics=eval_dataset_metrics,
         ),
     )
 

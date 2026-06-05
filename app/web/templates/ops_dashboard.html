@@ -238,6 +238,49 @@
   {% endif %}
 </section>
 
+<!-- ── Eval Dataset: FALSE GO / FALSE NO_GO rates ──────────────────────── -->
+<section>
+  <h2>Eval Dataset — ошибки агента</h2>
+  <p class="subtitle">
+    <b>FALSE GO</b> = агент сказал участвовать, человек решил нет (опасные ошибки) ·
+    <b>FALSE NO_GO</b> = агент отказал, человек решил участвовать (упущенная выгода)
+  </p>
+  {% if eval_dataset_metrics %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Компания</th>
+          <th>Размечено</th>
+          <th>FALSE GO</th>
+          <th>FALSE GO rate</th>
+          <th>FALSE NO_GO</th>
+          <th>FALSE NO_GO rate</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in eval_dataset_metrics %}
+        <tr>
+          <td class="name-cell">{{ row.company_name }}</td>
+          <td>{{ row.total_labeled }}</td>
+          <td>{{ row.false_go }}</td>
+          <td class="{% if row.false_go_rate is not none %}{% if row.false_go_rate <= 5 %}ok{% elif row.false_go_rate <= 15 %}warn{% else %}danger{% endif %}{% endif %}">
+            {{ row.false_go_rate if row.false_go_rate is not none else '—' }}{% if row.false_go_rate is not none %}%{% endif %}
+          </td>
+          <td>{{ row.false_no_go }}</td>
+          <td class="{% if row.false_no_go_rate is not none %}{% if row.false_no_go_rate <= 10 %}ok{% elif row.false_no_go_rate <= 20 %}warn{% else %}danger{% endif %}{% endif %}">
+            {{ row.false_no_go_rate if row.false_no_go_rate is not none else '—' }}{% if row.false_no_go_rate is not none %}%{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">Нет данных — eval dataset пуст.</p>
+  {% endif %}
+</section>
+
 <style>
   .subtitle { color: var(--muted); margin-bottom: 24px; font-size: 14px; }
   h2 { font-size: 16px; margin-bottom: 14px; color: var(--accent); }
