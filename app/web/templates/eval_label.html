@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Разметка датасета | Tender AI{% endblock %}
+{% block content %}
+<h1>Разметка eval dataset</h1>
+
+<div class="label-toolbar">
+  <div class="label-stats">
+    Размечено: <strong>{{ labeled_count }}</strong> из <strong>{{ total_count }}</strong>
+    {% if total_count > 0 %}
+    <span class="label-pct">({{ (labeled_count / total_count * 100) | round(1) }}%)</span>
+    {% endif %}
+  </div>
+  <div class="label-filters">
+    <a href="?filter=unlabeled&page=1" class="filter-btn {% if filter == 'unlabeled' %}active{% endif %}">Не размечены</a>
+    <a href="?filter=all&page=1" class="filter-btn {% if filter == 'all' %}active{% endif %}">Все тендеры</a>
+  </div>
+</div>
+
+{% if rows %}
+<div class="table-wrap">
+<table class="label-table">
+  <thead>
+    <tr>
+      <th>Тендер</th>
+      <th>НМЦК</th>
+      <th>Агент</th>
+      <th>Разметка</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for row in rows %}
+  <tr class="{% if row.expected_decision == 'go' %}row-go{% elif row.expected_decision == 'no_go' %}row-nogo{% elif row.expected_decision == 'review' %}row-review{% endif %}">
+    <td class="col-title">
+      <a href="/web/tenders/{{ row.tender_id }}" class="tender-link" target="_blank">
+        {{ row.title or '—' }}
+      </a>
+      {% if row.customer_name %}<div class="tender-customer">{{ row.customer_name }}</div>{% endif %}
+    </td>
+    <td class="col-nmck">
+      {% if row.nmck %}{{ '{:,.0f}'.format(row.nmck).replace(',', ' ') }} ₽{% else %}—{% endif %}
+    </td>
+    <td class="col-agent">
+      {% if row.recommendation %}
+        <span class="badge badge-{{ row.recommendation }}">{{ row.recommendation }}</span>
+      {% else %}—{% endif %}
+    </td>
+    <td class="col-mark">
+      <div class="mark-buttons">
+        <form method="post" action="/web/eval-dataset/label/{{ row.tender_id }}/mark" style="display:inline">
+          <input type="hidden" name="expected_decision" value="go">
+          <input type="hidden" name="page" value="{{ page }}">
+          <input type="hidden" name="filter" value="{{ filter }}">
+          <button type="submit" class="mark-btn btn-go {% if row.expected_decision == 'go' %}active{% endif %}">✓ go</button>
+        </form>
+        <form method="post" action="/web/eval-dataset/label/{{ row.tender_id }}/mark" style="display:inline">
+          <input type="hidden" name="expected_decision" value="no_go">
+          <input type="hidden" name="page" value="{{ page }}">
+          <input type="hidden" name="filter" value="{{ filter }}">
+          <button type="submit" class="mark-btn btn-nogo {% if row.expected_decision == 'no_go' %}active{% endif %}">✗ no_go</button>
+        </form>
+        <form method="post" action="/web/eval-dataset/label/{{ row.tender_id }}/mark" style="display:inline">
+          <input type="hidden" name="expected_decision" value="review">
+          <input type="hidden" name="page" value="{{ page }}">
+          <input type="hidden" name="filter" value="{{ filter }}">
+          <button type="submit" class="mark-btn btn-review {% if row.expected_decision == 'review' %}active{% endif %}">? review</button>
+        </form>
+      </div>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<div class="pagination">
+  {% if page > 1 %}
+  <a href="?filter={{ filter }}&page={{ page - 1 }}" class="page-btn">← Предыдущая</a>
+  {% else %}
+  <span class="page-btn disabled">← Предыдущая</span>
+  {% endif %}
+  <span class="page-info">Страница {{ page }} · показано {{ rows | length }}</span>
+  {% if has_next %}
+  <a href="?filter={{ filter }}&page={{ page + 1 }}" class="page-btn">Следующая →</a>
+  {% else %}
+  <span class="page-btn disabled">Следующая →</span>
+  {% endif %}
+</div>
+
+{% else %}
+<p class="empty-state">
+  {% if filter == 'unlabeled' %}Все тендеры размечены! Переключитесь на «Все тендеры» для просмотра.
+  {% else %}Нет тендеров с анализом.{% endif %}
+</p>
+{% endif %}
+
+<style>
+.label-toolbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:12px; }
+.label-stats { font-size:14px; color:var(--text); }
+.label-pct { color:var(--muted); margin-left:4px; }
+.label-filters { display:flex; gap:8px; }
+.filter-btn { padding:6px 14px; border:1px solid var(--line); border-radius:20px; font-size:13px; text-decoration:none; color:var(--text); background:#fff; }
+.filter-btn.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+.label-table { width:100%; border-collapse:collapse; font-size:13px; }
+.label-table th { text-align:left; padding:8px 12px; background:var(--accent-soft); color:var(--accent); font-weight:600; border-bottom:2px solid var(--line); white-space:nowrap; }
+.label-table td { padding:8px 12px; border-bottom:1px solid var(--line); vertical-align:middle; }
+.label-table tr:hover td { background:#f8faff; }
+.col-title { max-width:380px; }
+.col-nmck { white-space:nowrap; color:var(--text); min-width:110px; }
+.col-agent { min-width:80px; }
+.col-mark { min-width:220px; }
+.tender-link { color:var(--accent); text-decoration:none; font-weight:500; }
+.tender-link:hover { text-decoration:underline; }
+.tender-customer { font-size:11px; color:var(--muted); margin-top:2px; }
+.mark-buttons { display:flex; gap:6px; }
+.mark-btn { padding:4px 10px; border-radius:4px; border:1px solid; font-size:12px; font-weight:600; cursor:pointer; opacity:0.6; transition:opacity .15s, transform .1s; }
+.mark-btn:hover { opacity:1; transform:scale(1.05); }
+.mark-btn.active { opacity:1; box-shadow:0 0 0 2px currentColor; }
+.btn-go { background:#dcfce7; border-color:#86efac; color:#166534; }
+.btn-nogo { background:#fee2e2; border-color:#fca5a5; color:#991b1b; }
+.btn-review { background:#fef9c3; border-color:#fde047; color:#854d0e; }
+.row-go td { background:#f0fdf4; }
+.row-nogo td { background:#fff5f5; }
+.row-review td { background:#fefce8; }
+.badge { padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; }
+.badge-go, .badge-strong_go, .badge-weak_go { background:#dcfce7; color:#166534; }
+.badge-no_go { background:#fee2e2; color:#991b1b; }
+.badge-review, .badge-needs_review, .badge-unsure { background:#fef9c3; color:#854d0e; }
+.pagination { display:flex; justify-content:center; align-items:center; gap:16px; margin-top:24px; }
+.page-btn { padding:7px 18px; border:1px solid var(--line); border-radius:6px; font-size:13px; text-decoration:none; color:var(--text); background:#fff; }
+.page-btn.disabled { opacity:0.4; pointer-events:none; }
+.page-btn:not(.disabled):hover { background:var(--accent-soft); }
+.page-info { font-size:13px; color:var(--muted); }
+.empty-state { color:var(--muted); font-size:14px; margin-top:32px; }
+</style>
+{% endblock %}

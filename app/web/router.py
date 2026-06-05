@@ -1958,6 +1958,115 @@ async def web_upsert_evaluation(
     return RedirectResponse(url=f"/web/tenders/{tender_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
+@router.get("/eval-dataset/label")
+async def eval_label_page(
+    request: Request,
+    filter: str = "unlabeled",
+    page: int = 1,
+    current_user: User = Depends(get_current_user_from_cookie),
+    db: AsyncSession = Depends(get_db),
+):
+    """Quick-labeling page for eval dataset — 50 tenders per page with inline mark buttons."""
+    from app.eval_dataset.model import TenderEvalDataset as _TED
+    from app.tender_decisions.model import TenderDecision as _TDec
+    from app.tender_analysis.model import TenderAnalysis as _TA
+    from sqlalchemy import func as _func, outerjoin
+
+    page_size = 50
+    offset = (page - 1) * page_size
+    company_id = current_user.company_id
+
+    # Base: tenders with analysis for this company
+    base_q = (
+        select(
+            Tender.id.label("tender_id"),
+            Tender.title,
+            Tender.customer_name,
+            Tender.nmck,
+            _TDec.recommendation,
+            _TED.expected_decision,
+        )
+        .join(_TA, (_TA.tender_id == Tender.id) & (_TA.company_id == company_id))
+        .outerjoin(_TDec, (_TDec.tender_id == Tender.id) & (_TDec.company_id == company_id))
+        .outerjoin(_TED, (_TED.tender_id == Tender.id) & (_TED.company_id == company_id))
+        .where(Tender.company_id == company_id)
+    )
+
+    if filter == "unlabeled":
+        base_q = base_q.where(_TED.id.is_(None))
+
+    total_q = select(_func.count()).select_from(base_q.subquery())
+    total_count = (await db.scalar(total_q)) or 0
+
+    labeled_q = (
+        select(_func.count())
+        .select_from(_TED)
+        .where(_TED.company_id == company_id)
+    )
+    labeled_count = (await db.scalar(labeled_q)) or 0
+
+    rows_result = await db.execute(
+        base_q.order_by(Tender.created_at.desc()).offset(offset).limit(page_size)
+    )
+    rows = [row._asdict() for row in rows_result]
+    has_next = (offset + page_size) < total_count
+
+    return templates.TemplateResponse(
+        "eval_label.html",
+        _template_context(
+            request, current_user,
+            rows=rows,
+            filter=filter,
+            page=page,
+            has_next=has_next,
+            total_count=total_count,
+            labeled_count=labeled_count,
+        ),
+    )
+
+
+@router.post("/eval-dataset/label/{tender_id}/mark")
+async def eval_label_mark(
+    tender_id: UUID,
+    expected_decision: str = Form(...),
+    page: int = Form(default=1),
+    filter: str = Form(default="unlabeled"),
+    current_user: User = Depends(get_current_user_from_cookie),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upsert a single eval dataset label and redirect back to the same page."""
+    try:
+        from app.eval_dataset.model import TenderEvalDataset as _TED
+        from datetime import datetime, timezone
+        import uuid as _uuid
+        now = datetime.now(timezone.utc)
+        existing = await db.scalar(
+            select(_TED).where(
+                _TED.tender_id == tender_id,
+                _TED.company_id == current_user.company_id,
+            )
+        )
+        if existing:
+            existing.expected_decision = expected_decision.strip()
+            existing.updated_at = now
+        else:
+            db.add(_TED(
+                id=_uuid.uuid4(),
+                tender_id=tender_id,
+                company_id=current_user.company_id,
+                expected_decision=expected_decision.strip(),
+                created_at=now,
+                updated_at=now,
+            ))
+        await db.commit()
+    except Exception:
+        logger.exception("eval_label_mark: failed for tender_id=%s", tender_id)
+    return RedirectResponse(
+        url=f"/web/eval-dataset/label?filter={filter}&page={page}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 @router.post("/tenders/{tender_id}/eval-dataset")
 async def web_upsert_eval_dataset(
     tender_id: UUID,
