@@ -1323,7 +1323,7 @@ async def web_apply_template(
     template_key = str(form.get("template_key", ""))
     if template_key and template_key in POLICY_TEMPLATES:
         await apply_template(db, current_user.company_id, template_key)
-    return RedirectResponse(url="/policies", status_code=303)
+    return RedirectResponse(url="/web/policies", status_code=303)
 
 
 @router.get("/ops")
