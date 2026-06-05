@@ -95,7 +95,12 @@ async def generate_clarification_questions(
                 },
                 json=payload,
             )
-            response.raise_for_status()
+            if not response.is_success:
+                logger.error(
+                    "clarification_ai: API error %s — %s",
+                    response.status_code, response.text[:500],
+                )
+                response.raise_for_status()
             data = response.json()
 
         raw_text = data.get("content", [{}])[0].get("text", "")
