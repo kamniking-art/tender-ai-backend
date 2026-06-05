@@ -1962,6 +1962,7 @@ async def web_upsert_evaluation(
 async def eval_label_page(
     request: Request,
     filter: str = "unlabeled",
+    rec: str = "",
     page: int = 1,
     current_user: User = Depends(get_current_user_from_cookie),
     db: AsyncSession = Depends(get_db),
@@ -1995,6 +1996,10 @@ async def eval_label_page(
     if filter == "unlabeled":
         base_q = base_q.where(_TED.id.is_(None))
 
+    _VALID_RECS = {"strong_go", "go", "review", "no_go", "weak", "unsure"}
+    if rec and rec in _VALID_RECS:
+        base_q = base_q.where(_TDec.recommendation == rec)
+
     total_q = select(_func.count()).select_from(base_q.subquery())
     total_count = (await db.scalar(total_q)) or 0
 
@@ -2026,6 +2031,7 @@ async def eval_label_page(
             request, current_user,
             rows=rows,
             filter=filter,
+            rec=rec,
             page=page,
             has_next=has_next,
             total_count=total_count,
@@ -2040,6 +2046,7 @@ async def eval_label_mark(
     expected_decision: str = Form(...),
     page: int = Form(default=1),
     filter: str = Form(default="unlabeled"),
+    rec: str = Form(default=""),
     current_user: User = Depends(get_current_user_from_cookie),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2070,8 +2077,9 @@ async def eval_label_mark(
         await db.commit()
     except Exception:
         logger.exception("eval_label_mark: failed for tender_id=%s", tender_id)
+    _rec_qs = f"&rec={rec}" if rec else ""
     return RedirectResponse(
-        url=f"/web/eval-dataset/label?filter={filter}&page={page}",
+        url=f"/web/eval-dataset/label?filter={filter}&page={page}{_rec_qs}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
 

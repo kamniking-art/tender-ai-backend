@@ -11,9 +11,18 @@
     {% endif %}
   </div>
   <div class="label-filters">
-    <a href="?filter=unlabeled&page=1" class="filter-btn {% if filter == 'unlabeled' %}active{% endif %}">Не размечены</a>
-    <a href="?filter=all&page=1" class="filter-btn {% if filter == 'all' %}active{% endif %}">Все тендеры</a>
+    <a href="?filter=unlabeled&rec={{ rec }}&page=1" class="filter-btn {% if filter == 'unlabeled' %}active{% endif %}">Не размечены</a>
+    <a href="?filter=all&rec={{ rec }}&page=1" class="filter-btn {% if filter == 'all' %}active{% endif %}">Все тендеры</a>
   </div>
+</div>
+
+<div class="rec-filters">
+  <span class="rec-label">Агент:</span>
+  {% set rec_list = [('', 'Все'), ('strong_go', 'strong_go'), ('go', 'go'), ('review', 'review'), ('no_go', 'no_go'), ('weak', 'weak'), ('unsure', 'unsure')] %}
+  {% for val, label in rec_list %}
+  <a href="?filter={{ filter }}&rec={{ val }}&page=1"
+     class="rec-btn rec-{{ val if val else 'all' }} {% if rec == val %}active{% endif %}">{{ label }}</a>
+  {% endfor %}
 </div>
 
 {% if rows %}
@@ -50,18 +59,21 @@
           <input type="hidden" name="expected_decision" value="go">
           <input type="hidden" name="page" value="{{ page }}">
           <input type="hidden" name="filter" value="{{ filter }}">
+          <input type="hidden" name="rec" value="{{ rec }}">
           <button type="submit" class="mark-btn btn-go {% if row.expected_decision == 'go' %}active{% endif %}">✓ go</button>
         </form>
         <form method="post" action="/web/eval-dataset/label/{{ row.tender_id }}/mark" style="display:inline">
           <input type="hidden" name="expected_decision" value="no_go">
           <input type="hidden" name="page" value="{{ page }}">
           <input type="hidden" name="filter" value="{{ filter }}">
+          <input type="hidden" name="rec" value="{{ rec }}">
           <button type="submit" class="mark-btn btn-nogo {% if row.expected_decision == 'no_go' %}active{% endif %}">✗ no_go</button>
         </form>
         <form method="post" action="/web/eval-dataset/label/{{ row.tender_id }}/mark" style="display:inline">
           <input type="hidden" name="expected_decision" value="review">
           <input type="hidden" name="page" value="{{ page }}">
           <input type="hidden" name="filter" value="{{ filter }}">
+          <input type="hidden" name="rec" value="{{ rec }}">
           <button type="submit" class="mark-btn btn-review {% if row.expected_decision == 'review' %}active{% endif %}">? review</button>
         </form>
       </div>
@@ -74,13 +86,13 @@
 
 <div class="pagination">
   {% if page > 1 %}
-  <a href="?filter={{ filter }}&page={{ page - 1 }}" class="page-btn">← Предыдущая</a>
+  <a href="?filter={{ filter }}&rec={{ rec }}&page={{ page - 1 }}" class="page-btn">← Предыдущая</a>
   {% else %}
   <span class="page-btn disabled">← Предыдущая</span>
   {% endif %}
   <span class="page-info">Страница {{ page }} · показано {{ rows | length }}</span>
   {% if has_next %}
-  <a href="?filter={{ filter }}&page={{ page + 1 }}" class="page-btn">Следующая →</a>
+  <a href="?filter={{ filter }}&rec={{ rec }}&page={{ page + 1 }}" class="page-btn">Следующая →</a>
   {% else %}
   <span class="page-btn disabled">Следующая →</span>
   {% endif %}
@@ -94,7 +106,17 @@
 {% endif %}
 
 <style>
-.label-toolbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:12px; }
+.label-toolbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:12px; }
+.rec-filters { display:flex; align-items:center; gap:6px; margin-bottom:18px; flex-wrap:wrap; }
+.rec-label { font-size:12px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.04em; margin-right:2px; }
+.rec-btn { padding:4px 10px; border:1px solid var(--line); border-radius:12px; font-size:12px; font-weight:600; text-decoration:none; color:var(--muted); background:#fff; }
+.rec-btn:hover { border-color:var(--accent); color:var(--accent); }
+.rec-btn.active { color:#fff; border-color:transparent; }
+.rec-btn.rec-all.active { background:var(--accent); }
+.rec-btn.rec-strong_go.active, .rec-btn.rec-go.active { background:#166534; }
+.rec-btn.rec-no_go.active { background:#991b1b; }
+.rec-btn.rec-review.active { background:#854d0e; }
+.rec-btn.rec-weak.active, .rec-btn.rec-unsure.active { background:#475569; }
 .label-stats { font-size:14px; color:var(--text); }
 .label-pct { color:var(--muted); margin-left:4px; }
 .label-filters { display:flex; gap:8px; }
