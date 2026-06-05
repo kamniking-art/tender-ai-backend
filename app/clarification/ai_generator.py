@@ -76,8 +76,14 @@ async def generate_clarification_questions(
         text=truncated,
     )
 
+    # Route through Warsaw proxy to bypass RU IP block on Anthropic API
+    import os as _os
+    warsaw_url = _os.environ.get("WARSAW_EXTRACTOR_URL", "http://51.68.136.181:8091")
+    warsaw_token = _os.environ.get("WARSAW_API_TOKEN", "")
+    proxy_url = f"{warsaw_url.rstrip('/')}/claude/messages"
+
     payload = {
-        "model": settings.ai_extractor_model or "claude-3-5-sonnet-20241022",
+        "model": "claude-opus-4-5",
         "max_tokens": 1000,
         "temperature": 0,
         "system": SYSTEM_PROMPT,
@@ -85,12 +91,11 @@ async def generate_clarification_questions(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(
-                "https://api.anthropic.com/v1/messages",
+                proxy_url,
                 headers={
-                    "x-api-key": settings.ai_extractor_api_key,
-                    "anthropic-version": "2023-06-01",
+                    "Authorization": f"Bearer {warsaw_token}",
                     "content-type": "application/json",
                 },
                 json=payload,
