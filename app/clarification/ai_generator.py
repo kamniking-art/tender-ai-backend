@@ -77,7 +77,7 @@ async def generate_clarification_questions(
     )
 
     payload = {
-        "model": getattr(settings, "ai_model", "claude-haiku-4-5-20251001"),
+        "model": settings.ai_extractor_model or "claude-3-5-sonnet-20241022",
         "max_tokens": 1000,
         "temperature": 0,
         "system": SYSTEM_PROMPT,
