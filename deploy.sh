@@ -35,9 +35,16 @@ docker compose build \
   --build-arg APP_BUILT_AT_IMAGE="${APP_BUILT_AT_IMAGE}" \
   tender_ai_app
 
-# ── Tag as latest ─────────────────────────────────────────────────────────────
+# ── Tag as latest and local ───────────────────────────────────────────────────
 docker tag "tender-ai-backend:${IMAGE_TAG}" "tender-ai-backend:latest"
 echo "==> Tagged tender-ai-backend:latest"
+# :local keeps docker-compose.yml default (IMAGE_TAG:-local) in sync
+docker tag "tender-ai-backend:${IMAGE_TAG}" "tender-ai-backend:local"
+echo "==> Tagged tender-ai-backend:local"
+
+# ── Run pending migrations ─────────────────────────────────────────────────────
+echo "==> Running alembic upgrade head"
+docker compose run --rm --no-deps tender_ai_app alembic upgrade head
 
 # ── Deploy (app only — never recreate DB to avoid auth drift) ─────────────────
 echo "==> Restarting tender_ai_app only"
