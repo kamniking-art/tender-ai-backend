@@ -2796,6 +2796,9 @@ class _CompanyFullProfileResponse(BaseModel):
     min_nmck: int | None = None
     max_nmck: int | None = None
     max_active_projects: int | None = None
+    # Capacity profile v1
+    active_projects_count: int | None = None
+    work_all_regions: bool = False
 
 
 class _CompanyFullProfilePatch(BaseModel):
@@ -2818,6 +2821,9 @@ class _CompanyFullProfilePatch(BaseModel):
     min_nmck: int | None = None
     max_nmck: int | None = None
     max_active_projects: int | None = None
+    # Capacity profile v1
+    active_projects_count: int | None = None
+    work_all_regions: bool | None = None
 
 
 def _build_company_full_response(company: Company) -> _CompanyFullProfileResponse:
@@ -2842,6 +2848,8 @@ def _build_company_full_response(company: Company) -> _CompanyFullProfileRespons
         min_nmck=p.get("min_nmck"),
         max_nmck=p.get("max_nmck"),
         max_active_projects=p.get("max_active_projects"),
+        active_projects_count=p.get("active_projects_count"),
+        work_all_regions=bool(p.get("work_all_regions", False)),
     )
 
 

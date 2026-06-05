@@ -13,8 +13,18 @@ Component weights (core):
   finance    15 %
 
 Business profile v1 (additive penalty only, does not inflate score):
-  region_ok    — if False: -15 pts from final score
+  region_ok     — if False: -15 pts from final score
   nmck_range_ok — if False: -15 pts from final score
+
+Capacity profile v1 (additive penalty only):
+  capacity_ok   — if False: -15 pts from final score
+                   True  when active_projects_count <= max_active_projects
+                   False when active_projects_count > max_active_projects
+                   None  when either field is missing
+
+Region v2:
+  work_all_regions=True → region_ok=True regardless of service_regions
+  service_regions=[]    → region_ok=True (no restriction)
 """
 from __future__ import annotations
 
@@ -76,8 +86,9 @@ class FitScorer:
         license_ok = self._license(profile, checklist)
         experience = self._experience(profile, checklist)
         finance    = self._finance(profile, extracted)
-        region_ok  = self._region(profile, extracted)
-        nmck_ok    = self._nmck_range(profile, extracted)
+        region_ok    = self._region(profile, extracted)
+        nmck_ok      = self._nmck_range(profile, extracted)
+        capacity_ok  = self._capacity(profile)
 
         fit_score = (
             # okved=None means profile has no okved_main → conservative 20% (not neutral 50%)
@@ -89,10 +100,12 @@ class FitScorer:
             + _component_points(finance,  _WEIGHTS["finance"])
         )
 
-        # Business profile v1 — penalty only, does not inflate score above base
+        # Business/Capacity profile — penalty only, never inflates score
         if region_ok is False:
             fit_score = max(0.0, fit_score - 15.0)
         if nmck_ok is False:
+            fit_score = max(0.0, fit_score - 15.0)
+        if capacity_ok is False:
             fit_score = max(0.0, fit_score - 15.0)
 
         return FitScoreResult(
@@ -104,6 +117,7 @@ class FitScorer:
                 finance=finance,
                 region_ok=region_ok,
                 nmck_range_ok=nmck_ok,
+                capacity_ok=capacity_ok,
             ),
             fit_score=round(fit_score, 2),
         )
@@ -205,9 +219,15 @@ class FitScorer:
     def _region(self, profile: dict, extracted: ExtractedTenderV1) -> bool | None:
         """Return True if tender region is within company service_regions.
 
-        Returns None if service_regions is not configured (no penalty).
-        Returns False if configured and tender region doesn't match any entry.
+        work_all_regions=True  → always True (no restriction)
+        service_regions=[]     → True (no restriction configured)
+        service_regions=[...]  → substring match against tender region
+        Returns None when tender region data is unavailable.
         """
+        # work_all_regions flag bypasses all region checks
+        if profile.get("work_all_regions") is True:
+            return True
+
         service_regions: list[str] = profile.get("service_regions") or []
         if not service_regions:
             return None  # not configured → neutral
@@ -248,4 +268,22 @@ class FitScorer:
                 return False
             return True
         except Exception:
+            return None
+
+    def _capacity(self, profile: dict) -> bool | None:
+        """Return True if company has capacity for another project.
+
+        True  when active_projects_count <= max_active_projects
+        False when active_projects_count > max_active_projects
+        None  when either field is not configured (neutral, no penalty)
+        """
+        max_projects = profile.get("max_active_projects")
+        active = profile.get("active_projects_count")
+
+        if max_projects is None or active is None:
+            return None  # not configured → neutral
+
+        try:
+            return int(active) <= int(max_projects)
+        except (TypeError, ValueError):
             return None
