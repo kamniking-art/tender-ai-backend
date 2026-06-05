@@ -63,7 +63,7 @@ async def generate_clarification_questions(
     Возвращает список dict с полями: text, reason, category.
     При ошибке возвращает пустой список.
     """
-    if not text or len(text.strip()) < 100:
+    if not text or len(text.strip()) < 10:
         logger.warning("clarification_ai: text too short, skipping")
         return []
 
