@@ -1845,6 +1845,13 @@ async def tender_detail_page(
 
     clarifications = await list_questions(db, company_id=current_user.company_id, tender_id=tender.id)
     agent_evaluation = await get_evaluation(db, company_id=current_user.company_id, tender_id=tender.id)
+    from app.eval_dataset.model import TenderEvalDataset as _TED
+    eval_dataset_entry = await db.scalar(
+        select(_TED).where(
+            _TED.tender_id == tender.id,
+            _TED.company_id == current_user.company_id,
+        )
+    )
 
     return templates.TemplateResponse(
         "tender_detail.html",
@@ -1909,6 +1916,7 @@ async def tender_detail_page(
             },
             clarifications=clarifications,
             agent_evaluation=agent_evaluation,
+            eval_dataset_entry=eval_dataset_entry,
         ),
     )
 
@@ -1947,6 +1955,49 @@ async def web_upsert_evaluation(
         )
     except Exception:
         logger.exception("Failed to save evaluation for tender_id=%s", tender_id)
+    return RedirectResponse(url=f"/web/tenders/{tender_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/tenders/{tender_id}/eval-dataset")
+async def web_upsert_eval_dataset(
+    tender_id: UUID,
+    expected_decision: str = Form(...),
+    expected_reason: str = Form(default=""),
+    notes: str = Form(default=""),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_cookie),
+):
+    """Add or update a tender in the eval dataset."""
+    try:
+        from app.eval_dataset.model import TenderEvalDataset as _TED
+        from datetime import datetime, timezone
+        import uuid as _uuid
+        now = datetime.now(timezone.utc)
+        existing = await db.scalar(
+            select(_TED).where(
+                _TED.tender_id == tender_id,
+                _TED.company_id == current_user.company_id,
+            )
+        )
+        if existing:
+            existing.expected_decision = expected_decision.strip()
+            existing.expected_reason = expected_reason.strip() or None
+            existing.notes = notes.strip() or None
+            existing.updated_at = now
+        else:
+            db.add(_TED(
+                id=_uuid.uuid4(),
+                tender_id=tender_id,
+                company_id=current_user.company_id,
+                expected_decision=expected_decision.strip(),
+                expected_reason=expected_reason.strip() or None,
+                notes=notes.strip() or None,
+                created_at=now,
+                updated_at=now,
+            ))
+        await db.commit()
+    except Exception:
+        logger.exception("Failed to upsert eval_dataset for tender_id=%s", tender_id)
     return RedirectResponse(url=f"/web/tenders/{tender_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 

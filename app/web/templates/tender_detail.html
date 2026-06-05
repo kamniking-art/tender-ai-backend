@@ -482,6 +482,42 @@
   </form>
 </section>
 
+<!-- Eval Dataset -->
+<section class="card">
+  <h2>Эталонный датасет</h2>
+  <p class="section-hint">Добавьте тендер в датасет для измерения точности агента. Укажите правильное решение — оно будет использоваться при прогоне <code>run_eval_dataset.py</code>.</p>
+  {% if eval_dataset_entry %}
+  <div class="kv-grid" style="margin-bottom:14px">
+    <div><strong>Эталонное решение:</strong>
+      <span class="badge {% if eval_dataset_entry.expected_decision == 'go' %}badge-green{% elif eval_dataset_entry.expected_decision == 'no_go' %}badge-red{% else %}badge-yellow{% endif %}">
+        {{ {'go':'Участвовать','no_go':'Не участвовать','review':'На проверку'}.get(eval_dataset_entry.expected_decision, eval_dataset_entry.expected_decision) }}
+      </span>
+    </div>
+    {% if eval_dataset_entry.expected_reason %}<div><strong>Обоснование:</strong> {{ eval_dataset_entry.expected_reason }}</div>{% endif %}
+    {% if eval_dataset_entry.notes %}<div><strong>Заметки:</strong> {{ eval_dataset_entry.notes }}</div>{% endif %}
+  </div>
+  {% endif %}
+  <form method="post" action="/web/tenders/{{ tender.id }}/eval-dataset" class="grid-form">
+    <label>Эталонное решение
+      <select name="expected_decision" required style="padding:7px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px;background:#fff">
+        <option value="" disabled {% if not eval_dataset_entry %}selected{% endif %}>— выберите —</option>
+        {% for val, label in [('go','Участвовать'),('no_go','Не участвовать'),('review','На проверку')] %}
+        <option value="{{ val }}" {{ 'selected' if eval_dataset_entry and eval_dataset_entry.expected_decision == val else '' }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Обоснование
+      <input type="text" name="expected_reason" value="{{ eval_dataset_entry.expected_reason or '' if eval_dataset_entry else '' }}" placeholder="Почему именно это решение?" />
+    </label>
+    <label style="grid-column:1/-1">Заметки
+      <input type="text" name="notes" value="{{ eval_dataset_entry.notes or '' if eval_dataset_entry else '' }}" placeholder="Необязательно" />
+    </label>
+    <div style="grid-column:1/-1;margin-top:6px">
+      <button type="submit" class="btn-action">{{ 'Обновить' if eval_dataset_entry else 'Добавить в датасет' }}</button>
+    </div>
+  </form>
+</section>
+
 <!-- Уточнения -->
 <section class="card">
   <h2>Уточнения</h2>
