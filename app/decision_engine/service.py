@@ -122,7 +122,10 @@ def _resolve_harsh_penalties(analysis: TenderAnalysis | None) -> bool:
 
 
 def _keyword_strength(matched_keywords: list[str]) -> int:
-    return 40 if matched_keywords else 0
+    # Keyword match is already captured in relevance_score — this is a small
+    # confirmation bonus only, not the primary signal. Was 40 → caused double-counting
+    # with relevance_score and allowed irrelevant tenders to score strong_go.
+    return 10 if matched_keywords else 0
 
 
 def _nmck_factor(nmck: Decimal | None) -> int:
@@ -473,6 +476,9 @@ def compute_decision_engine_v1(
     short_deadline: bool = False,
     harsh_penalties: bool = False,
     high_security: bool = False,
+    # Fit score signal — from company_fit_score table
+    fit_score: float | None = None,
+    okved_match: bool | None = None,
 ) -> dict:
     rel = _clamp(relevance_score if relevance_score is not None else 0, 0, 100)
     matched_keywords = matched_keywords or []
@@ -486,6 +492,17 @@ def compute_decision_engine_v1(
     small_nmck_penalty = _small_nmck_penalty(nmck)
     risk_penalty = _risk_penalty(risk_score)
 
+    # ── Fit score / OKVED penalty ──────────────────────────────────────────────
+    # okved_match=False means tender OKVED explicitly doesn't match company profile
+    # fit_score < 50 means overall profile fit is low
+    fit_penalty = 0
+    if okved_match is False:
+        fit_penalty = 30  # explicit mismatch → strong penalty
+    elif fit_score is not None and fit_score < 40:
+        fit_penalty = 25  # poor overall fit
+    elif fit_score is not None and fit_score < 55:
+        fit_penalty = 15  # below-average fit
+
     total_score = _clamp(
         rel
         + keyword_points
@@ -495,11 +512,17 @@ def compute_decision_engine_v1(
         - negative_penalty
         - missing_docs_penalty
         - small_nmck_penalty
-        - risk_penalty,
+        - risk_penalty
+        - fit_penalty,
         0,
         100,
     )
     recommendation = _recommendation_for_score(total_score)
+
+    # ── strong_go guard: require relevance_score >= 50 ────────────────────────
+    # Prevent keyword-only tenders from reaching strong_go when relevance is weak
+    if recommendation == "strong_go" and rel < 50:
+        recommendation = "go"
     explanation = _build_recommendation_explanation(
         matched_keywords=matched_keywords,
         negative_keywords=negative_keywords,
@@ -519,6 +542,7 @@ def compute_decision_engine_v1(
         f"missing_documents_penalty=-{missing_docs_penalty}",
         f"small_nmck_penalty=-{small_nmck_penalty}",
         f"risk_penalty=-{risk_penalty} (risk_score={risk_score})",
+        f"fit_penalty=-{fit_penalty} (okved_match={okved_match}, fit_score={fit_score})",
         f"decision_score={total_score} -> recommendation={recommendation}",
     ]
     reason = _recommendation_reason(recommendation=recommendation, score=total_score, **explanation)
@@ -536,6 +560,7 @@ def compute_decision_engine_v1(
         "missing_documents_penalty": missing_docs_penalty,
         "small_nmck_penalty": small_nmck_penalty,
         "risk_penalty": risk_penalty,
+        "fit_penalty": fit_penalty,
         "inputs": {
             "relevance_score": rel,
             "matched_keywords": matched_keywords,
@@ -671,6 +696,23 @@ async def recompute_decision_engine_v1(
     matched_keywords = [str(item) for item in relevance.get("matched_keywords", []) if isinstance(item, str)]
     negative_keywords = [str(item) for item in relevance.get("negative_keywords", []) if isinstance(item, str)]
 
+    # Load fit_score and okved_match from company_fit_score (best-effort)
+    _fit_score: float | None = None
+    _okved_match: bool | None = None
+    try:
+        from app.fit_score.service import CompanyFitScore as _CFS_early
+        _cfs_early = await db.scalar(
+            select(_CFS_early).where(
+                _CFS_early.company_id == company_id,
+                _CFS_early.tender_id == tender_id,
+            )
+        )
+        if _cfs_early is not None:
+            _fit_score = float(_cfs_early.fit_score) if _cfs_early.fit_score is not None else None
+            _okved_match = _cfs_early.okved_match
+    except Exception:
+        logger.warning("Could not load fit_score for decision engine: tender_id=%s", tender_id)
+
     engine = compute_decision_engine_v1(
         relevance_score=relevance.get("score"),
         matched_keywords=matched_keywords,
@@ -685,6 +727,8 @@ async def recompute_decision_engine_v1(
         short_deadline=short_deadline,
         harsh_penalties=harsh_penalties,
         high_security=high_security,
+        fit_score=_fit_score,
+        okved_match=_okved_match,
     )
     finance_result = compute_finance_v2(
         contract_price=tender.nmck,
