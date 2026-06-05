@@ -1299,6 +1299,7 @@ async def policies_page(
     db: AsyncSession = Depends(get_db),
 ):
     from app.policy_engine.loader import Policy
+    from app.policy_engine.templates import POLICY_TEMPLATES
     rows = list((await db.scalars(
         select(Policy)
         .where(Policy.company_id == current_user.company_id)
@@ -1306,8 +1307,23 @@ async def policies_page(
     )).all())
     return templates.TemplateResponse(
         "policies.html",
-        _template_context(request, current_user, policies=rows),
+        _template_context(request, current_user, policies=rows, policy_templates=POLICY_TEMPLATES),
     )
+
+
+@router.post("/policies/apply-template")
+async def web_apply_template(
+    request: Request,
+    current_user: User = Depends(get_current_user_from_cookie),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.policy_engine.templates import apply_template, POLICY_TEMPLATES
+    from fastapi.responses import RedirectResponse
+    form = await request.form()
+    template_key = str(form.get("template_key", ""))
+    if template_key and template_key in POLICY_TEMPLATES:
+        await apply_template(db, current_user.company_id, template_key)
+    return RedirectResponse(url="/policies", status_code=303)
 
 
 @router.get("/ops")

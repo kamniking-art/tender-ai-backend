@@ -5,6 +5,22 @@
 
 <div id="toast" class="toast hidden"></div>
 
+{% if policy_templates %}
+<section class="template-section">
+  <h2>Применить отраслевой шаблон</h2>
+  <p class="template-hint">Шаблон добавит недостающие правила. Уже существующие типы правил пропускаются.</p>
+  <form method="post" action="/policies/apply-template" class="template-form">
+    <select name="template_key" class="template-select" required>
+      <option value="" disabled selected>— выберите отрасль —</option>
+      {% for key, tpl in policy_templates.items() %}
+      <option value="{{ key }}">{{ tpl.name }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn-apply-template">Применить</button>
+  </form>
+</section>
+{% endif %}
+
 {% set type_names = {
   "deadline_urgent": "Срочный дедлайн",
   "missing_sro": "Отсутствует СРО",
@@ -265,4 +281,54 @@ async function togglePolicy(btn) {
   }
 }
 </script>
+<style>
+.template-section {
+  margin-bottom: 28px;
+  padding: 18px 20px;
+  background: var(--accent-soft, #f0f4ff);
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 8px;
+}
+.template-section h2 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 6px;
+  color: var(--accent, #2563eb);
+}
+.template-hint {
+  font-size: 13px;
+  color: var(--muted, #64748b);
+  margin: 0 0 14px;
+}
+.template-form {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.template-select {
+  flex: 1;
+  min-width: 240px;
+  padding: 8px 12px;
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 6px;
+  font-size: 14px;
+  background: #fff;
+  color: var(--text, #1e293b);
+}
+.btn-apply-template {
+  padding: 8px 18px;
+  background: var(--accent, #2563eb);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-apply-template:hover {
+  background: #1d4ed8;
+}
+</style>
 {% endblock %}
