@@ -2065,10 +2065,18 @@ async def web_generate_clarification_ai(
         if tender is None:
             return RedirectResponse(url=f"/web/tenders/{tender_id}", status_code=status.HTTP_303_SEE_OTHER)
 
-        # Build source text: title + description
+        # Build source text from available tender fields + analysis summary
+        from app.tender_analysis.model import TenderAnalysis as _TA
+        _analysis = await db.scalar(
+            select(_TA).where(
+                _TA.company_id == current_user.company_id,
+                _TA.tender_id == tender_id,
+            )
+        )
         source_text = "\n\n".join(filter(None, [
             tender.title,
-            tender.description,
+            tender.place_text,
+            _analysis.summary if _analysis else None,
         ]))
 
         questions = await generate_clarification_questions(
