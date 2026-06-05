@@ -41,7 +41,7 @@ async def run_evaluation(db: AsyncSession, company_id: UUID | None = None) -> di
     """Прогнать pipeline на eval dataset и вернуть метрики."""
     from app.decision_engine.service import recompute_decision_engine_v1
     from app.tenders.model import Tender
-    from app.users.model import User
+    from app.models.user import User
     from sqlalchemy import select
 
     q = select(TenderEvalDataset)
@@ -67,14 +67,14 @@ async def run_evaluation(db: AsyncSession, company_id: UUID | None = None) -> di
                 errors += 1
                 continue
 
-            _, engine = await recompute_decision_engine_v1(
+            decision, _ = await recompute_decision_engine_v1(
                 db,
                 company_id=entry.company_id,
                 tender_id=entry.tender_id,
                 user_id=user.id,
                 force=True,
             )
-            agent_rec = engine.get("recommendation", "unknown")
+            agent_rec = decision.recommendation or "unknown"
             expected = entry.expected_decision
 
             # Нормализация: strong_go/weak → go; no_go остаётся
