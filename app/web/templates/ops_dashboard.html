@@ -201,6 +201,43 @@
   {% endif %}
 </section>
 
+<!-- ── Точность агента ────────────────────────────────────────────────── -->
+<section>
+  <h2>Точность агента</h2>
+  {% if agent_accuracy %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Компания</th>
+          <th>Всего оценок</th>
+          <th>Conclusive</th>
+          <th>Верно</th>
+          <th>Неверно</th>
+          <th>Точность, %</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in agent_accuracy %}
+        <tr>
+          <td class="name-cell">{{ row.company_name }}</td>
+          <td>{{ row.total }}</td>
+          <td>{{ row.conclusive }}</td>
+          <td>{{ row.correct }}</td>
+          <td>{{ row.incorrect }}</td>
+          <td class="{% if row.accuracy_pct is not none %}{% if row.accuracy_pct >= 70 %}ok{% elif row.accuracy_pct >= 50 %}warn{% else %}danger{% endif %}{% endif %}">
+            {{ row.accuracy_pct if row.accuracy_pct is not none else '—' }}{% if row.accuracy_pct is not none %}%{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">Нет данных — оценки агента ещё не выставлялись.</p>
+  {% endif %}
+</section>
+
 <style>
   .subtitle { color: var(--muted); margin-bottom: 24px; font-size: 14px; }
   h2 { font-size: 16px; margin-bottom: 14px; color: var(--accent); }

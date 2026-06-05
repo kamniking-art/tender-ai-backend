@@ -62,7 +62,7 @@ from app.tender_finance.service import (
     get_finance_scoped,
     upsert_finance,
 )
-from app.agent_eval.service import AgentEvaluation, get_evaluation, upsert_evaluation
+from app.agent_eval.service import AgentEvaluation, get_evaluation, get_evaluation_stats, upsert_evaluation
 from app.clarification.service import ClarificationQuestion, create_question, list_questions
 from app.tender_tasks.service import list_tasks
 from app.tenders.model import Tender
@@ -1357,6 +1357,21 @@ async def ops_dashboard_page(
     except Exception:
         logger.warning("ops_dashboard: cost_limits query failed", exc_info=True)
 
+    # ── Agent evaluation accuracy per company ────────────────────────────────
+    agent_accuracy: list[dict] = []
+    try:
+        if not companies_all:
+            companies_all = list((await db.scalars(select(Company))).all())
+        for _co in companies_all:
+            _stats = await get_evaluation_stats(db, company_id=_co.id)
+            if _stats["total"] > 0:
+                agent_accuracy.append({
+                    "company_name": _co.name or str(_co.id),
+                    **_stats,
+                })
+    except Exception:
+        logger.warning("ops_dashboard: agent_accuracy query failed", exc_info=True)
+
     return templates.TemplateResponse(
         "ops_dashboard.html",
         _template_context(
@@ -1365,6 +1380,7 @@ async def ops_dashboard_page(
             cost_by_tenant=cost_by_tenant,
             queue_backlog=queue_backlog,
             cost_limits=list(cost_limits.values()),
+            agent_accuracy=agent_accuracy,
         ),
     )
 
