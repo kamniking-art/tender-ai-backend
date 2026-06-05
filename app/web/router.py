@@ -2044,6 +2044,7 @@ async def eval_label_page(
 async def eval_label_mark(
     tender_id: UUID,
     expected_decision: str = Form(...),
+    reason: str = Form(default=""),
     page: int = Form(default=1),
     filter: str = Form(default="unlabeled"),
     rec: str = Form(default=""),
@@ -2064,6 +2065,7 @@ async def eval_label_mark(
         )
         if existing:
             existing.expected_decision = expected_decision.strip()
+            existing.reason = reason.strip() or None
             existing.updated_at = now
         else:
             db.add(_TED(
@@ -2071,6 +2073,7 @@ async def eval_label_mark(
                 tender_id=tender_id,
                 company_id=current_user.company_id,
                 expected_decision=expected_decision.strip(),
+                reason=reason.strip() or None,
                 created_at=now,
                 updated_at=now,
             ))

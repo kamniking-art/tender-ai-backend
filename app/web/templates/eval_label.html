@@ -3,6 +3,16 @@
 {% block content %}
 <h1>Разметка eval dataset</h1>
 
+<div class="criteria-hint">
+  <strong>Критерии разметки:</strong>
+  <ul>
+    <li><span class="c-go">go</span> — тендер <strong>подходит по профилю компании</strong>: ОКВЭД совпадает, требования выполнимы, мы реально участвовали или должны были</li>
+    <li><span class="c-nogo">no_go</span> — тендер <strong>не подходит по профилю</strong>: не наша специализация, требования невыполнимы, нет нужных лицензий — и укажи причину</li>
+    <li><span class="c-review">review</span> — <strong>неоднозначно</strong>: требует дополнительного изучения</li>
+  </ul>
+  <p class="criteria-note">⚠️ Не отмечай <span class="c-nogo">no_go</span> если тендер подходит, но ты просто не успел или не захотел участвовать — это не ошибка агента.</p>
+</div>
+
 <div class="label-toolbar">
   <div class="label-stats">
     Размечено: <strong>{{ labeled_count }}</strong> из <strong>{{ total_count }}</strong>
@@ -54,29 +64,29 @@
       {% else %}—{% endif %}
     </td>
     <td class="col-mark">
-      <div class="mark-buttons">
-        <form method="post" action="/web/eval-dataset/label/{{ row.tender_id }}/mark" style="display:inline">
-          <input type="hidden" name="expected_decision" value="go">
-          <input type="hidden" name="page" value="{{ page }}">
-          <input type="hidden" name="filter" value="{{ filter }}">
-          <input type="hidden" name="rec" value="{{ rec }}">
-          <button type="submit" class="mark-btn btn-go {% if row.expected_decision == 'go' %}active{% endif %}">✓ go</button>
-        </form>
-        <form method="post" action="/web/eval-dataset/label/{{ row.tender_id }}/mark" style="display:inline">
-          <input type="hidden" name="expected_decision" value="no_go">
-          <input type="hidden" name="page" value="{{ page }}">
-          <input type="hidden" name="filter" value="{{ filter }}">
-          <input type="hidden" name="rec" value="{{ rec }}">
-          <button type="submit" class="mark-btn btn-nogo {% if row.expected_decision == 'no_go' %}active{% endif %}">✗ no_go</button>
-        </form>
-        <form method="post" action="/web/eval-dataset/label/{{ row.tender_id }}/mark" style="display:inline">
-          <input type="hidden" name="expected_decision" value="review">
-          <input type="hidden" name="page" value="{{ page }}">
-          <input type="hidden" name="filter" value="{{ filter }}">
-          <input type="hidden" name="rec" value="{{ rec }}">
-          <button type="submit" class="mark-btn btn-review {% if row.expected_decision == 'review' %}active{% endif %}">? review</button>
-        </form>
-      </div>
+      <form method="post" action="/web/eval-dataset/label/{{ row.tender_id }}/mark" class="mark-form">
+        <input type="hidden" name="page" value="{{ page }}">
+        <input type="hidden" name="filter" value="{{ filter }}">
+        <input type="hidden" name="rec" value="{{ rec }}">
+        <div class="mark-buttons">
+          <button type="submit" name="expected_decision" value="go"
+            class="mark-btn btn-go {% if row.expected_decision == 'go' %}active{% endif %}">✓ go</button>
+          <button type="submit" name="expected_decision" value="no_go"
+            class="mark-btn btn-nogo {% if row.expected_decision == 'no_go' %}active{% endif %}">✗ no_go</button>
+          <button type="submit" name="expected_decision" value="review"
+            class="mark-btn btn-review {% if row.expected_decision == 'review' %}active{% endif %}">? review</button>
+        </div>
+        <select name="reason" class="reason-select">
+          <option value="">— причина (если no_go) —</option>
+          <option value="profile_mismatch" {% if row.reason == 'profile_mismatch' %}selected{% endif %}>Профиль не соответствует</option>
+          <option value="geography" {% if row.reason == 'geography' %}selected{% endif %}>Далеко географически</option>
+          <option value="deadline" {% if row.reason == 'deadline' %}selected{% endif %}>Не успеваем по срокам</option>
+          <option value="capacity" {% if row.reason == 'capacity' %}selected{% endif %}>Нет мощности/ресурсов</option>
+          <option value="requirements" {% if row.reason == 'requirements' %}selected{% endif %}>Нет нужных лицензий/СРО</option>
+          <option value="other" {% if row.reason == 'other' %}selected{% endif %}>Другое</option>
+        </select>
+        {% if row.reason %}<span class="reason-badge">{{ row.reason }}</span>{% endif %}
+      </form>
     </td>
   </tr>
   {% endfor %}
@@ -106,6 +116,16 @@
 {% endif %}
 
 <style>
+.criteria-hint { background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; padding:14px 18px; margin-bottom:18px; font-size:13px; }
+.criteria-hint ul { margin:8px 0 8px 18px; padding:0; }
+.criteria-hint li { margin-bottom:4px; }
+.criteria-note { margin:8px 0 0; color:#92400e; background:#fef3c7; padding:6px 10px; border-radius:4px; }
+.c-go { background:#dcfce7; color:#166534; padding:1px 7px; border-radius:10px; font-weight:600; font-size:12px; }
+.c-nogo { background:#fee2e2; color:#991b1b; padding:1px 7px; border-radius:10px; font-weight:600; font-size:12px; }
+.c-review { background:#fef9c3; color:#854d0e; padding:1px 7px; border-radius:10px; font-weight:600; font-size:12px; }
+.mark-form { display:flex; flex-direction:column; gap:6px; }
+.reason-select { font-size:11px; padding:3px 6px; border:1px solid var(--line); border-radius:4px; background:#fff; color:var(--muted); max-width:220px; }
+.reason-badge { font-size:10px; background:#e0e7ff; color:#3730a3; padding:2px 6px; border-radius:8px; font-weight:600; }
 .label-toolbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:12px; }
 .rec-filters { display:flex; align-items:center; gap:6px; margin-bottom:18px; flex-wrap:wrap; }
 .rec-label { font-size:12px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.04em; margin-right:2px; }

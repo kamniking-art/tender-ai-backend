@@ -18,6 +18,7 @@ class TenderEvalDataset(Base):
     tender_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("tenders.id"), nullable=False)
     company_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("companies.id"), nullable=True)
     expected_decision: Mapped[str] = mapped_column(Text, nullable=False)  # go/no_go/review
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)       # profile_mismatch/deadline/geography/capacity/other
     expected_risks: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     expected_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     verified_by: Mapped[str | None] = mapped_column(Text, nullable=True)
