@@ -3,7 +3,7 @@ from sqlalchemy import Text, DateTime, UniqueConstraint, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import UUID as PGUUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime, timezone
-from app.core.database import Base
+from app.models.base import Base
 
 
 class TenderEvalDataset(Base):
