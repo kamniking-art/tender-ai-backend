@@ -9,7 +9,7 @@
 <section class="template-section">
   <h2>Применить отраслевой шаблон</h2>
   <p class="template-hint">Шаблон добавит недостающие правила. Уже существующие типы правил пропускаются.</p>
-  <form method="post" action="/policies/apply-template" class="template-form">
+  <form method="post" action="/web/policies/apply-template" class="template-form">
     <select name="template_key" class="template-select" required>
       <option value="" disabled selected>— выберите отрасль —</option>
       {% for key, tpl in policy_templates.items() %}
