@@ -2050,6 +2050,52 @@ async def web_add_clarification(
     return RedirectResponse(url=f"/web/tenders/{tender_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
+@router.post("/tenders/{tender_id}/clarification/generate-ai")
+async def web_generate_clarification_ai(
+    tender_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_cookie),
+):
+    """Generate clarification questions via Claude AI and save as drafts."""
+    try:
+        from app.clarification.ai_generator import generate_clarification_questions
+        from app.tenders.service import get_tender_by_id_scoped
+
+        tender = await get_tender_by_id_scoped(db, current_user.company_id, tender_id)
+        if tender is None:
+            return RedirectResponse(url=f"/web/tenders/{tender_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+        # Build source text: title + description
+        source_text = "\n\n".join(filter(None, [
+            tender.title,
+            tender.description,
+        ]))
+
+        questions = await generate_clarification_questions(
+            title=tender.title or "",
+            customer=tender.customer_name or "",
+            text=source_text,
+        )
+
+        for q in questions:
+            q_text = (q.get("text") or "").strip()
+            q_reason = (q.get("reason") or "").strip()
+            if q_text:
+                await create_question(
+                    db,
+                    company_id=current_user.company_id,
+                    tender_id=tender_id,
+                    question_text=q_text,
+                    reason=q_reason or None,
+                )
+
+        logger.info("generate_clarification_ai: created %d drafts for tender_id=%s", len(questions), tender_id)
+    except Exception:
+        logger.exception("Failed to generate AI clarification questions for tender_id=%s", tender_id)
+
+    return RedirectResponse(url=f"/web/tenders/{tender_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
 @router.post("/tenders/{tender_id}/customer-email")
 async def web_set_customer_email(
     tender_id: UUID,

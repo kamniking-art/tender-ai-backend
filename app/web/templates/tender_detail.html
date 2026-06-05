@@ -536,6 +536,12 @@
     </div>
   </form>
 
+  <form method="post" action="/web/tenders/{{ tender.id }}/clarification/generate-ai" style="margin-bottom:16px">
+    <button type="submit" class="btn-action btn-ai-generate" title="Claude проанализирует текст тендера и предложит до 5 уточняющих вопросов в статусе Draft">
+      🤖 Сгенерировать вопросы (AI)
+    </button>
+  </form>
+
   {% if clarifications %}
   <table style="width:100%;border-collapse:collapse;font-size:13px">
     <thead>
