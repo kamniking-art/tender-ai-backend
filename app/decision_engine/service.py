@@ -502,6 +502,8 @@ def compute_decision_engine_v1(
         fit_penalty = 25  # poor overall fit
     elif fit_score is not None and fit_score < 55:
         fit_penalty = 15  # below-average fit
+    elif fit_score is not None and fit_score < 70:
+        fit_penalty = 10  # moderate fit gap (covers okved=None case: score≈62)
 
     total_score = _clamp(
         rel

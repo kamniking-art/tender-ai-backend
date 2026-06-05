@@ -30,13 +30,13 @@ _WEIGHTS: dict[str, float] = {
 }
 
 
-def _component_points(value: bool | None, weight: float) -> float:
+def _component_points(value: bool | None, weight: float, *, none_factor: float = 0.5) -> float:
     """Convert bool | None to weighted points."""
     if value is True:
         return weight
     if value is False:
         return 0.0
-    return weight * 0.5  # None → neutral
+    return weight * none_factor  # None → neutral (caller can override)
 
 
 def _checklist_required(
@@ -74,7 +74,9 @@ class FitScorer:
         finance    = self._finance(profile, extracted)
 
         fit_score = (
-            _component_points(okved,      _WEIGHTS["okved"])
+            # okved=None means profile has no okved_main → conservative 20% (not neutral 50%)
+            # because unknown OKVED is closer to "unconfirmed" than "neutral"
+            _component_points(okved,      _WEIGHTS["okved"], none_factor=0.2)
             + _component_points(sro,      _WEIGHTS["sro"])
             + _component_points(license_ok, _WEIGHTS["license"])
             + _component_points(experience, _WEIGHTS["experience"])
