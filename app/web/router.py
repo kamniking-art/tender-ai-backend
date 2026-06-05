@@ -2008,7 +2008,16 @@ async def eval_label_page(
     rows_result = await db.execute(
         base_q.order_by(Tender.created_at.desc()).offset(offset).limit(page_size)
     )
-    rows = [row._asdict() for row in rows_result]
+    rows = []
+    for row in rows_result:
+        d = dict(row._mapping)
+        # Convert Decimal to float for Jinja2 formatting
+        if d.get("nmck") is not None:
+            try:
+                d["nmck"] = float(d["nmck"])
+            except (TypeError, ValueError):
+                d["nmck"] = None
+        rows.append(d)
     has_next = (offset + page_size) < total_count
 
     return templates.TemplateResponse(
