@@ -440,6 +440,45 @@
   {% endif %}
 </section>
 
+<!-- Opportunity Report -->
+{% if opportunity_report %}
+<section class="card">
+  <h2>Анализ возможности</h2>
+  <div class="opp-report">
+    {% if opportunity_report.strengths %}
+    <div class="opp-section opp-strengths">
+      <div class="opp-header">✅ Сильные стороны</div>
+      <ul>{% for s in opportunity_report.strengths %}<li>{{ s }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    {% if opportunity_report.risks %}
+    <div class="opp-section opp-risks">
+      <div class="opp-header">🔴 Риски</div>
+      <ul>{% for r in opportunity_report.risks %}<li>{{ r }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    {% if opportunity_report.missing_information %}
+    <div class="opp-section opp-missing">
+      <div class="opp-header">🟡 Не хватает данных</div>
+      <ul>{% for m in opportunity_report.missing_information %}<li>{{ m }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    {% if opportunity_report.required_documents %}
+    <div class="opp-section opp-docs">
+      <div class="opp-header">📋 Требуемые документы</div>
+      <ul>{% for d in opportunity_report.required_documents %}<li>{{ d }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    {% if opportunity_report.recommended_actions %}
+    <div class="opp-section opp-actions">
+      <div class="opp-header">▶ Рекомендованные действия</div>
+      <ul>{% for a in opportunity_report.recommended_actions %}<li>{{ a }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
 <!-- Оценка решения агента -->
 <section class="card">
   <h2>Оценка решения агента</h2>
@@ -581,4 +620,24 @@
     });
   });
 </script>
+<style>
+.opp-report { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+@media(max-width:720px){ .opp-report { grid-template-columns:1fr; } }
+.opp-section { border-radius:7px; padding:12px 14px; }
+.opp-section ul { margin:8px 0 0 16px; padding:0; font-size:13px; line-height:1.6; }
+.opp-section li { margin-bottom:3px; }
+.opp-header { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px; }
+.opp-strengths { background:#f0fdf4; border:1px solid #bbf7d0; }
+.opp-strengths .opp-header { color:#15803d; }
+.opp-risks { background:#fff5f5; border:1px solid #fecaca; }
+.opp-risks .opp-header { color:#b91c1c; }
+.opp-missing { background:#fefce8; border:1px solid #fde68a; }
+.opp-missing .opp-header { color:#92400e; }
+.opp-docs { background:#f0f9ff; border:1px solid #bae6fd; }
+.opp-docs .opp-header { color:#0369a1; }
+.opp-actions { background:#f5f3ff; border:1px solid #ddd6fe; grid-column:1/-1; }
+.opp-actions .opp-header { color:#5b21b6; }
+.opp-actions ul { columns:2; }
+@media(max-width:720px){ .opp-actions ul { columns:1; } }
+</style>
 {% endblock %}

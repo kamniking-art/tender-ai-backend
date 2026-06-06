@@ -1907,6 +1907,13 @@ async def tender_detail_page(
             _TED.company_id == current_user.company_id,
         )
     )
+    from app.opportunity_report.model import TenderOpportunityReport as _TOR
+    opportunity_report = await db.scalar(
+        select(_TOR).where(
+            _TOR.tender_id == tender.id,
+            _TOR.company_id == current_user.company_id,
+        )
+    )
 
     return templates.TemplateResponse(
         "tender_detail.html",
@@ -1972,6 +1979,7 @@ async def tender_detail_page(
             clarifications=clarifications,
             agent_evaluation=agent_evaluation,
             eval_dataset_entry=eval_dataset_entry,
+            opportunity_report=opportunity_report,
         ),
     )
 

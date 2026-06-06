@@ -1065,6 +1065,38 @@ async def recompute_decision_engine_v1(
                 "Failed to trigger escalations for tender_id=%s", tender_id
             )
 
+    # Generate Opportunity Report (best-effort — never breaks decision engine).
+    try:
+        from app.opportunity_report.generator import generate as _gen_report
+        from app.opportunity_report.model import upsert_report as _upsert_report
+        from app.fit_score.service import CompanyFitScore as _CFSR
+        _cfs_r = await db.scalar(
+            select(_CFSR).where(_CFSR.company_id == company_id, _CFSR.tender_id == tender_id)
+        )
+        _components_r = _cfs_r.components if _cfs_r and hasattr(_cfs_r, "components") else None
+        # Reconstruct FitScoreComponents from DB record
+        if _cfs_r is not None:
+            from app.fit_score.schema import FitScoreComponents as _FSC
+            _components_r = _FSC(
+                okved=_cfs_r.okved_match,
+                sro=None, license=None, experience=None, finance=None,
+            )
+        _report = _gen_report(
+            components=_components_r or __import__("app.fit_score.schema", fromlist=["FitScoreComponents"]).FitScoreComponents(
+                okved=None, sro=None, license=None, experience=None, finance=None,
+            ),
+            risk_score=decision.risk_score,
+            risk_flags=list(decision.risk_flags or []),
+            extracted=_extract_extracted(analysis),
+            recommendation=final_recommendation,
+            score=decision.decision_score,
+            nmck=tender.nmck,
+        )
+        await _upsert_report(db, tender_id, company_id, _report)
+        logger.info("opportunity_report: generated for tender_id=%s rec=%s", tender_id, final_recommendation)
+    except Exception:
+        logger.warning("opportunity_report: failed for tender_id=%s", tender_id, exc_info=True)
+
     return decision, engine
 
 
