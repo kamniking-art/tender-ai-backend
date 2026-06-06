@@ -21,6 +21,9 @@ class FitScoreComponents(BaseModel):
     nmck_range_ok: bool | None = None   # tender nmck within [min_nmck, max_nmck]
     # Capacity profile v1
     capacity_ok: bool | None = None     # active_projects_count <= max_active_projects
+    # Financial profile v1
+    economics_ok: bool | None = None    # estimated_margin_pct >= min_margin_percent
+    risk_ok: bool | None = None         # risk_score within risk_tolerance threshold
 
 
 class FitScoreResult(BaseModel):

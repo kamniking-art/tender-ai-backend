@@ -172,6 +172,23 @@
         <input type="number" id="f-active-projects-count" placeholder="Например: 3" min="0" />
         <span style="font-size:11px;color:var(--muted)">Вводится вручную. При превышении max — штраф к fit score.</span>
       </label>
+      <label>Минимальная маржа, %
+        <input type="number" id="f-min-margin-percent" placeholder="Например: 15" min="0" max="100" step="0.1" />
+        <span style="font-size:11px;color:var(--muted)">Тендеры с меньшей маржой получат штраф -20.</span>
+      </label>
+      <label>Максимальная удалённость, км
+        <input type="number" id="f-max-distance-km" placeholder="Например: 500" min="0" />
+        <span style="font-size:11px;color:var(--muted)">Поле не влияет на scoring (storage only).</span>
+      </label>
+      <label>Допустимый риск
+        <select id="f-risk-tolerance" style="padding:7px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px;background:#fff">
+          <option value="">— не задан —</option>
+          <option value="low">Низкий (risk score ≤ 30)</option>
+          <option value="medium">Средний (risk score ≤ 60)</option>
+          <option value="high">Высокий (risk score ≤ 100)</option>
+        </select>
+        <span style="font-size:11px;color:var(--muted)">Тендеры с превышением риска получат штраф -20.</span>
+      </label>
     </div>
     <div style="margin-top:14px">
       <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;cursor:pointer">
@@ -328,6 +345,10 @@
       // Capacity profile v1
       document.getElementById("f-active-projects-count").value = d.active_projects_count ?? "";
       document.getElementById("f-work-all-regions").checked    = !!d.work_all_regions;
+      // Financial profile v1
+      document.getElementById("f-min-margin-percent").value = d.min_margin_percent ?? "";
+      document.getElementById("f-max-distance-km").value    = d.max_distance_km ?? "";
+      document.getElementById("f-risk-tolerance").value     = d.risk_tolerance || "";
       serviceRegions = d.service_regions || [];
       renderServiceRegions();
       toggleWorkAllRegions();
@@ -502,6 +523,10 @@
       // Capacity profile v1
       active_projects_count: numOrNull("f-active-projects-count"),
       work_all_regions: document.getElementById("f-work-all-regions").checked,
+      // Financial profile v1
+      min_margin_percent: numOrNull("f-min-margin-percent"),
+      max_distance_km: numOrNull("f-max-distance-km"),
+      risk_tolerance: document.getElementById("f-risk-tolerance").value || null,
       limits: {
         monthly_cost_usd: document.getElementById("f-limit-monthly-cost").value !== ""
           ? Number(document.getElementById("f-limit-monthly-cost").value) : null,

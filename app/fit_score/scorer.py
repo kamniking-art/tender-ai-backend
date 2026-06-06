@@ -22,6 +22,17 @@ Capacity profile v1 (additive penalty only):
                    False when active_projects_count > max_active_projects
                    None  when either field is missing
 
+Financial profile v1 (additive penalty only):
+  economics_ok  — if False: -20 pts
+                   True  when estimated_margin_pct >= min_margin_percent
+                   False when estimated_margin_pct < min_margin_percent
+                   None  when either field missing
+  risk_ok       — if False: -20 pts
+                   low    → risk_score <= 30
+                   medium → risk_score <= 60
+                   high   → risk_score <= 100 (always True if configured)
+                   None   when risk_tolerance or risk_score missing
+
 Region v2:
   work_all_regions=True → region_ok=True regardless of service_regions
   service_regions=[]    → region_ok=True (no restriction)
@@ -89,6 +100,8 @@ class FitScorer:
         region_ok    = self._region(profile, extracted)
         nmck_ok      = self._nmck_range(profile, extracted)
         capacity_ok  = self._capacity(profile)
+        economics_ok = self._economics(profile, extracted)
+        risk_ok      = self._risk(profile, extracted)
 
         fit_score = (
             # okved=None means profile has no okved_main → conservative 20% (not neutral 50%)
@@ -100,13 +113,17 @@ class FitScorer:
             + _component_points(finance,  _WEIGHTS["finance"])
         )
 
-        # Business/Capacity profile — penalty only, never inflates score
+        # Business/Capacity/Financial profile — penalty only, never inflates score
         if region_ok is False:
             fit_score = max(0.0, fit_score - 15.0)
         if nmck_ok is False:
             fit_score = max(0.0, fit_score - 15.0)
         if capacity_ok is False:
             fit_score = max(0.0, fit_score - 15.0)
+        if economics_ok is False:
+            fit_score = max(0.0, fit_score - 20.0)
+        if risk_ok is False:
+            fit_score = max(0.0, fit_score - 20.0)
 
         return FitScoreResult(
             components=FitScoreComponents(
@@ -118,6 +135,8 @@ class FitScorer:
                 region_ok=region_ok,
                 nmck_range_ok=nmck_ok,
                 capacity_ok=capacity_ok,
+                economics_ok=economics_ok,
+                risk_ok=risk_ok,
             ),
             fit_score=round(fit_score, 2),
         )
@@ -285,5 +304,59 @@ class FitScorer:
 
         try:
             return int(active) <= int(max_projects)
+        except (TypeError, ValueError):
+            return None
+
+    # ── Financial profile v1 ──────────────────────────────────────────────────
+
+    def _economics(self, profile: dict, extracted: ExtractedTenderV1) -> bool | None:
+        """Return True if tender estimated margin meets company minimum.
+
+        True  when estimated_margin_pct >= min_margin_percent
+        False when estimated_margin_pct < min_margin_percent → -20 penalty
+        None  when either field not configured (neutral)
+
+        estimated_margin_pct is injected via extracted._estimated_margin_pct
+        by the caller (decision engine or extraction service).
+        """
+        min_margin = profile.get("min_margin_percent")
+        if min_margin is None:
+            return None  # not configured → neutral
+
+        estimated = getattr(extracted, "_estimated_margin_pct", None)
+        if estimated is None:
+            return None  # margin unknown → neutral
+
+        try:
+            return float(estimated) >= float(min_margin)
+        except (TypeError, ValueError):
+            return None
+
+    def _risk(self, profile: dict, extracted: ExtractedTenderV1) -> bool | None:
+        """Return True if tender risk score is within company risk tolerance.
+
+        risk_tolerance thresholds:
+          low    → risk_score <= 30
+          medium → risk_score <= 60
+          high   → risk_score <= 100 (always True when configured)
+
+        Returns None when risk_tolerance or risk_score is not available.
+        risk_score is injected via extracted._risk_score by the caller.
+        """
+        risk_tolerance = profile.get("risk_tolerance")
+        if not risk_tolerance:
+            return None  # not configured → neutral
+
+        risk_score = getattr(extracted, "_risk_score", None)
+        if risk_score is None:
+            return None  # unknown → neutral
+
+        _thresholds = {"low": 30, "medium": 60, "high": 100}
+        threshold = _thresholds.get(str(risk_tolerance).lower())
+        if threshold is None:
+            return None  # invalid value → neutral
+
+        try:
+            return int(risk_score) <= threshold
         except (TypeError, ValueError):
             return None

@@ -2799,6 +2799,10 @@ class _CompanyFullProfileResponse(BaseModel):
     # Capacity profile v1
     active_projects_count: int | None = None
     work_all_regions: bool = False
+    # Financial profile v1
+    min_margin_percent: float | None = None
+    max_distance_km: int | None = None
+    risk_tolerance: str | None = None  # low / medium / high
 
 
 class _CompanyFullProfilePatch(BaseModel):
@@ -2824,6 +2828,10 @@ class _CompanyFullProfilePatch(BaseModel):
     # Capacity profile v1
     active_projects_count: int | None = None
     work_all_regions: bool | None = None
+    # Financial profile v1
+    min_margin_percent: float | None = None
+    max_distance_km: int | None = None
+    risk_tolerance: str | None = None
 
 
 def _build_company_full_response(company: Company) -> _CompanyFullProfileResponse:
@@ -2850,6 +2858,9 @@ def _build_company_full_response(company: Company) -> _CompanyFullProfileRespons
         max_active_projects=p.get("max_active_projects"),
         active_projects_count=p.get("active_projects_count"),
         work_all_regions=bool(p.get("work_all_regions", False)),
+        min_margin_percent=p.get("min_margin_percent"),
+        max_distance_km=p.get("max_distance_km"),
+        risk_tolerance=p.get("risk_tolerance"),
     )
 
 

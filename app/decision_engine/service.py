@@ -729,9 +729,15 @@ async def recompute_decision_engine_v1(
                 _company_fs = await db.scalar(select(_CompanyFS).where(_CompanyFS.id == company_id))
                 _profile_fs: dict = _company_fs.profile if _company_fs and isinstance(_company_fs.profile, dict) else {}
                 _extracted_fs = _extract_extracted(analysis)
-                # Inject tender.region so FitScorer._region() can match service_regions
-                if _extracted_fs is not None and tender.region:
-                    _extracted_fs._tender_region = tender.region
+                if _extracted_fs is not None:
+                    # Inject tender.region so FitScorer._region() can match service_regions
+                    if tender.region:
+                        _extracted_fs._tender_region = tender.region
+                    # Inject financial profile signals for FitScorer._economics() / _risk()
+                    if decision.expected_margin_pct is not None:
+                        _extracted_fs._estimated_margin_pct = float(decision.expected_margin_pct)
+                    if risk_score is not None:
+                        _extracted_fs._risk_score = risk_score
                 _checklist_fs = _RN().normalize(_extracted_fs) if _extracted_fs else []
                 _fit_result = _FitScorer().score(_profile_fs, _checklist_fs, _extracted_fs or type("_E", (), {"bid_security_amount": None, "subject": None, "qualification_requirements": [], "sro_required": None, "licenses": []})())
                 await _upsert_fs(db, tender_id, company_id, _fit_result)
